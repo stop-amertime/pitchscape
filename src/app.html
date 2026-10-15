@@ -332,7 +332,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
      real pitch, so they print in a strip along the top, BEAT_H tall, and the pitched sheet runs below it. */
   var F_LO = Math.log2(28), F_HI = Math.log2(10000), BEAT_H = 60;
   function yOf(hz) { var top = BEAT_H + 12, bot = H - 12, u = (Math.log2(Math.max(hz, 20)) - F_LO) / (F_HI - F_LO); return bot - u * (bot - top); }
-  function scaleY() { BEAT_H = Math.round(clamp(H * 0.13, 44, 96)); SEMI_PX = (H - BEAT_H - 24) / ((F_HI - F_LO) * 12); }
+  function scaleY() { BEAT_H = Math.round(clamp(H * 0.15, 54, 116)); SEMI_PX = (H - BEAT_H - 24) / ((F_HI - F_LO) * 12); }
   function xOf(t, now) { return nowX - (now - t) * pps; }
   function rate(hz) { return 4 + 3.2 * Math.log2(Math.max(hz, 30) / 30); }
 
@@ -669,10 +669,10 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     var own = L.drums === 'sound', br = own ? e.br : 0.35, sd = e.id * 977 + kind.length * 131;
     var trail = own && (kind === 'hat' || kind === 'cymbal') ? Math.min(age, e.d) * pps : 0;
     ctx.fillStyle = tint('drum', e.mhz, y); ctx.beginPath();
-    if (kind === 'snare') splat(x, y, (2.3 + 3.3 * e.s) * grow, br, e.s, sd);
+    if (kind === 'snare') splat(x, y, (3.2 + 4.2 * e.s) * grow, br, e.s, sd);
     else if (kind === 'tom') drop(x, y, (2.8 + 3.6 * e.s) * grow, sd);
     else spray(x, y, e.s, grow, trail, kind === 'cymbal', sd);
-    ctx.globalAlpha = inkA(kind === 'snare' || kind === 'tom' ? 0.9 : 0.82); ctx.fill();
+    ctx.globalAlpha = inkA(kind === 'snare' || kind === 'tom' ? 0.92 : 0.9); ctx.fill();
   }
   /* an ink splat: a ragged core, thin spikes (more and longer the brighter the hit) and a few loose drops */
   function splat(x, y, r0, br, s, sd) {
@@ -693,18 +693,18 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   /* a hat: a tight fleck of fine specks. A cymbal: a wider, finer spray. Either, while it rings, trails specks to the
      right that thin out as the sound dies */
   function spray(x, y, s, grow, trail, wide, sd) {
-    var n = wide ? 9 + Math.round(12 * s) : 4 + Math.round(4 * s), rx = (wide ? 4 + 6 * s : 2.2 + 3 * s) * grow, ry = rx * (wide ? 0.8 : 1), i, d;
-    dot(x, y, 0, 0, (wide ? 0.6 : 1.1 + 0.8 * s) * grow);
+    var n = wide ? 14 + Math.round(16 * s) : 6 + Math.round(6 * s), rx = (wide ? 6.5 + 8 * s : 4 + 4.5 * s) * grow, ry = rx * (wide ? 0.75 : 0.9), i, d;
+    dot(x, y, 0, 0, (wide ? 1.1 : 1.9 + 1.2 * s) * grow);
     for (i = 0; i < n; i++) {
       d = Math.sqrt(hash(sd + 30 + i));
       var an = hash(sd + i) * 6.2832;
-      dot(x + Math.cos(an) * d * rx, y + Math.sin(an) * d * ry, 0, 0, (wide ? 0.4 + 0.6 * hash(sd + 60 + i) : 0.5 + 0.7 * hash(sd + 60 + i)) * grow);
+      dot(x + Math.cos(an) * d * rx, y + Math.sin(an) * d * ry, 0, 0, (wide ? 0.6 + 0.9 * hash(sd + 60 + i) : 0.8 + 1.1 * hash(sd + 60 + i)) * grow);
     }
     if (trail > 2) {
-      var m = Math.min(24, Math.round(trail / (wide ? 2.5 : 4)));
+      var m = Math.min(28, Math.round(trail / (wide ? 2.5 : 3.5)));
       for (i = 0; i < m; i++) {
         var u = (i + hash(sd + 200 + i)) / m;
-        dot(x + u * trail, y + (hash(sd + 230 + i) - 0.5) * ry * (wide ? 2.4 : 1.6) * (1 - 0.5 * u), 0, 0, 0.75 * (1 - 0.55 * u));
+        dot(x + u * trail, y + (hash(sd + 230 + i) - 0.5) * ry * (wide ? 2.4 : 1.6) * (1 - 0.5 * u), 0, 0, (wide ? 1 : 1.2) * (1 - 0.55 * u));
       }
     }
   }
