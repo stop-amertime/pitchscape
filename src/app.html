@@ -1112,31 +1112,59 @@ body.lab-open .plate { height: clamp(240px, 44svh, 560px); }
     }).catch(function (e) { if (my === loadSeq) fail('The demo failed to render: ' + e.message); });
   }
   function fail(text) { S.busy = false; hideStatus(); say(text, true); playBtn.disabled = !S.ana; }
+  /* A song is known by the SHA-256 of its file. If it has been analysed before (kept on this device, or on the
+     server from any device) it loads straight away: no upload and no analysis on the phone. */
+  function sha256hex(buf) {
+    if (!(window.crypto && crypto.subtle)) return Promise.resolve(null);
+    return crypto.subtle.digest('SHA-256', buf).then(function (d) {
+      return Array.prototype.map.call(new Uint8Array(d), function (b) { return (b < 16 ? '0' : '') + b.toString(16); }).join('');
+    }, function () { return null; });
+  }
   function loadFile(file) {
-    var my = beginLoad('Opening ' + file.name, '');
+    var my = beginLoad('Opening ' + file.name, ''), name = file.name.replace(/\.[^.]+$/, ''), sha = null;
     $('trackName').textContent = file.name;
     file.arrayBuffer().then(function (buf) {
-      showStatus('Decoding the audio', 0.02);
-      return decode(buf);
-    }).then(function (ab) {
-      if (my !== loadSeq) return;
-      if (ab.duration > 15 * 60) { fail('That track is over 15 minutes. Try something shorter.'); return; }
-      var L = new Float32Array(ab.getChannelData(0)), R = ab.numberOfChannels > 1 ? new Float32Array(ab.getChannelData(1)) : null;
-      setAudioSrc(URL.createObjectURL(file));
-      return runJob({ cmd: 'analyze', L: L, R: R, sr: ab.sampleRate }, R ? [L.buffer, R.buffer] : [L.buffer], showStatus).then(function (r) {
+      return sha256hex(buf).then(function (h) {
+        sha = h;
+        return findPack(h);
+      }).then(function (pack) {
         if (my !== loadSeq) return;
-        finishLoad(r.res, file.name.replace(/\.[^.]+$/, ''), file.name + '|' + Math.round(ab.duration), null, 0);
+        if (pack) {
+          setAudioSrc(URL.createObjectURL(file));
+          finishLoad(packToRes(pack), name, 'sha:' + sha, null, 0);
+          useServerLyrics(pack);
+          return 'known';
+        }
+        showStatus('Decoding the audio', 0.02);
+        return decode(buf).then(function (ab) {
+          if (my !== loadSeq) return;
+          if (ab.duration > 15 * 60) { fail('That track is over 15 minutes. Try something shorter.'); return; }
+          var L = new Float32Array(ab.getChannelData(0)), R = ab.numberOfChannels > 1 ? new Float32Array(ab.getChannelData(1)) : null;
+          setAudioSrc(URL.createObjectURL(file));
+          return runJob({ cmd: 'analyze', L: L, R: R, sr: ab.sampleRate }, R ? [L.buffer, R.buffer] : [L.buffer], showStatus).then(function (r) {
+            if (my !== loadSeq) return;
+            finishLoad(r.res, name, sha ? 'sha:' + sha : file.name + '|' + Math.round(ab.duration), null, 0);
+          });
+        });
       });
-    }).catch(function (e) {
+    }).then(function (how) {
+      if (how !== 'known' && my === loadSeq && S.ana) fullAnalysis(file, sha, my);
+    }, function () {
       if (my === loadSeq) fail("Couldn't read that file. Try MP3, M4A, WAV or OGG.");
-    }).then(function () { if (my === loadSeq && S.ana) fullAnalysis(file, my); });
+    });
   }
 
   /* ------------------------------------------------------------ the analysis server
      The quick analysis above runs on the phone; the full one (stems, drum transcription, notes, words) runs on the
      server named in config.json. Its result replaces the quick one in place, and is kept on the device. */
-  var API = null;
-  try { fetch('config.json', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (c) { API = c && c.api ? String(c.api).replace(/\/$/, '') : null; }, function () {}); } catch (e) { /* no config */ }
+  var API = null, PIPELINE = '', apiReady = Promise.resolve(null);
+  try {
+    apiReady = fetch('config.json', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (c) {
+      API = c && c.api ? String(c.api).replace(/\/$/, '') : null; PIPELINE = c && c.pipeline ? String(c.pipeline) : ''; return API;
+    }, function () { return null; });
+  } catch (e) { /* no config */ }
+  /* where a song's full analysis is kept on the device: a new version of the server's analysis starts afresh */
+  function packKey(sha) { return 'pack:' + PIPELINE + ':' + sha; }
   var idb = (function () {
     var dbp = null;
     function open() {
@@ -1159,13 +1187,33 @@ body.lab-open .plate { height: clamp(240px, 44svh, 560px); }
   var STAGES = [['stems', 'splitting the song into stems'], ['drums', 'reading the drums'], ['notes', 'reading the notes'], ['bass', 'following the bass'],
     ['voice', 'following the voice'], ['words', 'listening for the words'], ['done', 'finishing']];
   function stageText(st) { for (var i = 0; st && i < STAGES.length; i++) if (st.indexOf(STAGES[i][0]) === 0) return STAGES[i][1]; return 'starting the server'; }
-  function fullAnalysis(file, my) {
+  /* the full analysis of a song, if it exists: on this device first, then on the server */
+  function findPack(sha) {
+    if (!sha) return Promise.resolve(null);
+    return apiReady.then(function () {
+      if (!API) return null;
+      return idb.get(packKey(sha)).then(function (p) {
+        if (p) return p;
+        var key = store.get('pitchscape:key');
+        if (!key) return null;
+        // a server that is slow to answer must not hold up a new song; once it answers, the download is not cut off
+        var ctl = window.AbortController ? new AbortController() : null, timer = ctl && setTimeout(function () { ctl.abort(); }, 4000);
+        return fetch(API + '/packs/' + sha, { headers: { 'X-Pitchscape-Key': key }, signal: ctl ? ctl.signal : undefined }).then(function (r) { clearTimeout(timer); return r.ok ? r.json() : null; }).then(function (j) {
+          if (j && j.pack) { idb.put(packKey(sha), j.pack); return j.pack; }
+          return null;
+        }, function () { return null; });
+      });
+    });
+  }
+  function fullAnalysis(file, sha, my) {
+    apiReady.then(function () { if (my === loadSeq) upload(file, sha, my); });
+  }
+  function upload(file, sha, my) {
     if (!API) return;
-    var key = store.get('pitchscape:key'), sig = 'pack|' + file.name + '|' + file.size + '|' + file.lastModified;
+    var key = store.get('pitchscape:key'), keep = function (pack) { if (sha) idb.put(packKey(sha), pack); };
     if (!key) { say('Add the server key in the Lab for the full analysis.'); return; }
-    idb.get(sig).then(function (cached) {
+    Promise.resolve().then(function () {
       if (my !== loadSeq) return;
-      if (cached) { applyServerPack(cached, my); return; }
       say('Full analysis: uploading');
       var fd = new FormData(); fd.append('file', file, file.name);
       return fetch(API + '/analyze', { method: 'POST', headers: { 'X-Pitchscape-Key': key }, body: fd }).then(function (r) {
@@ -1173,12 +1221,12 @@ body.lab-open .plate { height: clamp(240px, 44svh, 560px); }
         if (!r.ok) throw new Error('The server said ' + r.status + '.');
         return r.json();
       }).then(function (j) {
-        if (j.status === 'done') { idb.put(sig, j.pack); applyServerPack(j.pack, my); return; }
+        if (j.status === 'done') { keep(j.pack); applyServerPack(j.pack, my); return; }
         var poll = function () {
           if (my !== loadSeq) return;
           fetch(API + '/jobs/' + encodeURIComponent(j.job) + '?key=' + encodeURIComponent(j.key), { headers: { 'X-Pitchscape-Key': key } }).then(function (r) { return r.json(); }).then(function (p) {
             if (my !== loadSeq) return;
-            if (p.status === 'done' && p.pack) { idb.put(sig, p.pack); applyServerPack(p.pack, my); }
+            if (p.status === 'done' && p.pack) { keep(p.pack); applyServerPack(p.pack, my); }
             else if (p.status === 'failed') say('Full analysis failed: ' + (p.error || 'unknown error'), true);
             else { say('Full analysis: ' + stageText(p.stage)); setTimeout(poll, 3000); }
           }, function () { setTimeout(poll, 6000); });
@@ -1196,13 +1244,16 @@ body.lab-open .plate { height: clamp(240px, 44svh, 560px); }
   function applyServerPack(pack, my) {
     if (my !== loadSeq) return;
     setAnalysis(packToRes(pack)); S.dirty = true;
-    /* words the server heard, unless lyrics were already placed for this song on this device */
+    useServerLyrics(pack);
+    say('Full analysis loaded.');
+  }
+  /* words the server heard, unless lyrics were already placed for this song on this device */
+  function useServerLyrics(pack) {
     if (pack.lyrics && pack.lyrics.lines && pack.lyrics.lines.length && !store.get(lyricKey())) {
       var lines = pack.lyrics.lines.map(function (l) { return { text: l.text, words: l.words.map(function (w) { return { text: w[0], syl: Math.max(1, DSP.syllableCount(w[0])) }; }) }; });
       lyricsText.value = lines.map(function (l) { return l.text; }).join('\n');
       applyWordTimes(lines, pack.lyrics.lines.map(function (l) { return l.words.map(function (w) { return w[1]; }); }), 'heard');
     } else layoutWords();
-    say('Full analysis loaded.');
   }
   /* songs analysed ahead of time and published with the page: stems + word timing, no lyrics */
   var SONGS = {};

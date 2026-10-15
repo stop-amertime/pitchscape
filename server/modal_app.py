@@ -6,12 +6,18 @@
   GET  /jobs/{job}?key=<k>   (same header)
                        -> {"status": "running", "stage": "..."} | {"status": "done", "pack": {...}}
                           | {"status": "failed", "error": "..."}
+  GET  /packs/{sha256}  (same header) -> {"status": "done", "pack": {...}} or 404
+                       lets the page ask for a song it has fingerprinted before uploading anything
 
-Results are cached by the audio's SHA-256, so a song is only ever analysed once. Audio is not kept.
+Results are kept for good in a Modal Volume, one JSON file per song, named by the audio's SHA-256 (and the pipeline
+version), so a song is only ever analysed once. Audio is not kept.
 Deployed by .github/workflows/deploy-server.yml on every push to main that touches server/.
 """
+import asyncio
 import hashlib
+import json
 import os
+import re
 import tempfile
 
 import modal
@@ -21,8 +27,14 @@ ALLOWED_ORIGINS = ['https://stop-amertime.github.io', 'http://localhost:8000', '
 SITE = '/usr/local/lib/python3.11/site-packages'
 
 app = modal.App('pitchscape')
-results = modal.Dict.from_name('pitchscape-results', create_if_missing=True)
-progress = modal.Dict.from_name('pitchscape-progress', create_if_missing=True)
+cache = modal.Volume.from_name('pitchscape-cache', create_if_missing=True)      # durable; first TiB free
+progress = modal.Dict.from_name('pitchscape-progress', create_if_missing=True)   # transient stage messages
+CACHE = '/cache'
+
+
+def pack_path(key):
+    version, sha = key.split(':', 1)
+    return f'{CACHE}/v{version}/{sha}.json'
 
 
 def _download_models():
@@ -50,7 +62,7 @@ gpu_image = (
 web_image = modal.Image.debian_slim(python_version='3.11').pip_install('fastapi[standard]', 'python-multipart')
 
 
-@app.function(image=gpu_image, gpu='L4', timeout=1200, max_containers=2, scaledown_window=120)
+@app.function(image=gpu_image, gpu='L4', timeout=1200, max_containers=2, scaledown_window=120, volumes={CACHE: cache})
 def analyze(audio: bytes, key: str, name: str):
     from server.pipeline import analyze as run
     ext = os.path.splitext(name)[1] or '.mp3'
@@ -59,19 +71,40 @@ def analyze(audio: bytes, key: str, name: str):
         f.flush()
         pack = run(f.name, device='cuda', title=os.path.splitext(name)[0],
                    progress=lambda *a: progress.put(key, ' '.join(str(x) for x in a)))
-    results[key] = pack
-    return key
+    path = pack_path(key)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, 'w') as fh:
+        json.dump(pack, fh)
+    cache.commit()
+    return pack
 
 
-@app.function(image=web_image, secrets=[modal.Secret.from_name('pitchscape', required_keys=['PITCHSCAPE_PASSPHRASE'])])
+@app.function(image=web_image, secrets=[modal.Secret.from_name('pitchscape', required_keys=['PITCHSCAPE_PASSPHRASE'])],
+              volumes={CACHE: cache})
 @modal.asgi_app()
 @modal.concurrent(max_inputs=20)
 def api():
     from fastapi import FastAPI, File, Header, HTTPException, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.middleware.gzip import GZipMiddleware
 
     web = FastAPI()
+    web.add_middleware(GZipMiddleware, minimum_size=2000)
     web.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_methods=['GET', 'POST'], allow_headers=['*'])
+
+    async def read_pack(key):
+        path = pack_path(key)
+        if not os.path.exists(path):
+            for _ in range(3):                          # see results the GPU containers wrote since
+                try:
+                    await cache.reload.aio()
+                    break
+                except Exception:                       # refused while another request has a file open
+                    await asyncio.sleep(0.2)
+        if os.path.exists(path):
+            with open(path) as fh:
+                return json.load(fh)
+        return None
 
     def check(passphrase):
         if not passphrase or passphrase != os.environ['PITCHSCAPE_PASSPHRASE']:
@@ -88,7 +121,7 @@ def api():
         if len(data) > 80_000_000:
             raise HTTPException(413, 'That file is over 80 MB.')
         key = PIPELINE_VERSION + ':' + hashlib.sha256(data).hexdigest()
-        cached = await results.get.aio(key)
+        cached = await read_pack(key)
         if cached is not None:
             return {'status': 'done', 'pack': cached}
         call = await analyze.spawn.aio(data, key, file.filename or 'song.mp3')
@@ -98,11 +131,21 @@ def api():
     async def poll(job: str, key: str, x_pitchscape_key: str = Header('')):
         check(x_pitchscape_key)
         try:
-            await modal.FunctionCall.from_id(job).get.aio(timeout=0)
+            pack = await modal.FunctionCall.from_id(job).get.aio(timeout=0)
         except TimeoutError:
             return {'status': 'running', 'stage': await progress.get.aio(key)}
         except Exception as e:                      # the job raised, or its output expired
             return {'status': 'failed', 'error': str(e)[:300]}
-        return {'status': 'done', 'pack': await results.get.aio(key)}
+        return {'status': 'done', 'pack': pack}
+
+    @web.get('/packs/{sha}')
+    async def lookup(sha: str, x_pitchscape_key: str = Header('')):
+        check(x_pitchscape_key)
+        if not re.fullmatch(r'[0-9a-f]{64}', sha):
+            raise HTTPException(400, 'Not a SHA-256.')
+        pack = await read_pack(PIPELINE_VERSION + ':' + sha)
+        if not pack:
+            raise HTTPException(404, 'Not analysed yet.')
+        return {'status': 'done', 'pack': pack}
 
     return web

@@ -71,10 +71,14 @@ Deploying needs three repository secrets: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECR
 modal.com/settings/tokens) and `PITCHSCAPE_PASSPHRASE` (any phrase; the page asks for it once, so strangers cannot spend
 the GPU credit). The workflow writes the server's address to `docs/config.json`, which the page reads.
 
-In the page, put the passphrase in Lab → Server key once. From then on every song you load gets the quick on-phone
-analysis straight away, is uploaded for the full one, and switches over when it arrives (with the words Whisper heard,
-unless you have placed lyrics for that song yourself). Full results are kept on the device (IndexedDB) and on the
-server, keyed by the audio, so a song is only analysed once.
+In the page, put the passphrase in Lab → Server key once. A song is known by the SHA-256 of its file. If its full
+analysis exists, on the device (IndexedDB) or on the server (a JSON file per song in a Modal Volume, kept for good; the
+first TiB a month is free), it loads at once: no upload, no analysis on the phone. Otherwise it gets the quick
+on-phone analysis straight away, is uploaded for the full one, and switches over when that arrives (with the words
+Whisper heard, unless you have placed lyrics for that song yourself). Both stores are keyed by `PIPELINE_VERSION` in
+`server/modal_app.py` as well: bump it when the analysis changes and songs are analysed afresh. The audio itself is
+never kept. After each deploy the workflow sends a generated 12-second clip through the live server
+(`server/smoke_test.py`).
 
 ## How it works
 
