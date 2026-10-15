@@ -1,0 +1,7 @@
+work/
+*.wav
+__pycache__/
+# commercial audio and song packs made from it stay out of the public repo
+*.mp3
+*.m4a
+docs/*.pack.json
