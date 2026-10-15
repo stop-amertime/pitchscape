@@ -143,8 +143,9 @@ Steps (times measured on a 3-minute song, 2 CPU cores):
 
 ## The Lab
 
-The Lab button opens A/B switches, each with a line saying what it does; the print stays pinned at the top while it is
-open. Only settings changed from the defaults are kept on the device (`localStorage` key `pitchscape:lab`), so a new
+The Lab button opens A/B switches, each with a line saying what it does, in a drawer over the lower half of the screen
+with its own play button and seek bar; the print stays pinned above it. The server key shows as a line once saved, so
+the keyboard only comes up when you choose to change it. Only settings changed from the defaults are kept on the device (`localStorage` key `pitchscape:lab`), so a new
 default reaches anyone who left that setting alone. Colour by instrument (drums share one ink, tuned notes share warm
 inks), by height (the pitch axis, low blue to high pink, whatever made the sound) or by note name (circle-of-fifths
 colours; drums keep the drum ink). Palette, for colour by instrument, all real riso inks: Rainbow (an ink each),
