@@ -22,7 +22,7 @@ import tempfile
 
 import modal
 
-PIPELINE_VERSION = '1'          # bump when the analysis changes, so old cached results are not served
+PIPELINE_VERSION = '2'          # bump when the analysis changes, so old cached results are not served
 ALLOWED_ORIGINS = ['https://stop-amertime.github.io', 'http://localhost:8000', 'http://127.0.0.1:8000']
 SITE = '/usr/local/lib/python3.11/site-packages'
 
@@ -42,7 +42,7 @@ def _download_models():
     from demucs.pretrained import get_model
     from faster_whisper import WhisperModel
     from huggingface_hub import hf_hub_download
-    get_model('htdemucs')
+    get_model('htdemucs_6s')
     hf_hub_download('thebluescreen/adtof-drums-onnx', 'adtof_frame_rnn.onnx')
     WhisperModel('medium', device='cpu', compute_type='int8')
 
@@ -52,7 +52,8 @@ gpu_image = (
     .apt_install('ffmpeg')
     .pip_install('torch==2.5.1', 'torchaudio==2.5.1', 'demucs==4.1.0', 'basic-pitch[onnx]==0.4.0', 'onnxruntime==1.31.0',
                  'faster-whisper==1.2.1', 'ctranslate2==4.8.3', 'torchcrepe==0.0.24', 'librosa==0.11.0', 'soundfile==0.14.0',
-                 'scipy==1.17.1', 'huggingface_hub==2.2.0', 'setuptools==79.0.1')
+                 'scipy==1.17.1', 'huggingface_hub==2.2.0', 'setuptools==79.0.1',
+                 'mosqito==1.2.1', 'matplotlib==3.11.2')
     # Basic Pitch pulls in TensorFlow on Linux; it runs on ONNX here, and TensorFlow clashes with NumPy 2
     .run_commands('pip uninstall -y tensorflow tensorflow-cpu tensorflow-io-gcs-filesystem || true')
     # faster-whisper on CUDA needs the cuDNN and cuBLAS that came with torch on the library path
@@ -63,7 +64,9 @@ gpu_image = (
 web_image = modal.Image.debian_slim(python_version='3.11').pip_install('fastapi[standard]', 'python-multipart')
 
 
-@app.function(image=gpu_image, gpu='L4', timeout=1200, max_containers=2, scaledown_window=120, volumes={CACHE: cache})
+# eight CPU cores for the tone measurements, which run in parallel processes beside the GPU models
+@app.function(image=gpu_image, gpu='L4', cpu=8.0, memory=16384, timeout=1500, max_containers=2, scaledown_window=120,
+              volumes={CACHE: cache})
 def analyze(audio: bytes, key: str, name: str):
     from server.pipeline import analyze as run
     ext = os.path.splitext(name)[1] or '.mp3'

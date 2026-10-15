@@ -3,11 +3,14 @@
 Every detector here is an established, trained model. This file wires them together and measures a few plain
 properties of what they found (how loud, how bright, how long a hit rings, how a note starts and fades):
 
-  stems   Demucs htdemucs (Meta, MIT)                   drums / bass / other / vocals
+  stems   Demucs htdemucs_6s (Meta, MIT)                drums / bass / other / vocals / guitar / piano
   drums   ADTOF Frame_RNN (Zehren et al., CC BY-NC-SA)  kick, snare, toms, hi-hat, cymbals, read from the drum stem
-  notes   Basic Pitch (Spotify, Apache-2.0)             note events with pitch bends, read from the other stem
+  notes   Basic Pitch (Spotify, Apache-2.0)             note events with pitch bends, read from the guitar, piano
+                                                        and other stems separately; each note keeps its stem
   bass    pYIN (librosa, ISC)                           pitch contour of the bass stem
   voice   CREPE (torchcrepe, MIT)                       pitch contour and periodicity of the vocal stem
+  tone    MOSQITO (Eomys, Apache-2.0)                   roughness (Daniel & Weber) and sharpness (DIN 45692) of
+                                                        every note, and of the voice and bass, on their own stems
   words   Whisper (faster-whisper, MIT)                 words with timestamps, read from the vocal stem
 
 Usage (local, CPU is fine for testing):
@@ -22,7 +25,8 @@ HOP = 512                       # 23.2 ms per frame, the page's dt
 DT = HOP / SR
 DB = 16                         # drum spectrum bands, log-spaced 30 Hz .. 11 kHz (must match DSP.DRUM_BANDS)
 DRUM_BANDS = [30 * (SR / 2 / 30) ** (i / DB) for i in range(DB + 1)]
-EVW, SEGW = 5 + DB, 12
+EVW, SEGW = 5 + DB, 14
+NOTE_STEMS = ('other', 'guitar', 'piano')   # a note's source: its index here
 TYPES = {'kick': 0, 'snare': 1, 'hat': 2, 'tom': 3, 'cymbal': 4}
 
 
@@ -48,11 +52,11 @@ def b64f32(a):
 
 # ------------------------------------------------------------------ stems
 def separate(mix44, device):
-    """Demucs htdemucs: (2, n) at 44.1 kHz in, {'drums','bass','other','vocals': (2, n)} out."""
+    """Demucs htdemucs_6s: (2, n) at 44.1 kHz in, {'drums','bass','other','vocals','guitar','piano': (2, n)} out."""
     import torch
     from demucs.apply import apply_model
     from demucs.pretrained import get_model
-    model = get_model('htdemucs').to(device).eval()
+    model = get_model('htdemucs_6s').to(device).eval()
     wav = torch.from_numpy(mix44)
     ref = wav.mean(0)
     m, s = ref.mean(), ref.std() + 1e-8
@@ -326,10 +330,44 @@ def note_details(notes, other22):
         if fam == 0 and vd > 0:
             fam = 2
         hollow = 1 - min(1.0, 2 * ev / (ev + od)) if ev + od > 0 else 0.0
-        segs.append([t0, t1, midi, min(1.2, amp / aref), float(np.mean(br)) if br else 0.0,
-                     float(np.mean(nz)) if nz else 0.0, fam, attack, fade, vd, vr, hollow])
+        segs.append([t0, t1, midi, amp, float(np.mean(br)) if br else 0.0,
+                     float(np.mean(nz)) if nz else 0.0, fam, attack, fade, vd, vr, hollow, float(env[pk])])
     segs.sort(key=lambda s: s[0])
     return segs
+
+
+def notes_by_stem(stems, st22):
+    """Basic Pitch on each instrument stem. A note also found, much weaker, at the same pitch and time in another stem
+    is that stem's leak and is dropped there; notes far below the song's level (bleed into a near-empty stem) go too.
+    Records gain their stem's index (NOTE_STEMS) and lose the strength used for this."""
+    found = []
+    for i, name in enumerate(NOTE_STEMS):
+        if name in stems:
+            found += [r + [i] for r in note_details(notes_from_stem(stems[name]), st22[name])]
+    if not found:
+        return []
+    energy = np.array([r[12] for r in found])
+    floor = 0.02 * np.percentile(energy, 95)
+    found = [r for r in found if r[12] >= floor]
+    found.sort(key=lambda r: r[0])
+    drop = set()
+    for i, a in enumerate(found):
+        for j in range(i + 1, len(found)):
+            b = found[j]
+            if b[0] >= a[1]:
+                break
+            if a[13] == b[13] or abs(a[2] - b[2]) > 0.6:
+                continue
+            shared = min(a[1], b[1]) - max(a[0], b[0])
+            if shared < 0.5 * min(a[1] - a[0], b[1] - b[0]):
+                continue
+            if a[12] < 0.5 * b[12]:
+                drop.add(i)
+            elif b[12] < 0.5 * a[12]:
+                drop.add(j)
+    kept = [r for k, r in enumerate(found) if k not in drop]
+    aref = np.percentile([r[3] for r in kept], 95) + 1e-9
+    return [r[:3] + [min(1.2, r[3] / aref)] + r[4:12] + [r[13]] for r in kept]
 
 
 def notes_from_stem(other44):
@@ -341,6 +379,88 @@ def notes_from_stem(other44):
         _, _, events = predict(tmp.name, ICASSP_2022_MODEL_PATH, onset_threshold=0.5, frame_threshold=0.3,
                                minimum_note_length=100, melodia_trick=True)
     return [(float(a), float(b), int(p), float(v), list(bd) if bd is not None else None) for a, b, p, v, bd in events]
+
+
+# ------------------------------------------------------------------ tone
+TONE_SR, TONE_N = 48000, 9600       # MOSQITO's models run at 48 kHz on 200 ms slices
+_TONE = {}
+
+
+def _tone_init(paths):
+    import warnings
+    warnings.filterwarnings('ignore')
+    for name, path in paths.items():
+        _TONE[name] = np.load(path, mmap_mode='r')
+
+
+def _tone_slice(job):
+    """(stem, centre s) -> (roughness asper, sharpness acum) of a 200 ms slice; zeros for near silence."""
+    from mosqito.sq_metrics import roughness_dw, sharpness_din_freq
+    name, t = job
+    x = _TONE[name]
+    a = int(round(t * TONE_SR)) - TONE_N // 2
+    if a < 0 or a + TONE_N > len(x):
+        return 0.0, 0.0
+    seg = np.array(x[a:a + TONE_N], dtype=np.float64)
+    if np.sqrt(np.mean(seg ** 2)) < 2e-4:          # about 20 dB SPL
+        return 0.0, 0.0
+    r = float(np.mean(roughness_dw(seg, TONE_SR, overlap=0)[0]))
+    w = np.hanning(TONE_N)
+    spec = np.abs(np.fft.rfft(seg * w)) * 2 / w.sum() / math.sqrt(2)
+    sh = float(np.squeeze(sharpness_din_freq(spec, np.fft.rfftfreq(TONE_N, 1 / TONE_SR))))
+    return (r if math.isfinite(r) else 0.0), (sh if math.isfinite(sh) else 0.0)
+
+
+def harshness(rough, sharp):
+    """How harsh a sound is, 0 (smooth) to 1, from the two measures of it: roughness counts above 0.1 asper (a
+    clearly grating sound by 0.4), sharpness above 1.75 acum (where it starts to annoy in Zwicker's model) to 3."""
+    r = min(1.0, max(0.0, (rough - 0.1) / 0.3))
+    sh = min(1.0, max(0.0, (sharp - 1.75) / 1.25))
+    return min(1.0, math.hypot(r, sh))
+
+
+def tone(stems, segs, leadHz, bassHz, F, workers=None):
+    """Harshness of every note (one slice early in it, shared by notes of the same stem in the same slice) and of the
+    voice and bass every half second while they sound. Stems are first set to the level of a 70 dB SPL mix."""
+    import concurrent.futures, multiprocessing
+    names = {'vocals', 'bass'} | {NOTE_STEMS[int(r[12])] for r in segs}
+    mix = to_rate(sum(v.mean(0) for v in stems.values()), 44100, TONE_SR)
+    gain = 0.0632 / (float(np.sqrt(np.mean(mix ** 2))) + 1e-12)
+    tmp = tempfile.mkdtemp()
+    paths = {}
+    for name in names:
+        if name in stems:
+            paths[name] = os.path.join(tmp, name + '.npy')
+            np.save(paths[name], (to_rate(stems[name].mean(0), 44100, TONE_SR) * gain).astype(np.float32))
+    jobs = {}
+    for r in segs:
+        name = NOTE_STEMS[int(r[12])]
+        if name in paths:
+            jobs[(name, round((r[0] + min(0.3, 0.5 * (r[1] - r[0]))) / 0.2) * 0.2)] = None
+    grid = {}
+    for name, hz in (('vocals', leadHz), ('bass', bassHz)):
+        on = hz > 0
+        for k in range(int(F * DT / 0.5) + 1):
+            f = int(round(k * 0.5 / DT))
+            if f < F and on[f] and name in paths:
+                jobs[(name, k * 0.5)] = None
+        grid[name] = on
+    keys = list(jobs)
+    ctx = multiprocessing.get_context('spawn')
+    with concurrent.futures.ProcessPoolExecutor(max_workers=workers or os.cpu_count(), mp_context=ctx,
+                                                initializer=_tone_init, initargs=(paths,)) as ex:
+        for key, res in zip(keys, ex.map(_tone_slice, keys, chunksize=8)):
+            jobs[key] = harshness(*res)
+    for path in paths.values():
+        os.remove(path)
+    note_h = [jobs.get((NOTE_STEMS[int(r[12])], round((r[0] + min(0.3, 0.5 * (r[1] - r[0]))) / 0.2) * 0.2), 0.0) or 0.0 for r in segs]
+    lines = {}
+    for name in ('vocals', 'bass'):
+        h = np.zeros(F, np.float32)
+        for f in np.nonzero(grid[name])[0]:
+            h[f] = jobs.get((name, round(f * DT / 0.5) * 0.5), 0.0) or 0.0
+        lines[name] = h
+    return note_h, lines['vocals'], lines['bass'], len(keys)
 
 
 # ------------------------------------------------------------------ words
@@ -371,7 +491,8 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
     F = max(16, math.ceil(dur * SR / HOP))
     if stems_dir:
         import soundfile as sf
-        stems = {s: sf.read(os.path.join(stems_dir, s + '.wav'), dtype='float32')[0].T for s in ('drums', 'bass', 'other', 'vocals')}
+        stems = {s: sf.read(os.path.join(stems_dir, s + '.wav'), dtype='float32')[0].T
+                 for s in ('drums', 'bass', 'other', 'vocals', 'guitar', 'piano') if os.path.exists(os.path.join(stems_dir, s + '.wav'))}
         progress('stems: loaded from', stems_dir)
     else:
         progress('stems: separating with Demucs')
@@ -382,14 +503,18 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
     hits = drum_hits(stems['drums'], hf_hub_download(ADTOF_REPO, ADTOF_FILE))
     events = drum_details(hits, st22['drums'])
 
-    progress('notes: Basic Pitch')
-    segs = note_details(notes_from_stem(stems['other']), st22['other'])
+    progress('notes: Basic Pitch on guitar, piano and the rest')
+    segs = notes_by_stem(stems, st22)
 
     progress('bass: pYIN')
     bassN, bassHz, bassBr = bass_line(st22['bass'], F)
 
     progress('voice: CREPE')
     leadHz, leadN, leadBr, leadNz, noiseRef, onsets = voice_line(stems['vocals'], F, device)
+
+    progress('tone: roughness and sharpness')
+    note_h, leadHarsh, bassHarsh, slices = tone(stems, segs, leadHz, bassHz, F)
+    segs = [r + [h] for r, h in zip(segs, note_h)]
 
     lyrics = None
     if words:
@@ -400,18 +525,23 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
     sg = np.array(segs, np.float32).reshape(-1) if segs else np.zeros(0, np.float32)
     on = np.array(onsets, np.float32).reshape(-1) if onsets else np.zeros(0, np.float32)
     pack = {
-        'format': 'song-overprint-pack', 'version': 4, 'source': 'pitchscape-server',
-        'models': {'stems': 'htdemucs', 'drums': 'ADTOF Frame_RNN', 'notes': 'Basic Pitch ICASSP 2022',
-                   'bass': 'pYIN', 'voice': 'CREPE', 'words': 'Whisper' if words else None},
+        'format': 'song-overprint-pack', 'version': 5, 'source': 'pitchscape-server',
+        'models': {'stems': 'htdemucs_6s', 'drums': 'ADTOF Frame_RNN', 'notes': 'Basic Pitch ICASSP 2022',
+                   'bass': 'pYIN', 'voice': 'CREPE', 'tone': 'MOSQITO roughness_dw, sharpness_din',
+                   'words': 'Whisper' if words else None},
+        'noteStems': list(NOTE_STEMS),
         'title': title or os.path.splitext(os.path.basename(path))[0], 'artist': '', 'audio': None,
         'dur': dur, 'dt': DT, 'frames': F, 'stereo': True, 'noiseRef': noiseRef,
         'segStride': SEGW, 'eventStride': EVW,
         'arrays': {'bassN': b64f32(bassN), 'bassHz': b64f32(bassHz), 'bassBr': b64f32(bassBr),
                    'leadHz': b64f32(leadHz), 'leadN': b64f32(leadN), 'leadBr': b64f32(leadBr), 'leadNz': b64f32(leadNz),
-                   'events': b64f32(ev), 'segs': b64f32(sg), 'onsets': b64f32(on)},
+                   'events': b64f32(ev), 'segs': b64f32(sg), 'onsets': b64f32(on),
+                   'leadHarsh': b64f32(leadHarsh), 'bassHarsh': b64f32(bassHarsh)},
         'timing': None, 'lyrics': lyrics,
         'stats': {'seconds': round(time.time() - t_start, 1), 'hits': {k: sum(1 for h in hits if h[1] == k) for k in TYPES},
-                  'notes': len(segs), 'voiced': float((leadHz > 0).mean())},
+                  'notes': len(segs), 'voiced': float((leadHz > 0).mean()),
+                  'notesByStem': {n: sum(1 for r in segs if int(r[12]) == i) for i, n in enumerate(NOTE_STEMS)},
+                  'harshNotes': round(float(np.mean([r[13] > 0.3 for r in segs])) if segs else 0.0, 3), 'toneSlices': slices},
     }
     progress('done in %.0f s' % (time.time() - t_start))
     return pack
@@ -421,7 +551,7 @@ if __name__ == '__main__':
     ap = argparse.ArgumentParser(description='Analyse a song into a Pitchscape pack.')
     ap.add_argument('song')
     ap.add_argument('out')
-    ap.add_argument('--stems', help='folder with drums.wav, bass.wav, other.wav, vocals.wav (skips separation)')
+    ap.add_argument('--stems', help='folder with drums.wav, bass.wav, other.wav, vocals.wav, guitar.wav, piano.wav (skips separation)')
     ap.add_argument('--device', default='cpu')
     ap.add_argument('--no-words', action='store_true')
     ap.add_argument('--whisper', help='Whisper model size (default: medium on GPU, base on CPU)')

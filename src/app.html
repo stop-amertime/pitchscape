@@ -22,7 +22,7 @@
   --green: #00A95C;
   --crimson: #E45D50;
   --drum: #23211F;
-  --c-bass: #3255A4; --c-voice: #00838A; --c-keys: #FF6C2F; --c-pads: #FFB511; --c-leads: #E45D50; --c-words: #00838A;
+  --c-bass: #3255A4; --c-voice: #FF48B0; --c-guitar: #FF6C2F; --c-piano: #FFB511; --c-synth: #009DA5; --c-words: #914E72;
   --on-blue: #F4F5F1;
   --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --mono: "DM Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -211,8 +211,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     <div class="panel-head"><button class="btn btn-small" id="labPlay" type="button" disabled>Play</button><input type="range" id="labSeek" min="0" max="1" step="0.01" value="0" aria-label="Position in song"><button class="btn btn-small btn-primary" type="button" data-close>Done</button></div>
     <div class="tabs" role="tablist" aria-label="Lab sections"><button type="button" role="tab" id="tab-colour" data-tab="colour" aria-controls="pane-colour" aria-selected="false">Colour</button><button type="button" role="tab" id="tab-shapes" data-tab="shapes" aria-controls="pane-shapes" aria-selected="false">Shapes</button><button type="button" role="tab" id="tab-words" data-tab="words" aria-controls="pane-words" aria-selected="false">Words</button><button type="button" role="tab" id="tab-motion" data-tab="motion" aria-controls="pane-motion" aria-selected="false">Motion</button><button type="button" role="tab" id="tab-print" data-tab="print" aria-controls="pane-print" aria-selected="false">Print</button><button type="button" role="tab" id="tab-layers" data-tab="layers" aria-controls="pane-layers" aria-selected="false">Layers</button></div>
       <div class="pane" id="pane-colour" data-pane="colour" role="tabpanel" aria-labelledby="tab-colour" hidden>
-        <div class="row"><button type="button" class="k" data-tip="What sets a mark’s colour: its instrument, how high it sits, or which note it is." aria-expanded="false" aria-describedby="ld-colour">Colour by<i aria-hidden="true">i</i></button><div class="seg" data-key="colour" role="group" aria-label="Colour by" aria-describedby="ld-colour"><button type="button" id="lab-colour-inst" data-v="inst">Instrument</button><button type="button" id="lab-colour-height" data-v="height">Height</button><button type="button" id="lab-colour-note" data-v="note">Note</button></div><span class="vh" id="ld-colour">What sets a mark’s colour: its instrument, how high it sits, or which note it is.</span></div>
-        <div class="row"><button type="button" class="k" data-tip="The inks for colouring by instrument. Rainbow: an ink for each instrument. Warm and cool: the tune in warm inks, the backing in cool ones. Three and two inks: instruments share inks, and where they overlap the inks mix." aria-expanded="false" aria-describedby="ld-palette">Palette<i aria-hidden="true">i</i></button><div class="seg" data-key="palette" role="group" aria-label="Palette" aria-describedby="ld-palette"><button type="button" id="lab-palette-rainbow" data-v="rainbow">Rainbow</button><button type="button" id="lab-palette-warmcool" data-v="warmcool">Warm and cool</button><button type="button" id="lab-palette-three" data-v="three">Three inks</button><button type="button" id="lab-palette-two" data-v="two">Two inks</button></div><span class="vh" id="ld-palette">The inks for colouring by instrument. Rainbow: an ink for each instrument. Warm and cool: the tune in warm inks, the backing in cool ones. Three and two inks: instruments share inks, and where they overlap the inks mix.</span></div>
+        <div class="row"><button type="button" class="k" data-tip="Instrument: each has its own ink for the whole song, warmer the more it is out front: voice pink, guitar orange, piano yellow, everything else (synths, strings, brass, organ) teal, darker for held notes and paler for swells, bass blue, drums black. Height: colour follows how high a sound sits. Note: colour follows the note name." aria-expanded="false" aria-describedby="ld-colour">Colour by<i aria-hidden="true">i</i></button><div class="seg" data-key="colour" role="group" aria-label="Colour by" aria-describedby="ld-colour"><button type="button" id="lab-colour-inst" data-v="inst">Instrument</button><button type="button" id="lab-colour-height" data-v="height">Height</button><button type="button" id="lab-colour-note" data-v="note">Note</button></div><span class="vh" id="ld-colour">Instrument: each has its own ink for the whole song, warmer the more it is out front: voice pink, guitar orange, piano yellow, everything else (synths, strings, brass, organ) teal, darker for held notes and paler for swells, bass blue, drums black. Height: colour follows how high a sound sits. Note: colour follows the note name.</span></div>
       </div>
       <div class="pane" id="pane-shapes" data-pane="shapes" role="tabpanel" aria-labelledby="tab-shapes" hidden>
         <div class="row"><button type="button" class="k" data-tip="Follow the sound: brighter hits print spikier, and ringing ones trail. All alike: only how hard each is hit changes it." aria-expanded="false" aria-describedby="ld-drums">Drum marks<i aria-hidden="true">i</i></button><div class="seg" data-key="drums" role="group" aria-label="Drum marks" aria-describedby="ld-drums"><button type="button" id="lab-drums-sound" data-v="sound">Follow the sound</button><button type="button" id="lab-drums-simple" data-v="simple">All alike</button></div><span class="vh" id="ld-drums">Follow the sound: brighter hits print spikier, and ringing ones trail. All alike: only how hard each is hit changes it.</span></div>
@@ -254,16 +253,16 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
             <span class="nm">Toms</span></button>
           <button class="ink" type="button" data-layer="voice" aria-pressed="true" style="--c: var(--c-voice)">
             <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M1.5 17c4-1 5-9 9.5-9s4.5 7 8.5 7c2.6 0 3.6-2.4 5-4v4c-1.6 2-3 4-5.2 4-4.5 0-5-7-8.4-7S6 19 1.5 21z" fill="currentColor"/></svg>
-            <span class="nm">Voice / lead</span></button>
-          <button class="ink" type="button" data-layer="keys" aria-pressed="true" style="--c: var(--c-keys)">
+            <span class="nm">Voice</span></button>
+          <button class="ink" type="button" data-layer="guitar" aria-pressed="true" style="--c: var(--c-guitar)">
             <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 6.5h3.5L24 11.6v2.8L5.5 19.5H2z" fill="currentColor"/></svg>
-            <span class="nm">Keys &amp; plucks</span></button>
-          <button class="ink" type="button" data-layer="pads" aria-pressed="true" style="--c: var(--c-pads)">
+            <span class="nm">Guitar</span></button>
+          <button class="ink" type="button" data-layer="piano" aria-pressed="true" style="--c: var(--c-piano)">
+            <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 5h22v16H2z" fill="currentColor" opacity=".35"/><path d="M6 5h2.6v9H6zM11.2 5h2.6v9h-2.6zM16.4 5H19v9h-2.6z" fill="currentColor"/><path d="M2 5h22v16H2zM8.6 14v7M13.8 14v7M19 14v7" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
+            <span class="nm">Piano</span></button>
+          <button class="ink" type="button" data-layer="synths" aria-pressed="true" style="--c: var(--c-synth)">
             <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M1.5 13C8 12.6 13 6 24.5 6v14C13 20 8 13.4 1.5 13z" fill="currentColor" opacity=".85"/></svg>
-            <span class="nm">Pads &amp; strings</span></button>
-          <button class="ink" type="button" data-layer="leads" aria-pressed="true" style="--c: var(--c-leads)">
-            <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 8h4v1.6h4V8h4v1.6h4V8h4v10h-4v-1.6h-4V18h-4v-1.6H6V18H2z" fill="currentColor"/></svg>
-            <span class="nm">Organ &amp; leads</span></button>
+            <span class="nm">Synths &amp; strings</span></button>
           <button class="ink" type="button" data-layer="words" aria-pressed="true" style="--c: var(--c-words)">
             <svg viewBox="0 0 26 26" aria-hidden="true"><text x="13" y="18" text-anchor="middle" font-family="Bricolage Grotesque, system-ui, sans-serif" font-weight="700" font-size="13" fill="currentColor">Aa</text></svg>
             <span class="nm">Words</span></button>
@@ -296,7 +295,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   var S = {
     ana: null, dur: 0, name: '', key: '', kicks: [], snares: [], hats: [], toms: [], cymbals: [], segs: [], segMax: 0, medHz: 330,
     lines: [], wt: [], words: [], lineStarts: [], lyricMode: '',
-    vis: { bass: true, kick: true, snare: true, hats: true, toms: true, voice: true, keys: true, pads: true, leads: true, words: true },
+    vis: { bass: true, kick: true, snare: true, hats: true, toms: true, voice: true, guitar: true, piano: true, synths: true, words: true },
     dirty: true, neverPlayed: true, previewT: 0, tap: null, busy: false, timing: null, song: ''
   };
   var store = {
@@ -307,7 +306,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 
   /* ------------------------------------------------------------ lab settings (A/B switches, kept on this device) */
   var LAB_DEF = {
-    colour: 'inst', palette: 'rainbow', drums: 'sound', kick: 'smudge', bass: 'smudge', font: 'grotesque', wordSize: 'voice',
+    colour: 'inst', drums: 'sound', kick: 'smudge', bass: 'smudge', font: 'grotesque', wordSize: 'voice',
     shake: reduceMotion ? 0 : 0.25, tilt: reduceMotion ? 0 : 0.5, pulse: reduceMotion ? 0 : 0.6, slip: reduceMotion ? 0 : 0.35,
     secs: 0, ink: 1, weight: 1, grain: 0.5
   };
@@ -368,13 +367,19 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     }
     S.segs = []; S.segMax = 0;
     /* note records: [t0, t1, midi, amp, brightness, noise] and, from engine v2, [family, attack s, fade dB/s,
-       vibrato depth st, vibrato rate Hz, hollowness]. Family: 0 struck, 1 swell, 2 held; -1 for older packs. */
+       vibrato depth st, vibrato rate Hz, hollowness] and, from pipeline v2, [stem, harshness]. Family: 0 struck,
+       1 swell, 2 held; -1 for older packs. */
     var SW = ana.segW || 6, q = ana.segs;
     for (i = 0; i + SW <= q.length; i += SW) {
       var v2 = SW >= 12, sg = { t0: q[i], t1: q[i + 1], m: q[i + 2], a: q[i + 3], b: q[i + 4], z: q[i + 5], f: v2 ? q[i + 6] : -1, att: v2 ? q[i + 7] : 0, dec: v2 ? q[i + 8] : 0, vd: v2 ? q[i + 9] : 0, vr: v2 ? q[i + 10] : 0, h: v2 ? q[i + 11] : 0, id: i / SW };
+      /* from pipeline v2: which stem the note came from (0 other, 1 guitar, 2 piano) and how harsh it is, 0..1.
+         Older analyses carry neither: their notes count as "other", and a toned-down brightness stands in. */
+      sg.src = SW >= 13 ? q[i + 12] : 0; sg.hs = SW >= 14 ? q[i + 13] : brMap(sg.b) * 0.4;
       S.segs.push(sg); if (sg.t1 - sg.t0 > S.segMax) S.segMax = sg.t1 - sg.t0;
     }
     ana.leadHz = steadyVoice(ana.leadHz);
+    /* how harsh the voice and bass are, measured every half second: eased over a quarter of a second each way */
+    ana.leadH = ana.leadHarsh ? easeOut(ana.leadHarsh, 11) : null; ana.bassH = ana.bassHarsh ? easeOut(ana.bassHarsh, 11) : null;
     var hz = []; for (i = 0; i < ana.leadHz.length; i += 3) if (ana.leadHz[i] > 0) hz.push(ana.leadHz[i]);
     hz.sort(function (a, b) { return a - b; }); S.medHz = hz.length ? hz[hz.length >> 1] : 330;
     fitRange(ana); scaleY();
@@ -394,6 +399,15 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   }
   /* a frame that leaps away from both its neighbours (which agree with each other) and straight back is the pitch
      tracker slipping, not singing: it takes their pitch. Slides and vibrato are untouched. */
+  function easeOut(x, r) {
+    var out = new Float32Array(x.length), acc = 0, i;
+    for (i = 0; i < x.length + r; i++) {
+      if (i < x.length) acc += x[i];
+      if (i - 2 * r - 1 >= 0) acc -= x[i - 2 * r - 1];
+      if (i - r >= 0 && i - r < x.length) out[i - r] = acc / (2 * r + 1);
+    }
+    return out;
+  }
   function steadyVoice(hz) {
     var out = hz.slice();
     for (var i = 1; i < hz.length - 1; i++) {
@@ -438,28 +452,22 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     }
   }
   function heightHex(y) { return HLUT[Math.round(clamp((H - 12 - y) / Math.max(1, H - 28), 0, 1) * 95)] || C.ink; }
-  /* palettes: the ink each kind of sound prints in, all real riso inks. Rainbow gives every instrument its own ink.
-     Warm and cool prints what carries the tune in warm inks and the backing in cool ones. Three inks and two inks
-     share inks between instruments, as a real riso print would, so overlaps mix into new colours; a pale ink there is
-     a tint of a full one (the same drum printed through a screen), so the voice keeps the only solid pink. Drums
-     print in black throughout, and words in an ink dark enough to read. */
-  var PALETTES = {
-    rainbow: { bass: '#3255A4', voice: '#00838A', words: '#00838A', keys: '#FF6C2F', pads: '#FFB511', leads: '#E45D50', drum: '#23211F' },
-    warmcool: { bass: '#3255A4', voice: '#FF48B0', words: '#914E72', keys: '#00838A', pads: '#5EC8E5', leads: '#FF6C2F', drum: '#23211F' },
-    three: { bass: '#3255A4', voice: '#FF48B0', words: '#23211F', keys: '#3255A4', pads: '#FFB511', leads: '#F794CA', drum: '#23211F' },
-    two: { bass: '#3255A4', voice: '#FF48B0', words: '#23211F', keys: '#3255A4', pads: '#99AACA', leads: '#F794CA', drum: '#23211F' }
-  };
-  function pal() { return PALETTES[L.palette] || PALETTES.rainbow; }
-  function drumHex() { return pal().drum; }
+  /* colour = which instrument, fixed for the whole song (the stems say which), warmer the more it is out front. The
+     notes of the "other" stem (synths, strings, brass, organ) share a teal, in three shades by how each is played:
+     darkest held, middle struck, palest swelling. Words print in a deep wine from the voice's family, dark enough to
+     read. All real riso inks. */
+  var INKS = { voice: '#FF48B0', words: '#914E72', guitar: '#FF6C2F', piano: '#FFB511', lead: '#00838A', pluck: '#009DA5', pad: '#82D8D5', bass: '#3255A4', drum: '#23211F' };
+  function drumHex() { return INKS.drum; }
   function tint(group, hz, y) {
     if (L.colour === 'height') return heightHex(y != null ? y : yOf(hz || 1000));
     if (L.colour === 'note' && group !== 'drum' && hz > 0) { var pc = ((Math.round(DSP.ftom(hz)) % 12) + 12) % 12; return NOTE_FIFTHS[(pc * 7) % 12]; }
-    return pal()[group];
+    return INKS[group];
   }
   function inkA(a) { return Math.min(1, a * L.ink); }
 
   /* ------------------------------------------------------------ drawing */
-  /* edge shape: sine when mellow, sawtooth when bright, square steps (q) when hollow */
+  /* edge shape: a faint smooth ripple for a smooth sound, a sawtooth as it gets harsher (roughness and sharpness, as
+     measured on its own stem), square steps (q) when hollow */
   function wave(ph, br, q) { var f = ph - Math.floor(ph), w = (1 - br) * Math.sin(6.2832 * ph) * 0.55 + br * (2 * f - 1); return q ? w * (1 - q) + q * (f < 0.5 ? 0.75 : -0.75) : w; }
 
   var inkPre = {};
@@ -481,7 +489,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     }
     function push(x, y, w, br, ph, ink, q, c) {
       w *= L.weight;
-      var amp = w * (0.08 + 0.8 * Math.max(br, 0.5 * (q || 0)));
+      var amp = w * (0.03 + 0.8 * Math.max(br, 0.3 * (q || 0)));
       top.push(x, y - w - amp * wave(ph, br, q)); bot.push(x, y + w + amp * wave(ph + 0.41, br, q));
       xs.push(x); al.push(ink); cs.push(c || color);
     }
@@ -581,10 +589,10 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 
   /* other notes, one family per call: fams lists the families drawn (-1 = older packs, which carry none) */
   var SEMI_PX = 1;
-  function drawSegs(now, lv, fams, key) {
+  function drawSegs(now, lv, src, key) {
     var t0w = now - WIN - 0.2, i = lowerBound(S.segs, t0w - S.segMax, 't0');
     for (; i < S.segs.length; i++) {
-      var s = S.segs[i]; if (s.t0 > now) break; if (s.t1 < t0w || fams.indexOf(s.f) < 0) continue;
+      var s = S.segs[i]; if (s.t0 > now) break; if (s.t1 < t0w || s.src !== src) continue;
       var end = Math.min(s.t1, now); if (end - s.t0 < 0.02) continue;
       if (s.t1 >= now) lv[key] += s.a * 0.5;
       var hz = DSP.mtof(s.m), y0 = yOf(hz), br = brMap(s.b), z = zSeg(s.z), r = rate(hz), a1 = Math.min(1, s.a), pts = [], seed = 101 + s.id * 7, open = s.t1 > now;
@@ -609,16 +617,15 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
         } else {
           w = (1 + 4.2 * s.a) * Math.min(1, u / 0.05 + 0.25) * Math.min(1, (s.t1 - tt) / 0.08 + 0.2); ink = 0.45 + 0.55 * a1;
         }
-        /* washes keep soft edges whatever the tone: a pad is a bed of sound, not a buzz */
-        pts.push({ t: tt, y: y, w: w, a: ink, b: s.f === 1 ? br * 0.3 : br, z: s.f === 1 ? z * 0.5 : z, r: r, q: q });
+        pts.push({ t: tt, y: y, w: w, a: ink, b: s.hs, z: s.f === 1 ? z * 0.5 : z, r: r, q: q });
         if (tt >= end) break;
       }
-      var col = tint(key, hz, y0);
+      var col = tint(src === 1 ? 'guitar' : src === 2 ? 'piano' : s.f === 1 ? 'pad' : s.f === 2 ? 'lead' : 'pluck', hz, y0);
       if (s.f === 1) { ribbon(pts, now, col, 0.12, seed, 1.45, open); ribbon(pts, now, col, 0.78, seed, 1, open); }
       else if (s.f === 0) ribbon(pts, now, col, 0.85, seed, 1, open, 'blunt');
       else if (s.f === 2) ribbon(pts, now, col, 0.82, seed, 1, open, 'square');
       else {
-        if (br < 0.5) ribbon(pts, now, col, 0.14 * (1 - br), seed, 1.9, open);
+        if (s.hs < 0.5) ribbon(pts, now, col, 0.14 * (1 - s.hs), seed, 1.9, open);
         ribbon(pts, now, col, 0.8, seed, 1, open);
       }
       if (open) { var hd = pts[pts.length - 1]; pen(hd.y, hd.w, col, hd.a); }
@@ -765,7 +772,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     var yb = BEAT_H + 4.5;
     ctx.strokeStyle = 'rgba(35,33,31,0.09)'; ctx.setLineDash([1, 5]); ctx.beginPath(); ctx.moveTo(0, yb); ctx.lineTo(W, yb); ctx.stroke(); ctx.setLineDash([]);
   }
-  var DIRS = { keys: [0.8, -0.6], pads: [-0.4, 0.75], leads: [0.65, 0.45], bass: [-0.9, 0.3], voice: [0.5, 0.85], hats: [-0.3, -0.95], toms: [0.7, -0.3], snare: [0.95, 0.2], kick: [-0.6, -0.7], words: [0.25, 0.6] };
+  var DIRS = { guitar: [0.8, -0.6], synths: [-0.4, 0.75], piano: [0.65, 0.45], bass: [-0.9, 0.3], voice: [0.5, 0.85], hats: [-0.3, -0.95], toms: [0.7, -0.3], snare: [0.95, 0.2], kick: [-0.6, -0.7], words: [0.25, 0.6] };
   var meters = {};
   document.querySelectorAll('.ink').forEach(function (b) { meters[b.dataset.layer || b.dataset.toggle] = { el: b, v: -1 }; });
   function setMeter(name, v) { var m = meters[name]; if (!m) return; v = Math.round(clamp(v, 0, 1) * 20) / 20; if (v !== m.v) { m.v = v; m.el.style.setProperty('--lvl', v); } }
@@ -779,7 +786,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     if (!a) { drawGuides(); return; }
     var fi = clamp(Math.floor(now / a.dt), 0, a.frames - 1);
     var bassNow = a.bassN[fi] || 0, kickImp = impulse(S.kicks, now, 14), snImp = impulse(S.snares, now, 18), hatImp = impulse(S.hats, now, 22);
-    var lv = { keys: 0, pads: 0, leads: 0 };
+    var lv = { guitar: 0, piano: 0, synths: 0 };
     var amp = L.shake * ((S.vis.bass ? bassNow * bassNow * 5 : 0) + (S.vis.kick ? kickImp * 9 : 0) + (S.vis.snare ? snImp * 2 : 0));
     var ox = amp * (Math.sin(now * 53.1) + 0.7 * Math.sin(now * 31.7 + 1.3)) / 1.7, oy = amp * (Math.sin(now * 47.3 + 2.1) + 0.7 * Math.sin(now * 29.9 + 0.4)) / 1.7, rot = amp * 0.0022 * Math.sin(now * 37.7 + 0.9);
     var misAmt = L.slip * (kickImp * 2.4 + bassNow * 1.1), mis = {};
@@ -801,14 +808,14 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       ctx.globalAlpha = 1; ctx.fillStyle = g2; ctx.fillRect(-30, H * 0.45, W + 60, H * 0.55 + 30);
     }
     function layer(name, fn) { if (!S.vis[name]) return; ctx.save(); ctx.translate(mis[name][0], mis[name][1]); fn(); ctx.restore(); }
-    layer('pads', function () { drawSegs(now, lv, [1], 'pads'); });
-    layer('keys', function () { drawSegs(now, lv, [0, -1], 'keys'); });
-    layer('leads', function () { drawSegs(now, lv, [2], 'leads'); });
+    layer('synths', function () { drawSegs(now, lv, 0, 'synths'); });
+    layer('piano', function () { drawSegs(now, lv, 2, 'piano'); });
+    layer('guitar', function () { drawSegs(now, lv, 1, 'guitar'); });
     layer('bass', function () {
-      frameTrack(now, function (f) { return a.bassHz[f]; }, function (f) { return 0.8 + 12 * a.bassN[f]; }, function (f) { return smooth(0.015, 0.3, a.bassN[f]); }, function (f) { return brMap(a.bassBr[f]); }, function () { return 0; }, 'bass', 0.86, 0.15, 11);
+      frameTrack(now, function (f) { return a.bassHz[f]; }, function (f) { return 0.8 + 12 * a.bassN[f]; }, function (f) { return smooth(0.015, 0.3, a.bassN[f]); }, function (f) { return a.bassH ? a.bassH[f] : brMap(a.bassBr[f]) * 0.4; }, function () { return 0; }, 'bass', 0.86, 0.15, 11);
     });
     layer('voice', function () {
-      frameTrack(now, function (f) { return a.leadHz[f]; }, function (f) { return 0.8 + 8.5 * a.leadN[f]; }, function (f) { return smooth(0.02, 0.4, a.leadN[f]); }, function (f) { return brMap(a.leadBr[f]); }, function (f) { return zLead(a.leadNz[f]); }, 'voice', 0.9, 0.16, 37);
+      frameTrack(now, function (f) { return a.leadHz[f]; }, function (f) { return 0.8 + 8.5 * a.leadN[f]; }, function (f) { return smooth(0.02, 0.4, a.leadN[f]); }, function (f) { return a.leadH ? a.leadH[f] : brMap(a.leadBr[f]) * 0.4; }, function (f) { return zLead(a.leadNz[f]); }, 'voice', 0.9, 0.16, 37);
     });
     layer('hats', function () { drawHits(S.hats, now, 'hat'); drawHits(S.cymbals, now, 'cymbal'); });
     layer('toms', function () { drawHits(S.toms, now, 'tom'); });
@@ -828,7 +835,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     var lead = a.leadHz[fi] > 0 ? a.leadN[fi] : 0, wordHit = 0;
     if (S.words.length) { var wi = lowerBound(S.words, now - 0.3, 't'); if (wi < S.words.length && S.words[wi].t <= now) wordHit = 1 - (now - S.words[wi].t) / 0.3; }
     setMeter('bass', bassNow); setMeter('kick', kickImp); setMeter('snare', snImp); setMeter('hats', hatImp);
-    setMeter('voice', lead); setMeter('keys', lv.keys); setMeter('pads', lv.pads); setMeter('leads', lv.leads); setMeter('words', wordHit);
+    setMeter('voice', lead); setMeter('guitar', lv.guitar); setMeter('piano', lv.piano); setMeter('synths', lv.synths); setMeter('words', wordHit);
     /* tilt: the sheet tips back on each kick and leans with the bass (CSS 3D, so the drawing itself is untouched) */
     var rx = L.tilt * (9 * Math.min(1, kickImp) + 3 * bassNow), rz = L.tilt * 1.4 * bassNow * Math.sin(now * 1.3), tf = L.tilt > 0 ? 'perspective(700px) rotateX(' + rx.toFixed(2) + 'deg) rotate(' + rz.toFixed(2) + 'deg)' : '';
     if (tf !== lastTf) { lastTf = tf; cv.style.transform = tf; }
@@ -1229,6 +1236,9 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   } catch (e) { /* no config */ }
   /* where a song's analysis is kept on the device: a new version of the server's analysis starts afresh */
   function packKey(sha) { return 'pack:' + PIPELINE + ':' + sha; }
+  /* an analysis made by an older server (say, in the minutes while a new one deploys) is shown but not kept under the
+     new version's name, so the song is analysed afresh once the new server is up. Pipeline 2 writes pack version 5. */
+  function current(pack) { return !(+PIPELINE >= 2) || (pack && pack.version >= 5); }
   var idb = (function () {
     var dbp = null;
     function open() {
@@ -1248,7 +1258,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       put: function (k, v) { return run('readwrite', function (st) { return st.put(v, k); }).catch(function () {}); }
     };
   })();
-  var STAGES = [['stems', 'Splitting the song into stems', 0.2], ['drums', 'Reading the drums', 0.45], ['notes', 'Reading the notes', 0.55],
+  var STAGES = [['stems', 'Splitting the song into stems', 0.2], ['drums', 'Reading the drums', 0.45], ['notes', 'Reading the notes', 0.55], ['tone', 'Listening for harsh sounds', 0.8],
     ['bass', 'Following the bass', 0.65], ['voice', 'Following the voice', 0.75], ['words', 'Listening for the words', 0.85], ['done', 'Finishing', 0.95]];
   function stageOf(st) { for (var i = 0; st && i < STAGES.length; i++) if (st.indexOf(STAGES[i][0]) === 0) return STAGES[i]; return ['', 'Starting the server', 0.12]; }
   function sha256hex(buf) {
@@ -1263,13 +1273,13 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     return apiReady.then(function () {
       if (!API) return null;
       return idb.get(packKey(sha)).then(function (p) {
-        if (p) return p;
+        if (p && current(p)) return p;
         var key = store.get('pitchscape:key');
         if (!key) return null;
         // a server slow to answer the lookup is not waited on for long; once it answers, the download is not cut off
         var ctl = window.AbortController ? new AbortController() : null, timer = ctl && setTimeout(function () { ctl.abort(); }, 4000);
         return fetch(API + '/packs/' + sha, { headers: { 'X-Pitchscape-Key': key }, signal: ctl ? ctl.signal : undefined }).then(function (r) { clearTimeout(timer); return r.ok ? r.json() : null; }).then(function (j) {
-          if (j && j.pack) { idb.put(packKey(sha), j.pack); return j.pack; }
+          if (j && j.pack && current(j.pack)) { idb.put(packKey(sha), j.pack); return j.pack; }
           return null;
         }, function () { return null; });
       });
@@ -1324,7 +1334,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
           showStatus('Starting the server', 0.1); setTimeout(poll, 2500);
         });
       });
-    }).then(function (pack) { if (pack && sha) idb.put(packKey(sha), pack); return pack; });
+    }).then(function (pack) { if (pack && sha && current(pack)) idb.put(packKey(sha), pack); return pack; });
   }
   function packToRes(pack) {
     var res = { dur: pack.dur, dt: pack.dt, frames: pack.frames, stereo: pack.stereo, noiseRef: pack.noiseRef };
@@ -1389,9 +1399,9 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       var k = r.dataset.key, v = k === 'secs' ? (L.secs > 0 ? L.secs : WIN) : L[k];
       r.value = String(v); $('lab-' + k + '-v').textContent = labVal(k, v);
     });
-    var P = pal(), root = document.documentElement.style;
-    root.setProperty('--drum', P.drum);
-    ['bass', 'voice', 'keys', 'pads', 'leads', 'words'].forEach(function (k) { root.setProperty('--c-' + k, P[k]); });
+    var root = document.documentElement.style;
+    root.setProperty('--drum', INKS.drum); root.setProperty('--c-synth', INKS.pluck);
+    ['bass', 'voice', 'guitar', 'piano', 'words'].forEach(function (k) { root.setProperty('--c-' + k, INKS[k]); });
   }
   function labApply(k) {
     saveLab();

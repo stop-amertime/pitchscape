@@ -1,9 +1,9 @@
 # Pitchscape
 
-A phone-friendly music visualizer. It splits a song into layers (bass, kick, snare, hats, voice, other notes)
-and prints each one in its own risograph-style ink on a scrolling sheet. Height is pitch. The shape of each stroke
-follows the sound's tone: smooth edges for pure tones, sawtooth edges for bright or buzzy ones, speckle for breath and
-noise. Ink strength follows loudness, so quiet passages print pale and thin. Lyrics can be pasted in and are printed
+A phone-friendly music visualizer. It splits a song into instruments (voice, guitar, piano, bass, drums and the
+rest) and prints each in its own risograph-style ink on a scrolling sheet. Height is pitch. Colour says which
+instrument, warmer the more it is out front; shape says how each note is played (struck, swelling, held); the edge says
+how it sounds, smooth unless it was measured harsh (rough or sharp), and speckle shows breath and noise. Ink strength follows loudness, so quiet passages print pale and thin. Lyrics can be pasted in and are printed
 along the voice line, at the moment and pitch each word is sung.
 
 It started life as a claude.ai artifact, where large models could not load, so it grew its own lightweight analysis
@@ -54,12 +54,23 @@ every push to `main` that touches `server/`.
 
 | Layer | Model | Licence |
 | --- | --- | --- |
-| stems | Demucs htdemucs (Meta) | MIT |
+| stems: vocals, drums, bass, guitar, piano, other | Demucs htdemucs_6s (Meta) | MIT |
 | drums: kick, snare, toms, hi-hat, cymbals | ADTOF Frame_RNN (Zehren, Alunno, Bientinesi), via `thebluescreen/adtof-drums-onnx` | CC BY-NC-SA 4.0, non-commercial |
-| notes | Basic Pitch (Spotify) | Apache-2.0 |
+| notes, read from the guitar, piano and other stems separately | Basic Pitch (Spotify) | Apache-2.0 |
 | bass line | pYIN (librosa) | ISC |
 | voice line | CREPE (torchcrepe) | MIT |
+| tone: roughness (Daniel & Weber) and sharpness (DIN 45692) | MOSQITO (Eomys) | Apache-2.0 |
 | words | Whisper (faster-whisper) | MIT |
+
+Colour by instrument comes from the stems, so an instrument keeps its ink for the whole song, warmer the more it is
+out front: voice fluorescent pink, guitar orange, piano sunflower, the other stem's notes (synths, strings, brass,
+organ) teal in three shades by how each is played (darkest held, middle struck, palest swelling), bass blue, drums
+black, words a deep wine. Demucs' piano stem is the least reliable of the six. Notes that turn up in two stems at the
+same pitch and time stay only where they are much stronger. Tone is measured with MOSQITO on each note's own stem
+(one 200 ms slice early in the note, shared by notes of the same stem in the same slice) and on the voice and bass every
+half second, after setting the whole mix to 70 dB SPL so harshness is absolute rather than relative to the song:
+roughness counts above 0.1 asper, sharpness above 1.75 acum, and together they make a note's edge anything from a
+faint smooth ripple to a sawtooth. The slices run in parallel on the server's eight CPU cores.
 
 The pipeline only wires these together and measures plain properties of what they found (loudness, brightness, how
 long a hit rings, how a note starts and fades). On Made in the Dark, ADTOF found no drum hits at all in the stems that
@@ -149,12 +160,9 @@ panel below the print, which shrinks to sit above it; the page itself never scro
 demo and the server key, which shows as a line once saved, so the keyboard only comes up when you choose to change it.
 The Lab's A/B switches sit in tabs (Colour, Shapes, Words, Motion, Print, Layers), each with an explanation that pops
 up in a bubble from its label. Only settings changed from the defaults are kept on the device (`localStorage` key
-`pitchscape:lab`), so a new default reaches anyone who left that setting alone. Colour by instrument (drums share one
-ink, tuned notes share warm inks), by height (the pitch axis, low blue to high pink, whatever made the sound) or by
-note name (circle-of-fifths colours; drums keep the drum ink). Palette, for colour by instrument, all real riso inks:
-Rainbow (an ink each), Warm and cool (the tune in warm inks, the backing in cool), Three inks (pink voice, blue bass and
-keys, sunflower pads, pale pink leads, black drums and words) or Two inks (the same with pale blue pads), where shared
-inks overlap and mix as on a real print. Drum marks that follow each hit's sound (spikier when brighter, trailing
+`pitchscape:lab`), so a new default reaches anyone who left that setting alone. Colour by instrument, by height (the
+pitch axis, low blue to high pink, whatever made the sound) or by note name (circle-of-fifths colours; drums keep the
+drum ink). Drum marks that follow each hit's sound (spikier when brighter, trailing
 while it rings) or all alike. Kick as a soft smudge or a halftone thud; bass as a soft smear or a sharp line. Word face
 (grotesque, script, serif, mono), sized and weighted by how loudly each word was sung, or fixed. Sliders for shake, tilt
 (CSS 3D: the sheet tips back on kicks and sways with the bass), glow, misprint (each ink jumps out of register on
@@ -212,8 +220,8 @@ one that would steps up, or down, until it is clear.
 ## Ideas, roughly by impact
 
 1. Chords: name the chord under each beat from the notes and bass, printed small along the top like a lead sheet.
-2. Instrument identity within "other notes": a small audio-tagging model to tell guitar, keys, strings and synth apart,
-   each with its own mark family.
+2. Instrument identity within the "other" stem: a small audio-tagging model to tell strings, brass, organ and synth
+   apart, each with its own ink.
 3. Song structure: detect repeated sections and print repeats with the same layout; a poster mode that prints the whole
    song as one long sheet to save.
 4. Beat grid: lock the scroll to the tempo with faint bar lines, land the shakes on downbeats.
