@@ -71,6 +71,11 @@ Deploying needs three repository secrets: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECR
 modal.com/settings/tokens) and `PITCHSCAPE_PASSPHRASE` (any phrase; the page asks for it once, so strangers cannot spend
 the GPU credit). The workflow writes the server's address to `docs/config.json`, which the page reads.
 
+In the page, put the passphrase in Lab → Server key once. From then on every song you load gets the quick on-phone
+analysis straight away, is uploaded for the full one, and switches over when it arrives (with the words Whisper heard,
+unless you have placed lyrics for that song yourself). Full results are kept on the device (IndexedDB) and on the
+server, keyed by the audio, so a song is only analysed once.
+
 ## How it works
 
 **In the browser (any song you load):** `src/dsp.js`

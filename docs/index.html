@@ -132,6 +132,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; }
 .seg button { min-height: 32px; padding: 0 10px; font: 600 13px/1 var(--display); color: var(--ink); background: transparent; border: 1px solid var(--rule); border-radius: 3px; cursor: pointer; }
 .seg button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .seg button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+.lab input[type="password"] { min-width: 0; min-height: 34px; padding: 0 10px; font: 400 14px var(--mono); color: var(--ink); background: #F7F8F4; border: 1px solid var(--rule); border-radius: 3px; }
 .lab input[type="range"] { width: 100%; margin: 0; height: 28px; accent-color: var(--pink); }
 .lab-foot { display: flex; justify-content: flex-end; }
 body.lab-open .sheet { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 3; box-shadow: 0 10px 24px -14px rgba(35, 45, 30, 0.6); }
@@ -217,6 +218,7 @@ body.lab-open .plate { height: clamp(240px, 44svh, 560px); }
     <label class="lab-row slide"><span class="lab-k">Ink</span><input type="range" id="lab-ink" data-key="ink" min="0.4" max="1.6" step="0.05"><span class="lab-v" id="lab-ink-v"></span></label>
     <label class="lab-row slide"><span class="lab-k">Weight</span><input type="range" id="lab-weight" data-key="weight" min="0.5" max="1.8" step="0.05"><span class="lab-v" id="lab-weight-v"></span></label>
     <label class="lab-row slide"><span class="lab-k">Grain</span><input type="range" id="lab-grain" data-key="grain" min="0" max="1" step="0.05"><span class="lab-v" id="lab-grain-v"></span></label>
+    <label class="lab-row"><span class="lab-k">Server key</span><input type="password" id="lab-key" autocomplete="off" spellcheck="false" placeholder="passphrase"></label>
     <div class="lab-foot"><button class="btn btn-small btn-quiet" id="labReset" type="button">Reset</button></div>
   </section>
 
@@ -234,6 +236,9 @@ body.lab-open .plate { height: clamp(240px, 44svh, 560px); }
       <button class="ink" type="button" data-layer="hats" aria-pressed="true" style="--c: var(--drum)">
         <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><circle cx="7" cy="8" r="1.6" fill="currentColor"/><circle cx="13" cy="5" r="1.2" fill="currentColor"/><circle cx="18" cy="9.5" r="1.7" fill="currentColor"/><circle cx="10" cy="13" r="1.1" fill="currentColor"/><circle cx="15.5" cy="15" r="1.4" fill="currentColor"/><circle cx="20.5" cy="17" r="1" fill="currentColor"/><circle cx="8" cy="19" r="1.3" fill="currentColor"/></svg>
         <span class="nm">Hats &amp; cymbals</span></button>
+      <button class="ink" type="button" data-layer="toms" aria-pressed="true" style="--c: var(--drum)">
+        <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><ellipse cx="13" cy="14" rx="9" ry="6.5" fill="currentColor" opacity=".55"/><ellipse cx="13" cy="12" rx="9" ry="4.5" fill="currentColor"/></svg>
+        <span class="nm">Toms</span></button>
       <button class="ink" type="button" data-layer="voice" aria-pressed="true" style="--c: var(--teal)">
         <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M1.5 17c4-1 5-9 9.5-9s4.5 7 8.5 7c2.6 0 3.6-2.4 5-4v4c-1.6 2-3 4-5.2 4-4.5 0-5-7-8.4-7S6 19 1.5 21z" fill="currentColor"/></svg>
         <span class="nm">Voice / lead</span></button>
@@ -1281,9 +1286,9 @@ if (typeof module !== 'undefined') module.exports = DSP;
   var LABEL_FONT = '500 9.5px "DM Mono", ui-monospace, Menlo, monospace';
 
   var S = {
-    ana: null, dur: 0, name: '', key: '', kicks: [], snares: [], hats: [], segs: [], segMax: 0, medHz: 330,
+    ana: null, dur: 0, name: '', key: '', kicks: [], snares: [], hats: [], toms: [], cymbals: [], segs: [], segMax: 0, medHz: 330,
     lines: [], wt: [], words: [], lineStarts: [], lyricMode: '',
-    vis: { bass: true, kick: true, snare: true, hats: true, voice: true, keys: true, pads: true, leads: true, words: true },
+    vis: { bass: true, kick: true, snare: true, hats: true, toms: true, voice: true, keys: true, pads: true, leads: true, words: true },
     dirty: true, neverPlayed: true, previewT: 0, tap: null, busy: false, timing: null, song: ''
   };
   var store = {
@@ -1334,8 +1339,8 @@ if (typeof module !== 'undefined') module.exports = DSP;
   /* ------------------------------------------------------------ analysis results */
   function setAnalysis(ana) {
     S.ana = ana; S.dur = ana.dur;
-    S.kicks = []; S.snares = []; S.hats = [];
-    var lists = [S.kicks, S.snares, S.hats], i;
+    S.kicks = []; S.snares = []; S.hats = []; S.toms = []; S.cymbals = [];
+    var lists = [S.kicks, S.snares, S.hats, S.toms, S.cymbals], i;
     /* drum hits: [time, type, strength, Hz] and, from engine v3, [ring s, spectrum in DRUM_BANDS] */
     var EW = ana.evW || 4, ev = ana.events;
     for (i = 0; i + EW <= ev.length; i += EW) lists[ev[i + 1]].push({ t: ev[i], s: ev[i + 2], hz: ev[i + 3], d: EW > 4 ? ev[i + 4] : 0.08, p: EW > 4 ? ev.subarray(i + 5, i + EW) : null, id: i / EW });
@@ -1532,12 +1537,12 @@ if (typeof module !== 'undefined') module.exports = DSP;
     var t0 = now - WIN - 0.7;
     for (var i = lowerBound(list, t0, 't'); i < list.length && list[i].t <= now; i++) {
       var e = list[i];
-      if (L.drums === 'sound' && e.p) splatter(e, now, kind); else if (kind === 'hat') simpleHat(e, now); else simpleSnare(e, now);
+      if (L.drums === 'sound' && e.p) splatter(e, now, kind); else if (kind === 'hat' || kind === 'cymbal') simpleHat(e, now); else simpleSnare(e, now);
     }
   }
   function splatter(e, now, kind) {
-    var x = xOf(e.t, now), age = now - e.t, s = e.s, P = e.p, hat = kind === 'hat', sd = e.id * 977 + (hat ? 5 : 131);
-    var grow = age < 0.05 ? 0.55 + 0.45 * age / 0.05 : 1, total = hat ? 3 + 10 * s : 6 + 22 * s, wsum = 0, b, j, k = 0;
+    var x = xOf(e.t, now), age = now - e.t, s = e.s, P = e.p, hat = kind === 'hat' || kind === 'cymbal', cym = kind === 'cymbal', sd = e.id * 977 + (hat ? 5 : 131) + (cym || kind === 'tom' ? 71 : 0);
+    var grow = age < 0.05 ? 0.55 + 0.45 * age / 0.05 : 1, total = cym ? 6 + 18 * s : hat ? 3 + 10 * s : 6 + 22 * s, wsum = 0, b, j, k = 0;
     for (b = 0; b < P.length; b++) { WB[b] = P[b] * P[b]; wsum += WB[b]; }
     if (wsum <= 0) return;
     var trail = Math.min(age, Math.max(0.03, e.d)) * pps * (hat ? 1 : 0.55), perDot = L.colour === 'height', col = tint('drum');
@@ -1546,11 +1551,11 @@ if (typeof module !== 'undefined') module.exports = DSP;
     var bodyB = -1;
     for (b = 0; b < P.length; b++) {
       if (!WB[b]) continue;
-      if (!hat && DBB[b] > 140 && DBB[b + 1] < 6500 && (bodyB < 0 || P[b] > P[bodyB])) bodyB = b;
+      if (!hat && DBB[b] > (kind === 'tom' ? 50 : 140) && DBB[b + 1] < 6500 && (bodyB < 0 || P[b] > P[bodyB])) bodyB = b;
       var nb = Math.floor(total * WB[b] / wsum + hash(sd + 700 + b)), lo = DBB[b], hi = DBB[b + 1];
       for (j = 0; j < nb; j++, k++) {
         var h1 = hash(sd + k * 3), h2 = hash(sd + k * 3 + 1), h3 = hash(sd + k * 3 + 2);
-        var y = yOf(lo * Math.pow(hi / lo, h1)), along = hat ? h2 * h2 : h2 * h2 * h2, h4 = hash(sd + k * 3 + 7), dx = along * trail + (h4 - 0.5) * (hat ? 4 + 8 * s : 8 + 18 * s);
+        var y = yOf(lo * Math.pow(hi / lo, h1)), along = hat ? h2 * h2 : h2 * h2 * h2, h4 = hash(sd + k * 3 + 7), dx = along * trail + (h4 - 0.5) * (cym ? 10 + 14 * s : hat ? 4 + 8 * s : 8 + 18 * s);
         var r = (0.45 + 1.3 * h3) * (0.65 + 0.7 * s) * grow * (hat ? 1 : 1.2) * (1 - 0.45 * along);
         if (perDot) { ctx.fillStyle = heightHex(y); ctx.beginPath(); ctx.arc(x + dx, y, r, 0, 6.2832); ctx.fill(); }
         else { ctx.moveTo(x + dx + r, y); ctx.arc(x + dx, y, r, 0, 6.2832); }
@@ -1669,7 +1674,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
       ctx.fillStyle = 'rgba(35,33,31,0.42)'; ctx.fillText('C' + o + ' ' + Math.round(hz), 6, y - 2);
     }
   }
-  var DIRS = { keys: [0.8, -0.6], pads: [-0.4, 0.75], leads: [0.65, 0.45], bass: [-0.9, 0.3], voice: [0.5, 0.85], hats: [-0.3, -0.95], snare: [0.95, 0.2], kick: [-0.6, -0.7], words: [0.25, 0.6] };
+  var DIRS = { keys: [0.8, -0.6], pads: [-0.4, 0.75], leads: [0.65, 0.45], bass: [-0.9, 0.3], voice: [0.5, 0.85], hats: [-0.3, -0.95], toms: [0.7, -0.3], snare: [0.95, 0.2], kick: [-0.6, -0.7], words: [0.25, 0.6] };
   var meters = {};
   document.querySelectorAll('.ink').forEach(function (b) { meters[b.dataset.layer || b.dataset.toggle] = { el: b, v: -1 }; });
   function setMeter(name, v) { var m = meters[name]; if (!m) return; v = Math.round(clamp(v, 0, 1) * 20) / 20; if (v !== m.v) { m.v = v; m.el.style.setProperty('--lvl', v); } }
@@ -1714,7 +1719,8 @@ if (typeof module !== 'undefined') module.exports = DSP;
     layer('voice', function () {
       frameTrack(now, function (f) { return a.leadHz[f]; }, function (f) { return 0.8 + 8.5 * a.leadN[f]; }, function (f) { return smooth(0.02, 0.4, a.leadN[f]); }, function (f) { return brMap(a.leadBr[f]); }, function (f) { return zLead(a.leadNz[f]); }, 'voice', 0.9, 0.16, 37);
     });
-    layer('hats', function () { drawHits(S.hats, now, 'hat'); });
+    layer('hats', function () { drawHits(S.hats, now, 'hat'); drawHits(S.cymbals, now, 'cymbal'); });
+    layer('toms', function () { drawHits(S.toms, now, 'tom'); });
     layer('snare', function () { drawHits(S.snares, now, 'snare'); });
     layer('kick', function () { drawKicks(now); });
     layer('words', function () { drawWords(now); });
@@ -2137,7 +2143,80 @@ if (typeof module !== 'undefined') module.exports = DSP;
       });
     }).catch(function (e) {
       if (my === loadSeq) fail("Couldn't read that file. Try MP3, M4A, WAV or OGG.");
-    });
+    }).then(function () { if (my === loadSeq && S.ana) fullAnalysis(file, my); });
+  }
+
+  /* ------------------------------------------------------------ the analysis server
+     The quick analysis above runs on the phone; the full one (stems, drum transcription, notes, words) runs on the
+     server named in config.json. Its result replaces the quick one in place, and is kept on the device. */
+  var API = null;
+  try { fetch('config.json', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (c) { API = c && c.api ? String(c.api).replace(/\/$/, '') : null; }, function () {}); } catch (e) { /* no config */ }
+  var idb = (function () {
+    var dbp = null;
+    function open() {
+      if (!dbp) dbp = new Promise(function (res, rej) {
+        try { var r = indexedDB.open('pitchscape', 1); r.onupgradeneeded = function () { r.result.createObjectStore('packs'); }; r.onsuccess = function () { res(r.result); }; r.onerror = function () { rej(r.error); }; }
+        catch (e) { rej(e); }
+      });
+      return dbp;
+    }
+    function run(mode, fn) {
+      return open().then(function (db) {
+        return new Promise(function (res, rej) { var t = db.transaction('packs', mode), q = fn(t.objectStore('packs')); t.oncomplete = function () { res(q && q.result); }; t.onerror = function () { rej(t.error); }; });
+      });
+    }
+    return {
+      get: function (k) { return run('readonly', function (st) { return st.get(k); }).catch(function () { return null; }); },
+      put: function (k, v) { return run('readwrite', function (st) { return st.put(v, k); }).catch(function () {}); }
+    };
+  })();
+  var STAGES = [['stems', 'splitting the song into stems'], ['drums', 'reading the drums'], ['notes', 'reading the notes'], ['bass', 'following the bass'],
+    ['voice', 'following the voice'], ['words', 'listening for the words'], ['done', 'finishing']];
+  function stageText(st) { for (var i = 0; st && i < STAGES.length; i++) if (st.indexOf(STAGES[i][0]) === 0) return STAGES[i][1]; return 'starting the server'; }
+  function fullAnalysis(file, my) {
+    if (!API) return;
+    var key = store.get('pitchscape:key'), sig = 'pack|' + file.name + '|' + file.size + '|' + file.lastModified;
+    if (!key) { say('Add the server key in the Lab for the full analysis.'); return; }
+    idb.get(sig).then(function (cached) {
+      if (my !== loadSeq) return;
+      if (cached) { applyServerPack(cached, my); return; }
+      say('Full analysis: uploading');
+      var fd = new FormData(); fd.append('file', file, file.name);
+      return fetch(API + '/analyze', { method: 'POST', headers: { 'X-Pitchscape-Key': key }, body: fd }).then(function (r) {
+        if (r.status === 401) throw new Error('The server key is wrong. Check it in the Lab.');
+        if (!r.ok) throw new Error('The server said ' + r.status + '.');
+        return r.json();
+      }).then(function (j) {
+        if (j.status === 'done') { idb.put(sig, j.pack); applyServerPack(j.pack, my); return; }
+        var poll = function () {
+          if (my !== loadSeq) return;
+          fetch(API + '/jobs/' + encodeURIComponent(j.job) + '?key=' + encodeURIComponent(j.key), { headers: { 'X-Pitchscape-Key': key } }).then(function (r) { return r.json(); }).then(function (p) {
+            if (my !== loadSeq) return;
+            if (p.status === 'done' && p.pack) { idb.put(sig, p.pack); applyServerPack(p.pack, my); }
+            else if (p.status === 'failed') say('Full analysis failed: ' + (p.error || 'unknown error'), true);
+            else { say('Full analysis: ' + stageText(p.stage)); setTimeout(poll, 3000); }
+          }, function () { setTimeout(poll, 6000); });
+        };
+        say('Full analysis: starting the server'); setTimeout(poll, 2500);
+      });
+    }).catch(function (e) { if (my === loadSeq) say((e && e.message) || "Couldn't reach the server.", true); });
+  }
+  function packToRes(pack) {
+    var res = { dur: pack.dur, dt: pack.dt, frames: pack.frames, stereo: pack.stereo, noiseRef: pack.noiseRef };
+    for (var k in pack.arrays) res[k] = b64f32(pack.arrays[k]);
+    res.segW = pack.segStride || 6; res.evW = pack.eventStride || 4;
+    return res;
+  }
+  function applyServerPack(pack, my) {
+    if (my !== loadSeq) return;
+    setAnalysis(packToRes(pack)); S.dirty = true;
+    /* words the server heard, unless lyrics were already placed for this song on this device */
+    if (pack.lyrics && pack.lyrics.lines && pack.lyrics.lines.length && !store.get(lyricKey())) {
+      var lines = pack.lyrics.lines.map(function (l) { return { text: l.text, words: l.words.map(function (w) { return { text: w[0], syl: Math.max(1, DSP.syllableCount(w[0])) }; }) }; });
+      lyricsText.value = lines.map(function (l) { return l.text; }).join('\n');
+      applyWordTimes(lines, pack.lyrics.lines.map(function (l) { return l.words.map(function (w) { return w[1]; }); }), 'heard');
+    } else layoutWords();
+    say('Full analysis loaded.');
   }
   /* songs analysed ahead of time and published with the page: stems + word timing, no lyrics */
   var SONGS = {};
@@ -2151,9 +2230,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
       return fetch(pack.audio).then(function (r) { if (!r.ok) throw new Error('audio ' + r.status); return r.blob(); }).then(function (blob) {
         if (my !== loadSeq) return;
         setAudioSrc(URL.createObjectURL(blob));
-        var res = { dur: pack.dur, dt: pack.dt, frames: pack.frames, stereo: pack.stereo, noiseRef: pack.noiseRef };
-        for (var k in pack.arrays) res[k] = b64f32(pack.arrays[k]);
-        res.segW = pack.segStride || 6; res.evW = pack.eventStride || 4;
+        var res = packToRes(pack);
         S.timing = pack.timing;
         finishLoad(res, pack.title + ' · ' + pack.artist, 'pack:' + id, null, song.preview);
       });
@@ -2212,6 +2289,9 @@ if (typeof module !== 'undefined') module.exports = DSP;
     document.body.classList.toggle('lab-open', open);
   });
   labUI();
+  var keyIn = $('lab-key');
+  keyIn.value = store.get('pitchscape:key') || '';
+  keyIn.addEventListener('change', function () { var v = keyIn.value.trim(); if (v) store.set('pitchscape:key', v); else store.del('pitchscape:key'); say(v ? 'Server key saved. Load a song for the full analysis.' : 'Server key removed.'); });
   if (L.font !== 'grotesque') ensureFont(L.font).then(function () { layoutWords(); S.dirty = true; });
 
   if (window.ResizeObserver) new ResizeObserver(resize).observe(cv); else window.addEventListener('resize', resize);
