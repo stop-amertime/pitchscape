@@ -1343,8 +1343,11 @@ if (typeof module !== 'undefined') module.exports = DSP;
 
   /* ------------------------------------------------------------ geometry */
   var W = 0, H = 0, dpr = 1, nowX = 0, WIN = 4.2, pps = 100, grain = null;
-  var F_LO = Math.log2(28), F_HI = Math.log2(10000);
-  function yOf(hz) { var top = 16, bot = H - 12, u = (Math.log2(Math.max(hz, 20)) - F_LO) / (F_HI - F_LO); return bot - u * (bot - top); }
+  /* the pitch axis runs from F_LO to F_HI (log2 Hz), fitted to each song by fitRange. Snare, hats and cymbals have no
+     real pitch, so they print in a strip along the top, BEAT_H tall, and the pitched sheet runs below it. */
+  var F_LO = Math.log2(28), F_HI = Math.log2(10000), BEAT_H = 60;
+  function yOf(hz) { var top = BEAT_H + 12, bot = H - 12, u = (Math.log2(Math.max(hz, 20)) - F_LO) / (F_HI - F_LO); return bot - u * (bot - top); }
+  function scaleY() { BEAT_H = Math.round(clamp(H * 0.13, 44, 96)); SEMI_PX = (H - BEAT_H - 24) / ((F_HI - F_LO) * 12); }
   function xOf(t, now) { return nowX - (now - t) * pps; }
   function rate(hz) { return 4 + 3.2 * Math.log2(Math.max(hz, 30) / 30); }
 
@@ -1353,7 +1356,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
     W = Math.max(200, cv.clientWidth); H = Math.max(200, cv.clientHeight);
     cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
     WIN = L.secs > 0 ? L.secs : W < 520 ? 4.2 : W < 900 ? 5.5 : 7;
-    SEMI_PX = (H - 28) / ((F_HI - F_LO) * 12);
+    scaleY();
     nowX = Math.round(W * (W < 520 ? 0.82 : 0.86)); pps = nowX / WIN;
     makeGrain(); makeHeightLUT(); HT = {}; layoutWords(); S.dirty = true;
     if (labPanel) labUI();
@@ -1385,8 +1388,35 @@ if (typeof module !== 'undefined') module.exports = DSP;
       var v2 = SW >= 12, sg = { t0: q[i], t1: q[i + 1], m: q[i + 2], a: q[i + 3], b: q[i + 4], z: q[i + 5], f: v2 ? q[i + 6] : -1, att: v2 ? q[i + 7] : 0, dec: v2 ? q[i + 8] : 0, vd: v2 ? q[i + 9] : 0, vr: v2 ? q[i + 10] : 0, h: v2 ? q[i + 11] : 0, id: i / SW };
       S.segs.push(sg); if (sg.t1 - sg.t0 > S.segMax) S.segMax = sg.t1 - sg.t0;
     }
+    ana.leadHz = steadyVoice(ana.leadHz);
     var hz = []; for (i = 0; i < ana.leadHz.length; i += 3) if (ana.leadHz[i] > 0) hz.push(ana.leadHz[i]);
     hz.sort(function (a, b) { return a - b; }); S.medHz = hz.length ? hz[hz.length >> 1] : 330;
+    fitRange(ana); scaleY();
+  }
+  /* the sheet's pitch range, fitted to the song: from a little below its lowest notes to a little above its highest
+     (bass, voice and every note, by how long each sounds; drums aside), and never less than three octaves */
+  function fitRange(ana) {
+    var hz = [], i;
+    for (i = 0; i < ana.bassHz.length; i += 2) if (ana.bassHz[i] > 0) hz.push(ana.bassHz[i]);
+    for (i = 0; i < ana.leadHz.length; i += 2) if (ana.leadHz[i] > 0) hz.push(ana.leadHz[i]);
+    S.segs.forEach(function (sg) { var f = DSP.mtof(sg.m); for (var k = Math.max(1, Math.round((sg.t1 - sg.t0) / (2 * ana.dt))); k > 0; k--) hz.push(f); });
+    if (hz.length < 50) { F_LO = Math.log2(28); F_HI = Math.log2(10000); return; }
+    hz.sort(function (a, b) { return a - b; });
+    var lo = Math.log2(hz[Math.floor(hz.length * 0.01)]) - 0.25, hi = Math.log2(hz[Math.floor(hz.length * 0.995)]) + 0.33;
+    if (hi - lo < 3) { var mid = (hi + lo) / 2; lo = mid - 1.5; hi = mid + 1.5; }
+    F_LO = Math.max(Math.log2(24), lo); F_HI = Math.min(Math.log2(9000), hi);
+  }
+  /* a frame that leaps away from both its neighbours (which agree with each other) and straight back is the pitch
+     tracker slipping, not singing: it takes their pitch. Slides and vibrato are untouched. */
+  function steadyVoice(hz) {
+    var out = hz.slice();
+    for (var i = 1; i < hz.length - 1; i++) {
+      var a = hz[i - 1], b = hz[i], c = hz[i + 1];
+      if (!(a > 0 && b > 0 && c > 0)) continue;
+      var up = 12 * Math.log2(b / a), back = 12 * Math.log2(b / c);
+      if (Math.abs(up) > 0.8 && Math.abs(back) > 0.8 && up * back > 0 && Math.abs(12 * Math.log2(a / c)) < 0.6) out[i] = Math.sqrt(a * c);
+    }
+    return out;
   }
   function brMap(b) { return clamp((b - 0.05) / 0.3, 0, 1); }
   function zLead(z) { var r = S.ana.noiseRef; return clamp(((z - r[0]) / Math.max(0.05, r[1] - r[0]) - 0.35) * 1.2, 0, 1); }
@@ -1532,7 +1562,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
       var a = pts[i], b = pts[i + 1], xa = xOf(a.t, now), xb = xOf(b.t, now), steps = Math.max(1, Math.ceil(Math.abs(xb - xa) / 2));
       for (k = 0; k < steps; k++) {
         var u = k / steps, ink = a.a + (b.a - a.a) * u; if (ink < 0.02) continue;
-        var x = xa + (xb - xa) * u, y = a.y + (b.y - a.y) * u, r = 4 + 2.4 * (a.w + (b.w - a.w) * u) * L.weight;
+        var x = xa + (xb - xa) * u, y = a.y + (b.y - a.y) * u, loud = clamp((a.w + (b.w - a.w) * u - 0.8) / 8, 0, 1), r = (SEMI_PX * 1.3 + 1.5) * (0.85 + 0.3 * loud) * L.weight;
         g.globalAlpha = Math.min(1, alpha * ink * 3.2 / r); g.drawImage(dabSprite(a.c), x - r, y - r, 2 * r, 2 * r);
       }
     } });
@@ -1560,7 +1590,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
     }
     flush(!!head);
     if (smear.length) smudge(smear, now, alpha);
-    if (head) pen(head.y, head.w, head.c, head.a);
+    if (head) pen(head.y, soft ? SEMI_PX * 0.55 + 0.6 : head.w, head.c, head.a);
   }
 
   /* other notes, one family per call: fams lists the families drawn (-1 = older packs, which carry none) */
@@ -1634,8 +1664,15 @@ if (typeof module !== 'undefined') module.exports = DSP;
   function drawHits(list, now, kind) {
     for (var i = lowerBound(list, now - WIN - 1.2, 't'); i < list.length && list[i].t <= now; i++) drumMark(list[i], now, kind);
   }
+  /* where a hit prints: a tom at its note on the sheet; a snare, hat or cymbal in its own row of the strip along the
+     top (cymbals highest, snares lowest), a little higher the brighter it is */
+  function hitY(e, kind) {
+    if (kind === 'tom') return clamp(yOf(e.mhz), BEAT_H + 12, H - 12);
+    var span = BEAT_H - 12, row = kind === 'cymbal' ? 0.2 : kind === 'hat' ? 0.5 : 0.8;
+    return 8 + span * row - (L.drums === 'sound' ? (e.br - 0.5) * span * 0.2 : 0);
+  }
   function drumMark(e, now, kind) {
-    var x = xOf(e.t, now), y = yOf(e.mhz), age = now - e.t, grow = age < 0.05 ? 0.55 + 0.45 * age / 0.05 : 1;
+    var x = xOf(e.t, now), y = hitY(e, kind), age = now - e.t, grow = age < 0.05 ? 0.55 + 0.45 * age / 0.05 : 1;
     var own = L.drums === 'sound', br = own ? e.br : 0.35, sd = e.id * 977 + kind.length * 131;
     var trail = own && (kind === 'hat' || kind === 'cymbal') ? Math.min(age, e.d) * pps : 0;
     ctx.fillStyle = tint('drum', e.mhz, y); ctx.beginPath();
@@ -1701,7 +1738,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
     for (var i = lowerBound(S.kicks, now - WIN - 0.4, 't'); i < S.kicks.length && S.kicks[i].t <= now; i++) kickMark(S.kicks[i], now);
   }
   function kickMark(e, now) {
-    var hz = e.mhz, x = xOf(e.t, now), y = yOf(hz), age = now - e.t, s = e.s, col = tint('drum', hz, y);
+    var hz = e.mhz, x = xOf(e.t, now), y = clamp(yOf(hz), BEAT_H + 12, H - 10), age = now - e.t, s = e.s, col = tint('drum', hz, y);
     var settle = Math.min(1, age / 0.28), R = (10 + 19 * s) * (1 + 0.4 * clamp(e.d / 0.25, 0, 1)), RR = R * (1 + 0.35 * (1 - settle)), rg;
     if (L.kick === 'halftone') {
       var Rq = Math.max(8, Math.round(R / 4) * 4);
@@ -1723,7 +1760,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
     ctx.textBaseline = 'alphabetic';
     for (var i = lowerBound(S.words, now - WIN - 0.8, 't'); i < S.words.length && S.words[i].t <= now; i++) {
       var w = S.words[i], x = xOf(w.t, now); if (x + w.px < -4) continue;
-      var age = now - w.t, k = age < 0.09 ? age / 0.09 : 1, y = w.y - w.lane * w.lh;
+      var age = now - w.t, k = age < 0.09 ? age / 0.09 : 1, y = w.yy;
       ctx.font = w.font; ctx.fillStyle = tint('words', w.hz, y);
       ctx.globalAlpha = inkA(0.4 + 0.58 * k);
       if (k < 1) { ctx.save(); ctx.translate(x, y); var sc = 1.25 - 0.25 * k; ctx.scale(sc, sc); ctx.fillText(w.text, 0, 0); ctx.restore(); }
@@ -1735,9 +1772,12 @@ if (typeof module !== 'undefined') module.exports = DSP;
     ctx.font = LABEL_FONT; ctx.textBaseline = 'bottom';
     for (var o = 1; o <= 8; o++) {
       var hz = 440 * Math.pow(2, (12 * (o + 1) - 69) / 12), y = Math.round(yOf(hz)) + 0.5;
+      if (y < BEAT_H + 22 || y > H - 4) continue;
       ctx.strokeStyle = 'rgba(35,33,31,0.075)'; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
       ctx.fillStyle = 'rgba(35,33,31,0.42)'; ctx.fillText('C' + o + ' ' + Math.round(hz), 6, y - 2);
     }
+    var yb = BEAT_H + 4.5;
+    ctx.strokeStyle = 'rgba(35,33,31,0.09)'; ctx.setLineDash([1, 5]); ctx.beginPath(); ctx.moveTo(0, yb); ctx.lineTo(W, yb); ctx.stroke(); ctx.setLineDash([]);
   }
   var DIRS = { keys: [0.8, -0.6], pads: [-0.4, 0.75], leads: [0.65, 0.45], bass: [-0.9, 0.3], voice: [0.5, 0.85], hats: [-0.3, -0.95], toms: [0.7, -0.3], snare: [0.95, 0.2], kick: [-0.6, -0.7], words: [0.25, 0.6] };
   var meters = {};
@@ -1838,26 +1878,33 @@ if (typeof module !== 'undefined') module.exports = DSP;
     if (!S.words.length || !S.ana || !H) return;
     ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
     var boxes = [], lastY = yOf(S.medHz) - 16, lastHz = S.medHz;
+    /* (each word's box: its width and its ink above and below the baseline) */
     S.words.forEach(function (w) {
       var f = voiceAt(w.t), n = f >= 0 ? S.ana.leadN[f] : 0.35, ft = wordFont(n);
       w.font = ft.css; w.lh = ft.size + 1; ctx.font = w.font;
-      w.px = ctx.measureText(w.text).width;
+      var tm = ctx.measureText(w.text);
+      w.px = tm.width; w.asc = tm.actualBoundingBoxAscent || ft.size * 0.75; w.desc = tm.actualBoundingBoxDescent || ft.size * 0.22;
       /* at the pitch it is sung: just above the voice line at the word's vowel */
       if (f >= 0) { w.hz = S.ana.leadHz[f]; w.y = yOf(w.hz) - (0.8 + 8.5 * S.ana.leadN[f]) * L.weight - 5; lastY = w.y; lastHz = w.hz; } else { w.y = lastY; w.hz = lastHz; }
-      w.y = clamp(w.y, 30, H - 10);
-      /* stack upward until the word clears the recent words it would overprint */
-      var X0 = w.t * pps, X1 = X0 + w.px, lane = 0;
-      /* only stack when a word would print over the one before; two lanes at most, so words stay near their pitch */
-      for (; lane < 3; lane++) {
-        var y = w.y - lane * w.lh, hit = false;
-        for (var b = boxes.length - 1; b >= 0 && b >= boxes.length - 6; b--) {
+      var top = BEAT_H + 6, bottom = H - 8;
+      w.y = clamp(w.y, top + w.asc, bottom - w.desc);
+      /* never print over another word: try the height it is sung at, then a step at a time upward, then downward,
+         until it clears every word near it on the sheet */
+      var X0 = w.t * pps, X1 = X0 + w.px, step = Math.max(6, w.lh * 0.55), yy, k;
+      function clash(y) {
+        for (var b = boxes.length - 1; b >= 0; b--) {
           var bx = boxes[b];
-          if (bx.X1 + 4 > X0 && bx.X0 < X1 + 4 && Math.abs(bx.y - y) < Math.min(bx.h, w.lh) - 1) { hit = true; break; }
+          if (bx.X0 < X0 - 600) break;
+          if (bx.X1 + 4 > X0 && bx.X0 < X1 + 4 && bx.top < y + w.desc + 1 && bx.bot > y - w.asc - 1) return true;
         }
-        if (!hit) break;
+        return false;
       }
-      if (lane === 3) lane = 0;
-      w.lane = lane; boxes.push({ X0: X0, X1: X1, y: w.y - lane * w.lh, h: w.lh });
+      var tries = [];
+      for (yy = w.y; yy - w.asc >= top; yy -= step) tries.push(yy);
+      for (yy = w.y + step; yy + w.desc <= bottom; yy += step) tries.push(yy);
+      w.yy = w.y;
+      for (k = 0; k < tries.length; k++) if (!clash(tries[k])) { w.yy = tries[k]; break; }
+      boxes.push({ X0: X0, X1: X1, top: w.yy - w.asc, bot: w.yy + w.desc });
     });
     ctx.restore();
   }

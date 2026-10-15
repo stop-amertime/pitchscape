@@ -161,9 +161,14 @@ while it rings) or all alike. Kick as a soft smudge or a halftone thud; bass as 
 kicks), seconds on screen, ink strength, thickness and speckle (paper showing through the ink). Layers lifts any kind
 of sound off the print.
 
-Every line that is sounding has a round pen tip where it is being printed. Each drum prints one compact mark per hit,
-where the hit is loudest: a kick as a soft thud at its boom, a tom as a round drop at its note, a snare as a spiky
-splat at its crack, a hat as a tight fleck and a cymbal as a fine spray at their sizzle.
+The sheet's height is fitted to each song: from a little below its lowest notes to a little above its highest (bass,
+voice and every note, by how long each sounds), never less than three octaves, so the music fills the screen. Every
+line that is sounding has a round pen tip where it is being printed. Each drum prints one compact mark per hit: a kick
+as a soft thud at the pitch of its boom and a tom as a round drop at its note, on the sheet; snares, hats and cymbals,
+which have no real pitch, in their own rows of a strip along the top (a snare as a spiky splat, a hat as a tight fleck,
+a cymbal as a fine spray), a little higher the brighter they are. The bass smudge stays about three semitones tall and
+prints darker when louder. Words sit just above the voice line where they are sung and never print over each other:
+one that would steps up, or down, until it is clear.
 
 ## Data formats
 
