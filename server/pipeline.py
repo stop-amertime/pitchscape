@@ -447,7 +447,7 @@ def tone(stems, segs, leadHz, bassHz, F, workers=None):
         grid[name] = on
     keys = list(jobs)
     ctx = multiprocessing.get_context('spawn')
-    with concurrent.futures.ProcessPoolExecutor(max_workers=workers or os.cpu_count(), mp_context=ctx,
+    with concurrent.futures.ProcessPoolExecutor(max_workers=workers or min(8, os.cpu_count() or 1), mp_context=ctx,
                                                 initializer=_tone_init, initargs=(paths,)) as ex:
         for key, res in zip(keys, ex.map(_tone_slice, keys, chunksize=8)):
             jobs[key] = harshness(*res)

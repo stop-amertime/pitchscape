@@ -2336,13 +2336,16 @@ if (typeof module !== 'undefined') module.exports = DSP;
       }, function () { throw new Error("Couldn't reach the server. Check the connection and load the song again."); }).then(function (j) {
         if (j.status === 'done') return j.pack;
         return new Promise(function (resolve, reject) {
+          var asked = Date.now(), lastStage = '';
           function poll() {
             if (my !== loadSeq) { resolve(null); return; }
+            /* a job that has not reported a stage in 8 minutes is not going to: say so rather than wait for ever */
+            if (!lastStage && Date.now() - asked > 8 * 60 * 1000) { reject(new Error('The server never started on this song. Load it again in a minute.')); return; }
             fetch(API + '/jobs/' + encodeURIComponent(j.job) + '?key=' + encodeURIComponent(j.key), { headers: { 'X-Pitchscape-Key': key } }).then(function (r) { return r.json(); }).then(function (p) {
               if (my !== loadSeq) { resolve(null); return; }
               if (p.status === 'done' && p.pack) resolve(p.pack);
               else if (p.status === 'failed') reject(new Error('The analysis failed: ' + String(p.error || 'no reason given').replace(/\.?\s*$/, '.')));
-              else { var st = stageOf(p.stage); showStatus(st[1], st[2]); setTimeout(poll, 3000); }
+              else { if (p.stage) lastStage = p.stage; var st = stageOf(p.stage); showStatus(st[1], st[2]); setTimeout(poll, 3000); }
             }, function () { setTimeout(poll, 6000); });
           }
           showStatus('Starting the server', 0.1); setTimeout(poll, 2500);

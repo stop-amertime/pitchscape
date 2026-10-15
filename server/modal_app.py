@@ -19,6 +19,7 @@ import json
 import os
 import re
 import tempfile
+import time
 
 import modal
 
@@ -64,9 +65,9 @@ gpu_image = (
 web_image = modal.Image.debian_slim(python_version='3.11').pip_install('fastapi[standard]', 'python-multipart')
 
 
-# eight CPU cores for the tone measurements, which run in parallel processes beside the GPU models
-@app.function(image=gpu_image, gpu='L4', cpu=8.0, memory=16384, timeout=1500, max_containers=2, scaledown_window=120,
-              volumes={CACHE: cache})
+# no CPU or memory reservation: with one (8 cores, 16 GiB beside an L4) jobs sat unstarted. A container may use idle
+# cores beyond its request anyway, and the tone measurements spread over up to eight of them.
+@app.function(image=gpu_image, gpu='L4', timeout=1500, max_containers=2, scaledown_window=120, volumes={CACHE: cache})
 def analyze(audio: bytes, key: str, name: str):
     from server.pipeline import analyze as run
     ext = os.path.splitext(name)[1] or '.mp3'
@@ -128,8 +129,14 @@ def api():
         cached = await read_pack(key)
         if cached is not None:
             return {'status': 'done', 'pack': cached}
-        # the same song sent again while it is still being analysed (a reload, a second tab): follow that job
-        job = await running.get.aio(key)
+        # the same song sent again while it is still being analysed (a reload, a second tab): follow that job, unless
+        # it looks stuck (no stage reported after 8 minutes) or is older than any job can run
+        entry = await running.get.aio(key)
+        job = None
+        if isinstance(entry, dict):
+            age = time.time() - entry.get('t', 0)
+            if age < 1800 and (age < 480 or await progress.get.aio(key)):
+                job = entry.get('job')
         if job:
             try:
                 pack = await modal.FunctionCall.from_id(job).get.aio(timeout=0)
@@ -140,7 +147,8 @@ def api():
             else:
                 return {'status': 'done', 'pack': pack}
         call = await analyze.spawn.aio(data, key, file.filename or 'song.mp3')
-        await running.put.aio(key, call.object_id)
+        await progress.put.aio(key, None)
+        await running.put.aio(key, {'job': call.object_id, 't': time.time()})
         return {'status': 'queued', 'job': call.object_id, 'key': key}
 
     @web.get('/jobs/{job}')
