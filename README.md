@@ -143,19 +143,23 @@ Steps (times measured on a 3-minute song, 2 CPU cores):
 
 ## The Lab
 
-The Lab button opens A/B switches, each with a line saying what it does, in a drawer over the lower half of the screen
-with its own play button and seek bar; the print stays pinned above it. The server key shows as a line once saved, so
-the keyboard only comes up when you choose to change it. Only settings changed from the defaults are kept on the device (`localStorage` key `pitchscape:lab`), so a new
-default reaches anyone who left that setting alone. Colour by instrument (drums share one ink, tuned notes share warm
-inks), by height (the pitch axis, low blue to high pink, whatever made the sound) or by note name (circle-of-fifths
-colours; drums keep the drum ink). Palette, for colour by instrument, all real riso inks: Rainbow (an ink each),
-Warm and cool (the tune in warm inks, the backing in cool), Three inks (pink voice, blue bass and keys, sunflower pads,
-pale pink leads, black drums and words) or Two inks (the same with pale blue pads), where shared inks overlap and mix
-as on a real print. Drum marks that follow each hit's sound (spikier when brighter, trailing
+The screen shows nothing but the print. Its controls (play, seek, and Song, Lyrics and Lab) float over its foot
+while they are wanted, fade a few seconds into playing, and come back with a tap. Song, Lyrics and Lab each open as a
+panel below the print, which shrinks to sit above it; the page itself never scrolls. Song holds the file picker, the
+demo and the server key, which shows as a line once saved, so the keyboard only comes up when you choose to change it.
+The Lab's A/B switches sit in tabs (Colour, Shapes, Words, Motion, Print, Layers), each with an explanation that pops
+up in a bubble from its label. Only settings changed from the defaults are kept on the device (`localStorage` key
+`pitchscape:lab`), so a new default reaches anyone who left that setting alone. Colour by instrument (drums share one
+ink, tuned notes share warm inks), by height (the pitch axis, low blue to high pink, whatever made the sound) or by
+note name (circle-of-fifths colours; drums keep the drum ink). Palette, for colour by instrument, all real riso inks:
+Rainbow (an ink each), Warm and cool (the tune in warm inks, the backing in cool), Three inks (pink voice, blue bass and
+keys, sunflower pads, pale pink leads, black drums and words) or Two inks (the same with pale blue pads), where shared
+inks overlap and mix as on a real print. Drum marks that follow each hit's sound (spikier when brighter, trailing
 while it rings) or all alike. Kick as a soft smudge or a halftone thud; bass as a soft smear or a sharp line. Word face
 (grotesque, script, serif, mono), sized and weighted by how loudly each word was sung, or fixed. Sliders for shake, tilt
 (CSS 3D: the sheet tips back on kicks and sways with the bass), glow, misprint (each ink jumps out of register on
-kicks), seconds on screen, ink strength, thickness and speckle (paper showing through the ink).
+kicks), seconds on screen, ink strength, thickness and speckle (paper showing through the ink). Layers lifts any kind
+of sound off the print.
 
 Every line that is sounding has a round pen tip where it is being printed. Each drum prints one compact mark per hit,
 where the hit is loudest: a kick as a soft thud at its boom, a tom as a round drop at its note, a snare as a spiky

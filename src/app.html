@@ -4,15 +4,15 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=DM+Mono:wght@400;500&display=swap">
 <style>
-/* Layout: one riso "print sheet" (the canvas) on a grey-green print table, controls stacked under it.
-   A deliberate single light theme: the piece is ink on paper, and multiply blending needs a light ground. */
+/* One screen that never scrolls: the print fills it. Controls float over its foot while they are wanted and fade
+   while a song plays; Song, Lyrics and Lab open as a panel below the print, which shrinks to sit above it.
+   A single light theme on purpose: the piece is ink on paper, and multiply blending needs a light ground. */
 :root {
-  --table: #D9DCD3;
   --paper: #EEF0EA;
+  --sheet: #F6F7F3;
   --ink: #23211F;
   --muted: #565B52;
-  --upcoming: #7D8278;
-  --rule: #C3C7BC;
+  --rule: #C9CDC2;
   --blue: #3255A4;
   --pink: #FF48B0;
   --purple: #765BA7;
@@ -28,146 +28,132 @@
   --mono: "DM Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   color-scheme: light;
 }
-html, body { background: var(--table); color: var(--ink); }
-body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; }
-.app {
-  max-width: 980px; margin: 0 auto;
-  padding-block: 14px 32px;
-  padding-left: max(16px, env(safe-area-inset-left, 0px));
-  padding-right: max(16px, env(safe-area-inset-right, 0px));
-  display: grid; gap: 14px;
-}
+html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; overscroll-behavior: none; background: var(--paper); color: var(--ink); }
+body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
 [hidden] { display: none !important; }
 .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
+.app { position: fixed; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: var(--paper); }
 
-/* masthead */
-.mast { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
-.title { position: relative; margin: 0; font: 800 clamp(28px, 7.4vw, 44px)/0.95 var(--display); font-variation-settings: "opsz" 96; letter-spacing: -0.035em; color: var(--blue); text-wrap: balance; }
-.title::after { content: attr(data-text); position: absolute; inset: 0; transform: translate(2px, 1.6px); color: var(--pink); mix-blend-mode: multiply; pointer-events: none; }
-.track { margin: 0; min-width: 0; font: 500 12px/1.3 var(--mono); color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
-.track b { font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60vw; }
-.eyebrow { font: 500 11px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+/* the print */
+.stage { position: relative; min-height: 0; overflow: hidden; }
+#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: manipulation; transform-origin: 50% 100%; }
 
-/* the print sheet */
-.sheet { position: relative; background: var(--paper); border-radius: 3px; box-shadow: 0 1px 0 rgba(35, 33, 31, 0.08), 0 14px 32px -22px rgba(35, 45, 30, 0.55); overflow: hidden; }
-.plate { position: relative; height: clamp(320px, 56svh, 660px); }
-@supports not (height: 1svh) { .plate { height: clamp(320px, 56vh, 660px); } }
-#cv { display: block; width: 100%; height: 100%; touch-action: manipulation; cursor: pointer; }
-.status { position: absolute; left: 14px; right: 14px; bottom: 14px; background: rgba(238, 240, 234, 0.94); border: 1px solid var(--rule); border-radius: 4px; padding: 12px 14px; }
-.status p { margin: 0; font: 600 14px/1.3 var(--display); }
-.status .bar { height: 4px; margin-top: 9px; background: var(--rule); border-radius: 2px; overflow: hidden; }
-.status .bar i { display: block; height: 100%; width: 0; background: var(--pink); transition: width 120ms linear; }
-.tapzone { position: absolute; left: 12px; right: 12px; bottom: 12px; background: rgba(238, 240, 234, 0.95); border: 1.5px solid var(--teal); border-radius: 4px; padding: 10px 12px; display: grid; gap: 6px; }
-.tapzone .eyebrow { color: var(--teal); }
-.tapzone .tap-line { margin: 0; font: 600 16px/1.3 var(--display); text-wrap: balance; }
-.tapzone .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-.tapzone .count { font: 500 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
-
-.caption { border-top: 1px dashed var(--rule); padding: 10px 14px 12px; display: grid; gap: 4px; min-height: 64px; }
-.cap-now { margin: 0; font: 650 clamp(17px, 4.6vw, 21px)/1.3 var(--display); text-wrap: balance; color: var(--upcoming); min-width: 0; overflow-wrap: anywhere; }
-.cap-now .on { color: var(--ink); }
-.cap-now .cur { color: var(--c-words); }
-.cap-next { margin: 0; font: 400 12.5px/1.35 var(--mono); color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
-
-/* transport */
+/* controls over the foot of the print */
+.hud {
+  position: absolute; left: 0; right: 0; bottom: 0; display: grid; gap: 10px;
+  padding: 46px max(16px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  background: linear-gradient(to top, rgba(238, 240, 234, 0.97) 0%, rgba(238, 240, 234, 0.93) 64%, rgba(238, 240, 234, 0) 100%);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+.hud.away { opacity: 0; transform: translateY(14px); pointer-events: none; }
+.track { margin: 0; min-width: 0; font: 500 12px/1.3 var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .transport { display: flex; align-items: center; gap: 14px; }
-.play { flex: none; width: 54px; height: 54px; border-radius: 50%; border: 0; background: var(--ink); color: var(--paper); display: grid; place-items: center; cursor: pointer; }
+.play { flex: none; width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--ink); color: var(--paper); display: grid; place-items: center; cursor: pointer; }
 .play:disabled { opacity: 0.35; cursor: default; }
 .play svg { width: 22px; height: 22px; }
 .scrub { flex: 1; min-width: 0; }
 #seek { width: 100%; margin: 0; accent-color: var(--pink); height: 28px; }
 .times { display: flex; justify-content: space-between; font: 500 11.5px/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.hud-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.hud-btns .btn { justify-content: center; background: rgba(246, 247, 243, 0.9); }
 
 /* buttons */
-.actions, .lyr-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.btn { position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 15px; font: 600 14px/1 var(--display); color: var(--ink); background: transparent; border: 1.5px solid var(--ink); border-radius: 4px; cursor: pointer; }
+.btn { position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 15px; font: 600 14px/1 var(--display); color: var(--ink); background: transparent; border: 1.5px solid var(--ink); border-radius: 6px; cursor: pointer; }
 .btn-primary { background: var(--blue); border-color: var(--blue); color: var(--on-blue); }
 .btn-quiet { border-color: transparent; color: var(--muted); padding: 0 8px; }
-.btn-small { min-height: 34px; padding: 0 11px; font-size: 13px; }
-.btn[aria-expanded="true"] { background: var(--ink); color: var(--paper); }
-.btn:focus-visible, .play:focus-visible, .ink:focus-visible, summary:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+.btn-small { min-height: 34px; padding: 0 12px; font-size: 13px; }
+.btn:focus-visible, .play:focus-visible, .ink:focus-visible, .tabs button:focus-visible, .k:focus-visible, .seg button:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
 .btn:has(input:focus-visible) { outline: 2px solid var(--pink); outline-offset: 2px; }
 .file-btn { overflow: hidden; }
 .file-btn input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 100px; }
-.shelf { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.song { display: grid; gap: 2px; text-align: left; padding: 9px 12px; min-height: 52px; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; color: var(--ink); cursor: pointer; font: inherit; }
-.song b { font: 650 15px/1.2 var(--display); }
-.song span { font: 400 11px/1.3 var(--mono); color: var(--muted); }
-.song[aria-pressed="true"] { border: 1.5px solid var(--ink); box-shadow: inset 4px 0 0 var(--pink); }
-.song:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
-.msg { margin: -4px 0 0; min-height: 1.4em; font: 400 13px/1.45 var(--display); color: var(--muted); }
-.msg.err { color: #B3262E; }
-.msg:empty { display: none; }
 
-/* lyrics */
-.lyrics { display: grid; gap: 10px; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; padding: 14px; }
-#lyricsText { width: 100%; box-sizing: border-box; min-height: 9.5em; resize: vertical; font: 400 14px/1.5 var(--mono); color: var(--ink); background: #F7F8F4; border: 1px solid var(--rule); border-radius: 3px; padding: 10px; }
+/* messages and progress, over the print */
+.toast { position: absolute; z-index: 2; top: max(12px, env(safe-area-inset-top, 0px)); left: 12px; right: 12px; margin: 0; padding: 10px 14px; background: rgba(246, 247, 243, 0.97); border: 1px solid var(--rule); border-radius: 8px; font: 500 14px/1.4 var(--display); color: var(--ink); box-shadow: 0 8px 22px -16px rgba(35, 45, 30, 0.7); }
+.toast.err { color: #B3262E; }
+.toast:empty { display: none; }
+.status { position: absolute; z-index: 1; left: 16px; right: 16px; top: 50%; transform: translateY(-50%); background: rgba(246, 247, 243, 0.96); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; }
+.status p { margin: 0; font: 600 15px/1.3 var(--display); }
+.status .bar { height: 4px; margin-top: 10px; background: var(--rule); border-radius: 2px; overflow: hidden; }
+.status .bar i { display: block; height: 100%; width: 0; background: var(--pink); transition: width 120ms linear; }
+.status .note { margin-top: 8px; font: 400 13px/1.4 var(--display); color: var(--muted); }
+.tapzone { position: absolute; z-index: 2; left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom, 0px)); background: rgba(246, 247, 243, 0.96); border: 1.5px solid var(--teal); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
+.eyebrow { font: 500 11px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.tapzone .eyebrow { color: var(--teal); }
+.tapzone .tap-line { margin: 0; font: 600 16px/1.3 var(--display); text-wrap: balance; }
+.tapzone .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.tapzone .count { font: 500 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* panels: Song, Lyrics and Lab, one at a time, below the print */
+.panel {
+  position: relative; max-height: 58dvh; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box;
+  background: var(--sheet); border-top: 1px solid var(--rule); border-radius: 14px 14px 0 0; box-shadow: 0 -12px 28px -22px rgba(35, 45, 30, 0.6);
+  padding: 0 max(16px, env(safe-area-inset-right, 0px)) max(18px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+}
+@supports not (height: 1dvh) { .panel { max-height: 58vh; } }
+/* on a wide screen the controls and panels keep a phone-like width, centred */
+.panel { padding-left: max(16px, env(safe-area-inset-left, 0px), calc(50% - 380px)); padding-right: max(16px, env(safe-area-inset-right, 0px), calc(50% - 380px)); }
+.hud { padding-left: max(16px, env(safe-area-inset-left, 0px), calc(50% - 380px)); padding-right: max(16px, env(safe-area-inset-right, 0px), calc(50% - 380px)); }
+.panel-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 12px 0 10px; background: var(--sheet); border-bottom: 1px solid var(--rule); }
+.panel-head h2 { flex: 1; min-width: 0; margin: 0; font: 700 17px/1.2 var(--display); }
+.panel-head #labSeek { flex: 1; min-width: 0; margin: 0; height: 28px; accent-color: var(--pink); }
+.panel-body { display: grid; gap: 14px; padding-top: 14px; }
+.title { position: relative; font: 800 24px/1 var(--display) !important; font-variation-settings: "opsz" 96; letter-spacing: -0.03em; color: var(--blue); }
+.title::after { content: attr(data-text); position: absolute; inset: 0; transform: translate(1.6px, 1.3px); color: var(--pink); mix-blend-mode: multiply; pointer-events: none; }
+.song-btns, .lyr-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.hint { margin: 0; font: 400 13px/1.45 var(--display); color: var(--muted); }
+.key-box { min-width: 0; display: flex; align-items: center; }
+.key-box input { flex: 1; min-width: 0; min-height: 36px; padding: 0 10px; font: 400 14px var(--mono); color: var(--ink); background: #FBFBF8; border: 1px solid var(--rule); border-radius: 4px; }
+.key-saved { font: 400 14px/1.3 var(--display); color: var(--ink); }
+.key-change { margin-left: 2px; padding: 6px 2px; font: 600 14px/1 var(--display); color: var(--blue); background: none; border: 0; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+#lyricsText { width: 100%; box-sizing: border-box; min-height: 8.5em; resize: vertical; font: 400 14px/1.5 var(--mono); color: var(--ink); background: #FBFBF8; border: 1px solid var(--rule); border-radius: 4px; padding: 10px; }
 #lyricsText:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
 
-/* inks */
-.inks { display: block; }
+/* lab */
+.tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 12px 0 2px; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { flex: none; min-height: 34px; padding: 0 13px; border-radius: 17px; border: 1px solid var(--rule); background: transparent; font: 600 13.5px/1 var(--display); color: var(--ink); cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.pane { display: grid; gap: 10px; padding: 14px 0 6px; }
+.row { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 10px; }
+.row.slide { grid-template-columns: 112px minmax(0, 1fr) 46px; }
+.k { justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0; background: none; border: 0; font: 500 11px/1.2 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); text-align: left; cursor: pointer; }
+.k i { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; border: 1.2px solid currentColor; border-radius: 50%; font: italic 700 10px/1 Georgia, "Times New Roman", serif; text-transform: none; }
+.k[aria-expanded="true"] { color: var(--ink); }
+.k-static { font: 500 11px/1.2 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.lab-v { font: 500 11px/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.seg button { min-height: 34px; padding: 0 10px; font: 600 13px/1 var(--display); color: var(--ink); background: transparent; border: 1px solid var(--rule); border-radius: 4px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+.lab input[type="range"] { width: 100%; margin: 0; height: 28px; accent-color: var(--pink); }
+.lab input:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+.lab-foot { display: flex; justify-content: flex-end; padding-top: 6px; }
+.bubble { position: absolute; z-index: 3; max-width: min(290px, calc(100% - 32px)); box-sizing: border-box; padding: 10px 12px; background: var(--ink); color: var(--paper); border-radius: 10px; font: 400 14px/1.4 var(--display); box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.6); }
+.bubble::after { content: ""; position: absolute; left: var(--tail, 20px); width: 12px; height: 12px; background: inherit; transform: rotate(45deg); }
+.bubble.below::after { top: -5px; }
+.bubble.above::after { bottom: -5px; }
+
+/* layers: one chip per kind of sound; tap to lift it off the print. Each swells with its sound. */
 .ink-grid { display: flex; flex-wrap: wrap; gap: 6px; }
-.ink { display: inline-flex; align-items: center; gap: 7px; padding: 0 12px 0 8px; min-height: 38px; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; color: var(--ink); cursor: pointer; font: inherit; }
+.ink { display: inline-flex; align-items: center; gap: 7px; padding: 0 12px 0 8px; min-height: 38px; background: transparent; border: 1px solid var(--rule); border-radius: 6px; color: var(--ink); cursor: pointer; font: inherit; }
 .ink svg { flex: none; width: 20px; height: 20px; color: var(--c); transform: scale(calc(0.8 + var(--lvl, 0) * 0.45)); transform-origin: 50% 50%; transition: transform 70ms linear; }
+.ink svg.drum { color: var(--drum); }
 .ink .nm { font: 600 13.5px/1.15 var(--display); }
-.ink[aria-pressed="false"] { background: transparent; border-style: dashed; }
+.ink[aria-pressed="false"] { border-style: dashed; }
 .ink[aria-pressed="false"] svg { opacity: 0.3; }
 .ink[aria-pressed="false"] .nm { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
 
-
-.ink svg.drum { color: var(--drum); }
-
-/* lab: A/B controls in a drawer over the lower half of the screen. The print stays pinned at the top, above it, so
-   changes can be watched, and the drawer scrolls on its own. */
-.lab {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; margin: 0 auto; max-width: 980px; box-sizing: border-box;
-  max-height: 58svh; overflow-y: auto; overscroll-behavior: contain;
-  display: grid; gap: 10px; background: var(--paper); border: 1px solid var(--rule); border-bottom: 0; border-radius: 12px 12px 0 0;
-  padding: 0 max(16px, env(safe-area-inset-right, 0px)) max(18px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
-  box-shadow: 0 -16px 36px -22px rgba(35, 45, 30, 0.7); animation: lab-in 170ms ease-out;
-}
-@supports not (height: 1svh) { .lab { max-height: 58vh; } }
-@keyframes lab-in { from { transform: translateY(100%); } }
-.lab-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 0 9px; background: var(--paper); border-bottom: 1px solid var(--rule); }
-.lab-head #labSeek { flex: 1; min-width: 0; margin: 0; height: 28px; accent-color: var(--pink); }
-body.lab-open .transport { display: none; }
-.key-box { min-width: 0; display: flex; }
-.key-box input { flex: 1; }
-.key-saved { font: 400 13px/1.3 var(--display); color: var(--ink); }
-.key-change { margin-left: 2px; padding: 6px 2px; font: 600 13px/1 var(--display); color: var(--blue); background: none; border: 0; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
-.lab-row { display: grid; grid-template-columns: 74px minmax(0, 1fr); align-items: center; gap: 10px; }
-.lab-row.slide { grid-template-columns: 74px minmax(0, 1fr) 44px; }
-.lab-k { font: 500 10.5px/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.lab-v { font: 500 11px/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
-.lab-d { grid-column: 2 / -1; margin-top: -7px; font: 400 12px/1.35 var(--display); color: var(--muted); text-wrap: pretty; }
-.seg { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
-.seg button { min-height: 32px; padding: 0 10px; font: 600 13px/1 var(--display); color: var(--ink); background: transparent; border: 1px solid var(--rule); border-radius: 3px; cursor: pointer; }
-.seg button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
-.seg button:focus-visible, .lab input:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
-.lab input[type="password"] { min-width: 0; min-height: 34px; padding: 0 10px; font: 400 14px var(--mono); color: var(--ink); background: #F7F8F4; border: 1px solid var(--rule); border-radius: 3px; }
-.lab input[type="range"] { width: 100%; margin: 0; height: 28px; accent-color: var(--pink); }
-.lab-foot { display: flex; justify-content: flex-end; }
-body.lab-open .sheet { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 3; box-shadow: 0 10px 24px -14px rgba(35, 45, 30, 0.6); }
-body.lab-open .plate { height: clamp(180px, 42svh, 520px); }
-@supports not (height: 1svh) { body.lab-open .plate { height: clamp(180px, 42vh, 520px); } }
-body.lab-open .caption { display: none; }
-body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to the top, above the drawer */
-@supports not (height: 1svh) { body.lab-open .app { padding-bottom: 60vh; } }
-#cv { transform-origin: 50% 100%; }
-
-@media (prefers-reduced-motion: reduce) { .ink svg { transition: none; } .lab { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .hud, .ink svg { transition: none; } }
 </style>
 
 <main class="app">
-  <header class="mast">
-    <h1 class="title" data-text="Pitchscape" aria-label="Pitchscape">Pitchscape</h1>
-    <p class="track"><b id="trackName">Demo song</b></p>
-  </header>
-
-  <section class="sheet" aria-label="The print">
-    <div class="plate" id="plate">
-      <canvas id="cv" role="img" aria-label="A scrolling print of the song. Each kind of sound is drawn in its own ink; higher pitches sit higher on the sheet."></canvas>
-      <div class="tapzone" id="tapzone" hidden>
+  <section class="stage" id="plate" aria-label="The print">
+    <canvas id="cv" role="img" aria-label="A scrolling print of the song. Each kind of sound is drawn in its own ink; higher pitches sit higher on the sheet."></canvas>
+    <div class="status" id="status" hidden>
+      <p id="statusText">Getting ready</p>
+      <div class="bar" role="progressbar" aria-labelledby="statusText" aria-valuemin="0" aria-valuemax="100"><i id="statusBar"></i></div>
+      <p class="note" id="statusNote" hidden></p>
+    </div>
+    <div class="tapzone" id="tapzone" hidden>
         <div class="row"><span class="eyebrow">Tap the print as each line starts</span><span class="count" id="tapCount">0 / 0</span></div>
         <p class="tap-line" id="tapLine"></p>
         <div class="row">
@@ -175,103 +161,117 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
           <button class="btn btn-small btn-primary" id="tapDone" type="button">Done</button>
         </div>
       </div>
-      <div class="status" id="status" hidden>
-        <p id="statusText">Getting ready</p>
-        <div class="bar" role="progressbar" aria-labelledby="statusText" aria-valuemin="0" aria-valuemax="100"><i id="statusBar"></i></div>
-      </div>
-    </div>
-    <div class="caption" id="caption" hidden>
-      <p class="cap-now" id="capNow"></p>
-      <p class="cap-next" id="capNext"></p>
-    </div>
-  </section>
-  <div class="transport">
-    <button class="play" id="play" type="button" aria-label="Play" disabled>
+    <p class="toast" id="msg" role="status"></p>
+    <div class="hud" id="hud">
+      <p class="track" id="trackName">Demo song</p>
+      <div class="transport">
+        <button class="play" id="play" type="button" aria-label="Play" disabled>
       <svg id="icoPlay" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor"/></svg>
       <svg id="icoPause" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M6.5 4.5h4v15h-4zM13.5 4.5h4v15h-4z" fill="currentColor"/></svg>
     </button>
-    <div class="scrub">
-      <input type="range" id="seek" min="0" max="1" step="0.01" value="0" aria-label="Position in song">
-      <div class="times"><span id="tNow">0:00</span><span id="tDur">0:00</span></div>
-    </div>
-  </div>
-
-  <div class="shelf" role="group" aria-label="Songs on this page">
-    <button class="song" type="button" data-song="demo" aria-pressed="false"><b>Demo song</b><span>Synth</span></button>
-  </div>
-  <div class="actions">
-    <span class="btn btn-primary file-btn">Load a song<input type="file" id="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.oga,.flac,.opus" aria-label="Load a song from your device"></span>
-    <button class="btn" id="lyricsBtn" type="button" aria-expanded="false" aria-controls="lyricsPanel">Lyrics</button>
-    <button class="btn" id="labBtn" type="button" aria-expanded="false" aria-controls="labPanel">Lab</button>
-  </div>
-  <p class="msg" id="msg" role="status"></p>
-
-  <section class="lyrics" id="lyricsPanel" hidden>
-    <textarea id="lyricsText" aria-label="Lyrics" spellcheck="false" placeholder="Paste lyrics"></textarea>
-    <div class="lyr-actions">
-      <button class="btn btn-primary" id="placeBtn" type="button">Place</button>
-      <button class="btn" id="tapBtn" type="button">Tap along</button>
-      <span class="btn file-btn">Timing file<input type="file" id="lrcFile" accept=".lrc,.json,.txt,text/plain,application/json" aria-label="Load a timing file"></span>
-      <button class="btn btn-quiet" id="clearLyr" type="button">Clear</button>
+        <div class="scrub">
+          <input type="range" id="seek" min="0" max="1" step="0.01" value="0" aria-label="Position in song">
+          <div class="times"><span id="tNow">0:00</span><span id="tDur">0:00</span></div>
+        </div>
+      </div>
+      <div class="hud-btns">
+        <button class="btn" type="button" data-panel="songPanel" aria-controls="songPanel" aria-expanded="false">Song</button>
+        <button class="btn" type="button" data-panel="lyricsPanel" aria-controls="lyricsPanel" aria-expanded="false">Lyrics</button>
+        <button class="btn" type="button" data-panel="labPanel" aria-controls="labPanel" aria-expanded="false">Lab</button>
+      </div>
     </div>
   </section>
 
-  <section class="lab" id="labPanel" aria-label="Lab" hidden>
-    <div class="lab-head"><button class="btn btn-small" id="labPlay" type="button" disabled>Play</button><input type="range" id="labSeek" min="0" max="1" step="0.01" value="0" aria-label="Position in song"><button class="btn btn-small btn-primary" id="labDone" type="button">Done</button></div>
-    <div class="lab-row"><span class="lab-k" id="lk-colour">Colour</span><div class="seg" data-key="colour" role="group" aria-labelledby="lk-colour" aria-describedby="ld-colour"><button type="button" id="lab-colour-inst" data-v="inst">By instrument</button><button type="button" id="lab-colour-height" data-v="height">By height</button><button type="button" id="lab-colour-note" data-v="note">By note</button></div><span class="lab-d" id="ld-colour">What sets a mark&rsquo;s colour: its instrument, how high it sits, or which note it is.</span></div>
-    <div class="lab-row"><span class="lab-k" id="lk-palette">Palette</span><div class="seg" data-key="palette" role="group" aria-labelledby="lk-palette" aria-describedby="ld-palette"><button type="button" id="lab-palette-rainbow" data-v="rainbow">Rainbow</button><button type="button" id="lab-palette-warmcool" data-v="warmcool">Warm and cool</button><button type="button" id="lab-palette-three" data-v="three">Three inks</button><button type="button" id="lab-palette-two" data-v="two">Two inks</button></div><span class="lab-d" id="ld-palette">The inks for Colour: By instrument. Rainbow: an ink for each instrument. Warm and cool: the tune in warm inks, the backing in cool ones. Three and two inks: instruments share inks, and where they overlap the inks mix.</span></div>
-    <div class="lab-row"><span class="lab-k" id="lk-drums">Drum marks</span><div class="seg" data-key="drums" role="group" aria-labelledby="lk-drums" aria-describedby="ld-drums"><button type="button" id="lab-drums-sound" data-v="sound">Follow the sound</button><button type="button" id="lab-drums-simple" data-v="simple">All alike</button></div><span class="lab-d" id="ld-drums">Follow the sound: brighter hits print spikier and ringing ones trail. All alike: only how hard each is hit changes it.</span></div>
-    <div class="lab-row"><span class="lab-k" id="lk-kick">Kick</span><div class="seg" data-key="kick" role="group" aria-labelledby="lk-kick" aria-describedby="ld-kick"><button type="button" id="lab-kick-smudge" data-v="smudge">Smudge</button><button type="button" id="lab-kick-halftone" data-v="halftone">Halftone</button></div><span class="lab-d" id="ld-kick">A soft smudge, or a screen of dots like a printed photo.</span></div>
-    <div class="lab-row"><span class="lab-k" id="lk-bass">Bass</span><div class="seg" data-key="bass" role="group" aria-labelledby="lk-bass" aria-describedby="ld-bass"><button type="button" id="lab-bass-smudge" data-v="smudge">Smudge</button><button type="button" id="lab-bass-line" data-v="line">Line</button></div><span class="lab-d" id="ld-bass">A soft smear, or a sharp line whose edge shows the tone.</span></div>
-    <div class="lab-row"><span class="lab-k" id="lk-font">Words</span><div class="seg" data-key="font" role="group" aria-labelledby="lk-font" aria-describedby="ld-font"><button type="button" id="lab-font-grotesque" data-v="grotesque">Grotesque</button><button type="button" id="lab-font-script" data-v="script">Script</button><button type="button" id="lab-font-serif" data-v="serif">Serif</button><button type="button" id="lab-font-mono" data-v="mono">Mono</button></div><span class="lab-d" id="ld-font">The typeface for the sung words.</span></div>
-    <div class="lab-row"><span class="lab-k" id="lk-wordSize">Word size</span><div class="seg" data-key="wordSize" role="group" aria-labelledby="lk-wordSize" aria-describedby="ld-wordSize"><button type="button" id="lab-wordSize-voice" data-v="voice">Follows voice</button><button type="button" id="lab-wordSize-fixed" data-v="fixed">Fixed</button></div><span class="lab-d" id="ld-wordSize">Follows voice: louder singing prints bigger and bolder.</span></div>
-    <label class="lab-row slide"><span class="lab-k">Shake</span><input type="range" id="lab-shake" data-key="shake" min="0" max="1" step="0.05" aria-describedby="ld-shake"><span class="lab-v" id="lab-shake-v"></span><span class="lab-d" id="ld-shake">The whole print shakes with the kick and bass.</span></label>
-    <label class="lab-row slide"><span class="lab-k">Tilt</span><input type="range" id="lab-tilt" data-key="tilt" min="0" max="1" step="0.05" aria-describedby="ld-tilt"><span class="lab-v" id="lab-tilt-v"></span><span class="lab-d" id="ld-tilt">The print tips back on each kick and sways with the bass.</span></label>
-    <label class="lab-row slide"><span class="lab-k">Glow</span><input type="range" id="lab-pulse" data-key="pulse" min="0" max="1" step="0.05" aria-describedby="ld-pulse"><span class="lab-v" id="lab-pulse-v"></span><span class="lab-d" id="ld-pulse">The bottom of the print darkens on each kick.</span></label>
-    <label class="lab-row slide"><span class="lab-k">Misprint</span><input type="range" id="lab-slip" data-key="slip" min="0" max="1" step="0.05" aria-describedby="ld-slip"><span class="lab-v" id="lab-slip-v"></span><span class="lab-d" id="ld-slip">Each colour jumps out of line on kicks, like a print slipping.</span></label>
-    <label class="lab-row slide"><span class="lab-k">Seconds</span><input type="range" id="lab-secs" data-key="secs" min="2" max="10" step="0.5" aria-describedby="ld-secs"><span class="lab-v" id="lab-secs-v"></span><span class="lab-d" id="ld-secs">How many seconds of the song fit across.</span></label>
-    <label class="lab-row slide"><span class="lab-k">Ink</span><input type="range" id="lab-ink" data-key="ink" min="0.4" max="1.6" step="0.05" aria-describedby="ld-ink"><span class="lab-v" id="lab-ink-v"></span><span class="lab-d" id="ld-ink">How dark everything prints.</span></label>
-    <label class="lab-row slide"><span class="lab-k">Thickness</span><input type="range" id="lab-weight" data-key="weight" min="0.5" max="1.8" step="0.05" aria-describedby="ld-weight"><span class="lab-v" id="lab-weight-v"></span><span class="lab-d" id="ld-weight">How thick the lines are.</span></label>
-    <label class="lab-row slide"><span class="lab-k">Speckle</span><input type="range" id="lab-grain" data-key="grain" min="0" max="1" step="0.05" aria-describedby="ld-grain"><span class="lab-v" id="lab-grain-v"></span><span class="lab-d" id="ld-grain">White flecks over the print, where the ink missed the paper.</span></label>
-    <div class="lab-row"><span class="lab-k" id="lk-key">Server key</span><div class="key-box"><span class="key-saved" id="keySaved" hidden>Saved on this phone. <button type="button" class="key-change" id="keyChange">Change</button></span><input type="password" id="lab-key" autocomplete="off" spellcheck="false" placeholder="passphrase" aria-labelledby="lk-key" aria-describedby="ld-key"></div><span class="lab-d" id="ld-key">The passphrase for the analysis server. Songs need it before they can play.</span></div>
-    <div class="lab-foot"><button class="btn btn-small btn-quiet" id="labReset" type="button">Reset</button></div>
-  </section>
-
-  <section class="inks" aria-label="Inks: tap one to lift it off the print">
-    <div class="ink-grid">
-      <button class="ink" type="button" data-layer="bass" aria-pressed="true" style="--c: var(--c-bass)">
-        <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 15c3-5 5-5 8 0s5 5 8 0 4-5 6-2v5c-2-3-3-3-6 2s-5 5-8 0-5-5-8 0z" fill="currentColor"/></svg>
-        <span class="nm">Bass</span></button>
-      <button class="ink" type="button" data-layer="kick" aria-pressed="true" style="--c: var(--drum)">
-        <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><defs><radialGradient id="ico-kick"><stop offset="0" stop-color="currentColor" stop-opacity=".9"/><stop offset=".5" stop-color="currentColor" stop-opacity=".45"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></radialGradient></defs><circle cx="13" cy="13" r="12.5" fill="url(#ico-kick)"/></svg>
-        <span class="nm">Kick</span></button>
-      <button class="ink" type="button" data-layer="snare" aria-pressed="true" style="--c: var(--drum)">
-        <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><path d="M13 7.5l2 3.6 3.9-1-1.6 3.7 3 2.6-4 .6-.4 4-2.9-2.8-3.2 2.4.1-4.1-3.9-1.1 3.4-2.2-1.2-3.9 3.8 1.5z" fill="currentColor"/><circle cx="4" cy="6" r="1.3" fill="currentColor"/><circle cx="22.5" cy="5" r="1" fill="currentColor"/><circle cx="21.5" cy="21.5" r="1.4" fill="currentColor"/><circle cx="5" cy="21" r="0.9" fill="currentColor"/></svg>
-        <span class="nm">Snare / clap</span></button>
-      <button class="ink" type="button" data-layer="hats" aria-pressed="true" style="--c: var(--drum)">
-        <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><circle cx="7.5" cy="8" r="1.9" fill="currentColor"/><circle cx="10.2" cy="6.4" r="0.9" fill="currentColor"/><circle cx="5.2" cy="6.1" r="0.8" fill="currentColor"/><circle cx="9.8" cy="10.4" r="0.9" fill="currentColor"/><circle cx="5" cy="10" r="0.7" fill="currentColor"/><circle cx="7.8" cy="5" r="0.6" fill="currentColor"/><circle cx="14.5" cy="17" r="0.9" fill="currentColor"/><circle cx="16.4" cy="15.2" r="0.6" fill="currentColor"/><circle cx="13.2" cy="19.6" r="0.6" fill="currentColor"/><circle cx="17.2" cy="18.6" r="0.7" fill="currentColor"/><circle cx="19" cy="16.4" r="0.6" fill="currentColor"/><circle cx="20.6" cy="18.2" r="0.55" fill="currentColor"/><circle cx="22.2" cy="16.9" r="0.5" fill="currentColor"/><circle cx="23.6" cy="18.4" r="0.45" fill="currentColor"/><circle cx="18.4" cy="20.4" r="0.5" fill="currentColor"/><circle cx="15.6" cy="21.2" r="0.45" fill="currentColor"/></svg>
-        <span class="nm">Hats &amp; cymbals</span></button>
-      <button class="ink" type="button" data-layer="toms" aria-pressed="true" style="--c: var(--drum)">
-        <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><circle cx="12" cy="13.5" r="7.2" fill="currentColor"/><circle cx="21.4" cy="8.6" r="1.6" fill="currentColor"/><circle cx="21" cy="19.2" r="1.1" fill="currentColor"/></svg>
-        <span class="nm">Toms</span></button>
-      <button class="ink" type="button" data-layer="voice" aria-pressed="true" style="--c: var(--c-voice)">
-        <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M1.5 17c4-1 5-9 9.5-9s4.5 7 8.5 7c2.6 0 3.6-2.4 5-4v4c-1.6 2-3 4-5.2 4-4.5 0-5-7-8.4-7S6 19 1.5 21z" fill="currentColor"/></svg>
-        <span class="nm">Voice / lead</span></button>
-      <button class="ink" type="button" data-layer="keys" aria-pressed="true" style="--c: var(--c-keys)">
-        <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 6.5h3.5L24 11.6v2.8L5.5 19.5H2z" fill="currentColor"/></svg>
-        <span class="nm">Keys &amp; plucks</span></button>
-      <button class="ink" type="button" data-layer="pads" aria-pressed="true" style="--c: var(--c-pads)">
-        <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M1.5 13C8 12.6 13 6 24.5 6v14C13 20 8 13.4 1.5 13z" fill="currentColor" opacity=".85"/></svg>
-        <span class="nm">Pads &amp; strings</span></button>
-      <button class="ink" type="button" data-layer="leads" aria-pressed="true" style="--c: var(--c-leads)">
-        <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 8h4v1.6h4V8h4v1.6h4V8h4v10h-4v-1.6h-4V18h-4v-1.6H6V18H2z" fill="currentColor"/></svg>
-        <span class="nm">Organ &amp; leads</span></button>
-      <button class="ink" type="button" data-layer="words" aria-pressed="true" style="--c: var(--c-words)">
-        <svg viewBox="0 0 26 26" aria-hidden="true"><text x="13" y="18" text-anchor="middle" font-family="Bricolage Grotesque, system-ui, sans-serif" font-weight="700" font-size="13" fill="currentColor">Aa</text></svg>
-        <span class="nm">Words</span></button>
+  <section class="panel" id="songPanel" aria-label="Song" hidden>
+    <div class="panel-head"><h2 class="title" data-text="Pitchscape">Pitchscape</h2><button class="btn btn-small btn-primary" type="button" data-close>Done</button></div>
+    <div class="panel-body">
+      <div class="song-btns">
+        <span class="btn btn-primary file-btn">Load a song<input type="file" id="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.oga,.flac,.opus" aria-label="Load a song from your device"></span>
+        <button class="btn" type="button" id="demoBtn">Demo song</button>
+      </div>
+      <div class="row"><span class="k-static" id="lk-key">Server key</span><div class="key-box"><span class="key-saved" id="keySaved" hidden>Saved on this phone. <button type="button" class="key-change" id="keyChange">Change</button></span><input type="password" id="lab-key" autocomplete="off" spellcheck="false" placeholder="passphrase" aria-labelledby="lk-key"></div></div>
+      <p class="hint">The first time a song is played it is analysed on the server, which takes a few minutes. After that it opens at once, on any device.</p>
     </div>
   </section>
 
+  <section class="panel" id="lyricsPanel" aria-label="Lyrics" hidden>
+    <div class="panel-head"><h2>Lyrics</h2><button class="btn btn-small btn-primary" type="button" data-close>Done</button></div>
+    <div class="panel-body">
+      <textarea id="lyricsText" aria-label="Lyrics" spellcheck="false" placeholder="Paste lyrics"></textarea>
+      <div class="lyr-actions">
+        <button class="btn btn-primary" id="placeBtn" type="button">Place</button>
+        <button class="btn" id="tapBtn" type="button">Tap along</button>
+        <span class="btn file-btn">Timing file<input type="file" id="lrcFile" accept=".lrc,.json,.txt,text/plain,application/json" aria-label="Load a timing file"></span>
+        <button class="btn btn-quiet" id="clearLyr" type="button">Clear</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel lab" id="labPanel" aria-label="Lab" hidden>
+    <div class="panel-head"><button class="btn btn-small" id="labPlay" type="button" disabled>Play</button><input type="range" id="labSeek" min="0" max="1" step="0.01" value="0" aria-label="Position in song"><button class="btn btn-small btn-primary" type="button" data-close>Done</button></div>
+    <div class="tabs" role="tablist" aria-label="Lab sections"><button type="button" role="tab" id="tab-colour" data-tab="colour" aria-controls="pane-colour" aria-selected="false">Colour</button><button type="button" role="tab" id="tab-shapes" data-tab="shapes" aria-controls="pane-shapes" aria-selected="false">Shapes</button><button type="button" role="tab" id="tab-words" data-tab="words" aria-controls="pane-words" aria-selected="false">Words</button><button type="button" role="tab" id="tab-motion" data-tab="motion" aria-controls="pane-motion" aria-selected="false">Motion</button><button type="button" role="tab" id="tab-print" data-tab="print" aria-controls="pane-print" aria-selected="false">Print</button><button type="button" role="tab" id="tab-layers" data-tab="layers" aria-controls="pane-layers" aria-selected="false">Layers</button></div>
+      <div class="pane" id="pane-colour" data-pane="colour" role="tabpanel" aria-labelledby="tab-colour" hidden>
+        <div class="row"><button type="button" class="k" data-tip="What sets a mark’s colour: its instrument, how high it sits, or which note it is." aria-expanded="false" aria-describedby="ld-colour">Colour by<i aria-hidden="true">i</i></button><div class="seg" data-key="colour" role="group" aria-label="Colour by" aria-describedby="ld-colour"><button type="button" id="lab-colour-inst" data-v="inst">Instrument</button><button type="button" id="lab-colour-height" data-v="height">Height</button><button type="button" id="lab-colour-note" data-v="note">Note</button></div><span class="vh" id="ld-colour">What sets a mark’s colour: its instrument, how high it sits, or which note it is.</span></div>
+        <div class="row"><button type="button" class="k" data-tip="The inks for colouring by instrument. Rainbow: an ink for each instrument. Warm and cool: the tune in warm inks, the backing in cool ones. Three and two inks: instruments share inks, and where they overlap the inks mix." aria-expanded="false" aria-describedby="ld-palette">Palette<i aria-hidden="true">i</i></button><div class="seg" data-key="palette" role="group" aria-label="Palette" aria-describedby="ld-palette"><button type="button" id="lab-palette-rainbow" data-v="rainbow">Rainbow</button><button type="button" id="lab-palette-warmcool" data-v="warmcool">Warm and cool</button><button type="button" id="lab-palette-three" data-v="three">Three inks</button><button type="button" id="lab-palette-two" data-v="two">Two inks</button></div><span class="vh" id="ld-palette">The inks for colouring by instrument. Rainbow: an ink for each instrument. Warm and cool: the tune in warm inks, the backing in cool ones. Three and two inks: instruments share inks, and where they overlap the inks mix.</span></div>
+      </div>
+      <div class="pane" id="pane-shapes" data-pane="shapes" role="tabpanel" aria-labelledby="tab-shapes" hidden>
+        <div class="row"><button type="button" class="k" data-tip="Follow the sound: brighter hits print spikier, and ringing ones trail. All alike: only how hard each is hit changes it." aria-expanded="false" aria-describedby="ld-drums">Drum marks<i aria-hidden="true">i</i></button><div class="seg" data-key="drums" role="group" aria-label="Drum marks" aria-describedby="ld-drums"><button type="button" id="lab-drums-sound" data-v="sound">Follow the sound</button><button type="button" id="lab-drums-simple" data-v="simple">All alike</button></div><span class="vh" id="ld-drums">Follow the sound: brighter hits print spikier, and ringing ones trail. All alike: only how hard each is hit changes it.</span></div>
+        <div class="row"><button type="button" class="k" data-tip="A soft smudge, or a screen of dots like a printed photo." aria-expanded="false" aria-describedby="ld-kick">Kick<i aria-hidden="true">i</i></button><div class="seg" data-key="kick" role="group" aria-label="Kick" aria-describedby="ld-kick"><button type="button" id="lab-kick-smudge" data-v="smudge">Smudge</button><button type="button" id="lab-kick-halftone" data-v="halftone">Halftone</button></div><span class="vh" id="ld-kick">A soft smudge, or a screen of dots like a printed photo.</span></div>
+        <div class="row"><button type="button" class="k" data-tip="A soft smear, or a sharp line whose edge shows the tone." aria-expanded="false" aria-describedby="ld-bass">Bass<i aria-hidden="true">i</i></button><div class="seg" data-key="bass" role="group" aria-label="Bass" aria-describedby="ld-bass"><button type="button" id="lab-bass-smudge" data-v="smudge">Smudge</button><button type="button" id="lab-bass-line" data-v="line">Line</button></div><span class="vh" id="ld-bass">A soft smear, or a sharp line whose edge shows the tone.</span></div>
+      </div>
+      <div class="pane" id="pane-words" data-pane="words" role="tabpanel" aria-labelledby="tab-words" hidden>
+        <div class="row"><button type="button" class="k" data-tip="The typeface for the sung words." aria-expanded="false" aria-describedby="ld-font">Typeface<i aria-hidden="true">i</i></button><div class="seg" data-key="font" role="group" aria-label="Typeface" aria-describedby="ld-font"><button type="button" id="lab-font-grotesque" data-v="grotesque">Grotesque</button><button type="button" id="lab-font-script" data-v="script">Script</button><button type="button" id="lab-font-serif" data-v="serif">Serif</button><button type="button" id="lab-font-mono" data-v="mono">Mono</button></div><span class="vh" id="ld-font">The typeface for the sung words.</span></div>
+        <div class="row"><button type="button" class="k" data-tip="Follows voice: louder singing prints bigger and bolder. Fixed: every word the same size." aria-expanded="false" aria-describedby="ld-wordSize">Word size<i aria-hidden="true">i</i></button><div class="seg" data-key="wordSize" role="group" aria-label="Word size" aria-describedby="ld-wordSize"><button type="button" id="lab-wordSize-voice" data-v="voice">Follows voice</button><button type="button" id="lab-wordSize-fixed" data-v="fixed">Fixed</button></div><span class="vh" id="ld-wordSize">Follows voice: louder singing prints bigger and bolder. Fixed: every word the same size.</span></div>
+      </div>
+      <div class="pane" id="pane-motion" data-pane="motion" role="tabpanel" aria-labelledby="tab-motion" hidden>
+        <div class="row slide"><button type="button" class="k" data-tip="The whole print shakes with the kick and bass." aria-expanded="false" aria-describedby="ld-shake">Shake<i aria-hidden="true">i</i></button><input type="range" id="lab-shake" data-key="shake" min="0" max="1" step="0.05" aria-label="Shake" aria-describedby="ld-shake"><span class="lab-v" id="lab-shake-v"></span><span class="vh" id="ld-shake">The whole print shakes with the kick and bass.</span></div>
+        <div class="row slide"><button type="button" class="k" data-tip="The print tips back on each kick and sways with the bass." aria-expanded="false" aria-describedby="ld-tilt">Tilt<i aria-hidden="true">i</i></button><input type="range" id="lab-tilt" data-key="tilt" min="0" max="1" step="0.05" aria-label="Tilt" aria-describedby="ld-tilt"><span class="lab-v" id="lab-tilt-v"></span><span class="vh" id="ld-tilt">The print tips back on each kick and sways with the bass.</span></div>
+        <div class="row slide"><button type="button" class="k" data-tip="The bottom of the print darkens on each kick." aria-expanded="false" aria-describedby="ld-pulse">Glow<i aria-hidden="true">i</i></button><input type="range" id="lab-pulse" data-key="pulse" min="0" max="1" step="0.05" aria-label="Glow" aria-describedby="ld-pulse"><span class="lab-v" id="lab-pulse-v"></span><span class="vh" id="ld-pulse">The bottom of the print darkens on each kick.</span></div>
+        <div class="row slide"><button type="button" class="k" data-tip="Each colour jumps out of line on kicks, like a print slipping." aria-expanded="false" aria-describedby="ld-slip">Misprint<i aria-hidden="true">i</i></button><input type="range" id="lab-slip" data-key="slip" min="0" max="1" step="0.05" aria-label="Misprint" aria-describedby="ld-slip"><span class="lab-v" id="lab-slip-v"></span><span class="vh" id="ld-slip">Each colour jumps out of line on kicks, like a print slipping.</span></div>
+        <div class="row slide"><button type="button" class="k" data-tip="How many seconds of the song fit across the screen." aria-expanded="false" aria-describedby="ld-secs">Seconds<i aria-hidden="true">i</i></button><input type="range" id="lab-secs" data-key="secs" min="2" max="10" step="0.5" aria-label="Seconds" aria-describedby="ld-secs"><span class="lab-v" id="lab-secs-v"></span><span class="vh" id="ld-secs">How many seconds of the song fit across the screen.</span></div>
+      </div>
+      <div class="pane" id="pane-print" data-pane="print" role="tabpanel" aria-labelledby="tab-print" hidden>
+        <div class="row slide"><button type="button" class="k" data-tip="How dark everything prints." aria-expanded="false" aria-describedby="ld-ink">Ink<i aria-hidden="true">i</i></button><input type="range" id="lab-ink" data-key="ink" min="0.4" max="1.6" step="0.05" aria-label="Ink" aria-describedby="ld-ink"><span class="lab-v" id="lab-ink-v"></span><span class="vh" id="ld-ink">How dark everything prints.</span></div>
+        <div class="row slide"><button type="button" class="k" data-tip="How thick the lines are." aria-expanded="false" aria-describedby="ld-weight">Thickness<i aria-hidden="true">i</i></button><input type="range" id="lab-weight" data-key="weight" min="0.5" max="1.8" step="0.05" aria-label="Thickness" aria-describedby="ld-weight"><span class="lab-v" id="lab-weight-v"></span><span class="vh" id="ld-weight">How thick the lines are.</span></div>
+        <div class="row slide"><button type="button" class="k" data-tip="White flecks over the print, where the ink missed the paper." aria-expanded="false" aria-describedby="ld-grain">Speckle<i aria-hidden="true">i</i></button><input type="range" id="lab-grain" data-key="grain" min="0" max="1" step="0.05" aria-label="Speckle" aria-describedby="ld-grain"><span class="lab-v" id="lab-grain-v"></span><span class="vh" id="ld-grain">White flecks over the print, where the ink missed the paper.</span></div>
+      </div>
+      <div class="pane" id="pane-layers" data-pane="layers" role="tabpanel" aria-labelledby="tab-layers" hidden>
+        <div class="ink-grid">
+          <button class="ink" type="button" data-layer="bass" aria-pressed="true" style="--c: var(--c-bass)">
+            <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 15c3-5 5-5 8 0s5 5 8 0 4-5 6-2v5c-2-3-3-3-6 2s-5 5-8 0-5-5-8 0z" fill="currentColor"/></svg>
+            <span class="nm">Bass</span></button>
+          <button class="ink" type="button" data-layer="kick" aria-pressed="true" style="--c: var(--drum)">
+            <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><defs><radialGradient id="ico-kick"><stop offset="0" stop-color="currentColor" stop-opacity=".9"/><stop offset=".5" stop-color="currentColor" stop-opacity=".45"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></radialGradient></defs><circle cx="13" cy="13" r="12.5" fill="url(#ico-kick)"/></svg>
+            <span class="nm">Kick</span></button>
+          <button class="ink" type="button" data-layer="snare" aria-pressed="true" style="--c: var(--drum)">
+            <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><path d="M13 7.5l2 3.6 3.9-1-1.6 3.7 3 2.6-4 .6-.4 4-2.9-2.8-3.2 2.4.1-4.1-3.9-1.1 3.4-2.2-1.2-3.9 3.8 1.5z" fill="currentColor"/><circle cx="4" cy="6" r="1.3" fill="currentColor"/><circle cx="22.5" cy="5" r="1" fill="currentColor"/><circle cx="21.5" cy="21.5" r="1.4" fill="currentColor"/><circle cx="5" cy="21" r="0.9" fill="currentColor"/></svg>
+            <span class="nm">Snare / clap</span></button>
+          <button class="ink" type="button" data-layer="hats" aria-pressed="true" style="--c: var(--drum)">
+            <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><circle cx="7.5" cy="8" r="1.9" fill="currentColor"/><circle cx="10.2" cy="6.4" r="0.9" fill="currentColor"/><circle cx="5.2" cy="6.1" r="0.8" fill="currentColor"/><circle cx="9.8" cy="10.4" r="0.9" fill="currentColor"/><circle cx="5" cy="10" r="0.7" fill="currentColor"/><circle cx="7.8" cy="5" r="0.6" fill="currentColor"/><circle cx="14.5" cy="17" r="0.9" fill="currentColor"/><circle cx="16.4" cy="15.2" r="0.6" fill="currentColor"/><circle cx="13.2" cy="19.6" r="0.6" fill="currentColor"/><circle cx="17.2" cy="18.6" r="0.7" fill="currentColor"/><circle cx="19" cy="16.4" r="0.6" fill="currentColor"/><circle cx="20.6" cy="18.2" r="0.55" fill="currentColor"/><circle cx="22.2" cy="16.9" r="0.5" fill="currentColor"/><circle cx="23.6" cy="18.4" r="0.45" fill="currentColor"/><circle cx="18.4" cy="20.4" r="0.5" fill="currentColor"/><circle cx="15.6" cy="21.2" r="0.45" fill="currentColor"/></svg>
+            <span class="nm">Hats &amp; cymbals</span></button>
+          <button class="ink" type="button" data-layer="toms" aria-pressed="true" style="--c: var(--drum)">
+            <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><circle cx="12" cy="13.5" r="7.2" fill="currentColor"/><circle cx="21.4" cy="8.6" r="1.6" fill="currentColor"/><circle cx="21" cy="19.2" r="1.1" fill="currentColor"/></svg>
+            <span class="nm">Toms</span></button>
+          <button class="ink" type="button" data-layer="voice" aria-pressed="true" style="--c: var(--c-voice)">
+            <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M1.5 17c4-1 5-9 9.5-9s4.5 7 8.5 7c2.6 0 3.6-2.4 5-4v4c-1.6 2-3 4-5.2 4-4.5 0-5-7-8.4-7S6 19 1.5 21z" fill="currentColor"/></svg>
+            <span class="nm">Voice / lead</span></button>
+          <button class="ink" type="button" data-layer="keys" aria-pressed="true" style="--c: var(--c-keys)">
+            <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 6.5h3.5L24 11.6v2.8L5.5 19.5H2z" fill="currentColor"/></svg>
+            <span class="nm">Keys &amp; plucks</span></button>
+          <button class="ink" type="button" data-layer="pads" aria-pressed="true" style="--c: var(--c-pads)">
+            <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M1.5 13C8 12.6 13 6 24.5 6v14C13 20 8 13.4 1.5 13z" fill="currentColor" opacity=".85"/></svg>
+            <span class="nm">Pads &amp; strings</span></button>
+          <button class="ink" type="button" data-layer="leads" aria-pressed="true" style="--c: var(--c-leads)">
+            <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 8h4v1.6h4V8h4v1.6h4V8h4v10h-4v-1.6h-4V18h-4v-1.6H6V18H2z" fill="currentColor"/></svg>
+            <span class="nm">Organ &amp; leads</span></button>
+          <button class="ink" type="button" data-layer="words" aria-pressed="true" style="--c: var(--c-words)">
+            <svg viewBox="0 0 26 26" aria-hidden="true"><text x="13" y="18" text-anchor="middle" font-family="Bricolage Grotesque, system-ui, sans-serif" font-weight="700" font-size="13" fill="currentColor">Aa</text></svg>
+            <span class="nm">Words</span></button>
+        </div>
+      </div>
+    <div class="lab-foot"><button class="btn btn-small btn-quiet" id="labReset" type="button">Reset all</button></div>
+    <div class="bubble" id="bubble" role="tooltip" hidden></div>
+  </section>
 </main>
 <audio id="player" preload="auto" playsinline></audio>
 
@@ -284,7 +284,6 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
   var $ = function (id) { return document.getElementById(id); };
   var cv = $('cv'), ctx = cv.getContext('2d'), plate = $('plate'), audio = $('player');
   var playBtn = $('play'), seek = $('seek'), labSeek = $('labSeek'), tNow = $('tNow'), tDur = $('tDur'), msg = $('msg');
-  var caption = $('caption'), capNow = $('capNow'), capNext = $('capNext');
   var lyricsText = $('lyricsText');
   var reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -318,7 +317,11 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
   var L = Object.assign({}, LAB_DEF, labSaved && labSaved.v === LAB_VERSION ? labSaved.set : {});
   function saveLab() { var d = {}; for (var k in L) if (L[k] !== LAB_DEF[k]) d[k] = L[k]; store.set('pitchscape:lab', { v: LAB_VERSION, set: d }); }
 
-  function say(text, isErr) { msg.textContent = text || ''; msg.classList.toggle('err', !!isErr); }
+  var sayTimer = null;
+  function say(text, isErr) {
+    msg.textContent = text || ''; msg.classList.toggle('err', !!isErr); clearTimeout(sayTimer);
+    if (text && !isErr) sayTimer = setTimeout(function () { if (msg.textContent === text) msg.textContent = ''; }, 4000);
+  }
   function fmt(t) { t = Math.max(0, t || 0); var m = Math.floor(t / 60), s = Math.floor(t % 60); return m + ':' + (s < 10 ? '0' : '') + s; }
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
   function hash(n) { n |= 0; n = Math.imul(n ^ (n >>> 16), 0x45d9f3b); n = Math.imul(n ^ (n >>> 16), 0x45d9f3b); n ^= n >>> 16; return (n >>> 0) / 4294967296; }
@@ -851,25 +854,7 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
     });
     S.words.sort(function (a, b) { return a.t - b.t; });
     S.lineStarts = wt.map(function (l) { for (var i = 0; l && i < l.length; i++) if (l[i] != null) return l[i]; return null; });
-    layoutWords(); capKey = ''; S.dirty = true;
-  }
-  var capKey = '';
-  function updateCaption(now) {
-    if (!S.lines.length || !S.vis.words) { if (capKey !== 'x') { capKey = 'x'; caption.hidden = true; } return; }
-    var li = -1, i;
-    for (i = 0; i < S.lineStarts.length; i++) { var st = S.lineStarts[i]; if (st == null) continue; if (st <= now + 0.08) li = i; else break; }
-    var wi = -1;
-    if (li >= 0) { var wt = S.wt[li]; for (i = 0; i < wt.length; i++) if (wt[i] != null && wt[i] <= now + 0.04) wi = i; }
-    var key = li + ':' + wi; if (key === capKey) return;
-    capKey = key; caption.hidden = false;
-    var show = li < 0 ? 0 : li, ln = S.lines[show];
-    capNow.textContent = '';
-    ln.words.forEach(function (w, k) {
-      var sp = document.createElement('span');
-      sp.className = li < 0 ? '' : k < wi ? 'on' : k === wi ? 'cur' : '';
-      sp.textContent = w.text; capNow.appendChild(sp); capNow.appendChild(document.createTextNode(' '));
-    });
-    var nx = S.lines[show + 1]; capNext.textContent = nx ? nx.text : '';
+    layoutWords(); S.dirty = true;
   }
   function lyricKey() { return 'pitchscape:lyrics:' + S.key; }
   function cleanBox() {
@@ -968,14 +953,14 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
     if (!S.ana) return;
     var lines = DSP.parseLyrics(lyricsText.value);
     if (!lines.length) { say('Paste lyrics first.', true); return; }
-    S.tap = { lines: lines, anchors: [] }; tapzone.hidden = false; tapUI();
+    closePanels(); S.tap = { lines: lines, anchors: [] }; tapzone.hidden = false; tapUI(); hud.classList.add('away');
     say('');
     S.neverPlayed = false;
     audio.currentTime = 0; playAudio();
   }
   function finishTap() {
     var T = S.tap; if (!T) return;
-    S.tap = null; tapzone.hidden = true;
+    S.tap = null; tapzone.hidden = true; wakeHud();
     if (!T.anchors.length) { say(''); return; }
     var anchors = T.lines.map(function (_, i) { return T.anchors[i] != null ? T.anchors[i] : null; });
     applyWordTimes(T.lines, DSP.alignToAnchors(T.lines, anchors, S.ana), 'tap');
@@ -996,12 +981,10 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
   });
   cv.addEventListener('click', function () {
     if (swallowClick) { swallowClick = false; return; }
-    if (!S.tap && !playBtn.disabled) togglePlay();
+    if (S.tap) return;
+    if (hud.classList.contains('away')) wakeHud(); else if (playing()) hud.classList.add('away');
   });
 
-  $('lyricsBtn').addEventListener('click', function () {
-    var p = $('lyricsPanel'), open = p.hidden; p.hidden = !open; this.setAttribute('aria-expanded', String(open));
-  });
   $('placeBtn').addEventListener('click', function () { placeAuto(true); });
   var inputTimer = null;
   lyricsText.addEventListener('input', function () {
@@ -1052,7 +1035,23 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
     } else audio.pause();
   }
   playBtn.addEventListener('click', togglePlay);
-  ['play', 'pause', 'ended'].forEach(function (ev) { audio.addEventListener(ev, function () { setIcons(); S.dirty = true; }); });
+  var hud = $('hud'), hudTimer = null;
+  function playing() { return !audio.paused && !audio.ended; }
+  function panelOpen() { return panels.some(function (p) { return !p.hidden; }); }
+  function wakeHud() {
+    clearTimeout(hudTimer);
+    if (panelOpen() || S.tap) { hud.classList.add('away'); return; }
+    hud.classList.remove('away');
+    if (playing()) hudTimer = setTimeout(function () { if (playing() && !keyboardIn(hud)) hud.classList.add('away'); }, 2600);
+  }
+  /* a control reached from the keyboard keeps the controls up; one that was just tapped does not */
+  function keyboardIn(el) {
+    var a = document.activeElement;
+    try { return !!a && el.contains(a) && a.matches(':focus-visible'); } catch (e) { return false; }
+  }
+  ['pointerdown', 'focusin', 'input'].forEach(function (ev) { hud.addEventListener(ev, wakeHud); });
+  plate.addEventListener('mousemove', function (e) { if (e.movementX || e.movementY) wakeHud(); });
+  ['play', 'pause', 'ended'].forEach(function (ev) { audio.addEventListener(ev, function () { setIcons(); S.dirty = true; wakeHud(); }); });
   audio.addEventListener('seeked', function () { S.dirty = true; });
   audio.addEventListener('error', function () { if (audio.src) say("Can't play that file here.", true); });
   /* two seek bars, the page's and the Lab drawer's, kept in step */
@@ -1079,7 +1078,6 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
       var t = S.neverPlayed ? S.previewT : clock();
       draw(t); S.dirty = false;
       if (!seeking && !S.neverPlayed) { seek.value = labSeek.value = String(t); tNow.textContent = fmt(t); }
-      updateCaption(t);
     }
     requestAnimationFrame(loop);
   }
@@ -1119,9 +1117,13 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
     });
   }
 
-  var statusEl = $('status'), statusText = $('statusText'), statusBar = $('statusBar');
-  function showStatus(label, p) { statusEl.hidden = false; statusText.textContent = label; statusBar.style.width = Math.round(clamp(p, 0, 1) * 100) + '%'; statusBar.parentNode.setAttribute('aria-valuenow', String(Math.round(p * 100))); }
-  function hideStatus() { statusEl.hidden = true; }
+  var statusEl = $('status'), statusText = $('statusText'), statusBar = $('statusBar'), statusNote = $('statusNote');
+  function showStatus(label, p, note) {
+    statusEl.hidden = false; statusText.textContent = label; statusBar.style.width = Math.round(clamp(p, 0, 1) * 100) + '%';
+    statusBar.parentNode.setAttribute('aria-valuenow', String(Math.round(p * 100)));
+    if (note !== undefined) { statusNote.textContent = note || ''; statusNote.hidden = !note; }
+  }
+  function hideStatus() { statusEl.hidden = true; statusNote.hidden = true; }
 
   function wavBlob(L, R, sr) {
     var n = L.length, buf = new ArrayBuffer(44 + n * 4), v = new DataView(buf), o = 44, i;
@@ -1132,14 +1134,13 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
     return new Blob([buf], { type: 'audio/wav' });
   }
   var loadSeq = 0;
-  function markShelf(id) { document.querySelectorAll('.song').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.song === id)); }); }
   /* the sheet goes blank while a song loads: nothing is drawn until the server's analysis of it is in */
   function beginLoad(label, songId) {
-    S.timing = null; S.song = songId || ''; S.retry = null; markShelf(S.song);
+    S.timing = null; S.song = songId || ''; S.retry = null;
     if (S.busy) cancelJobs();
     S.busy = true; audio.pause(); setPlayable(false);
     if (S.tap) { S.tap = null; tapzone.hidden = true; }
-    S.ana = null; S.dur = 0; applyWordTimes([], [], ''); capKey = '';
+    S.ana = null; S.dur = 0; applyWordTimes([], [], '');
     seek.value = labSeek.value = '0'; tNow.textContent = '0:00'; tDur.textContent = '0:00'; S.dirty = true;
     say(''); showStatus(label, 0.01);
     return ++loadSeq;
@@ -1245,7 +1246,7 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
     }).catch(function (e) {
       if (my !== loadSeq) return;
       fail((e && e.message) || "Couldn't open that file.");
-      if (e && e.needsKey) S.retry = retry;
+      if (e && e.needsKey) { S.retry = retry; openPanel('songPanel'); }
     });
   }
   function keyError(text) { var e = new Error(text); e.needsKey = true; return e; }
@@ -1253,12 +1254,11 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
     return apiReady.then(function () {
       var key = store.get('pitchscape:key');
       if (!API) throw new Error('This page has no analysis server set up.');
-      if (!key) throw keyError('Put the server key in the Lab and this song will be analysed.');
-      showStatus('Uploading', 0.05);
-      say('The first time takes a few minutes. After that this song opens at once.');
+      if (!key) throw keyError('Add the server key under Song and this song will be analysed.');
+      showStatus('Uploading', 0.05, 'The first time takes a few minutes. After that this song opens at once.');
       var fd = new FormData(); fd.append('file', blob, fileName);
       return fetch(API + '/analyze', { method: 'POST', headers: { 'X-Pitchscape-Key': key }, body: fd }).then(function (r) {
-        if (r.status === 401) throw keyError('The server key is wrong. Fix it in the Lab and this song will be analysed.');
+        if (r.status === 401) throw keyError('The server key is wrong. Fix it under Song and this song will be analysed.');
         if (r.status === 413) throw new Error('That file is over 80 MB.');
         if (!r.ok) throw new Error('The server said ' + r.status + '. Try again in a minute.');
         return r.json();
@@ -1297,7 +1297,7 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
   var SONGS = {};
   function b64f32(b64) { var bin = atob(b64), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Float32Array(u.buffer); }
   function loadPack(id) {
-    var song = SONGS[id], btn = document.querySelector('.song[data-song="' + id + '"]'), title = btn ? btn.querySelector('b').textContent : id;
+    var song = SONGS[id], title = song.title || id;
     var my = beginLoad('Loading ' + title, id);
     $('trackName').textContent = title;
     return fetch(song.pack).then(function (r) { if (!r.ok) throw new Error('song data ' + r.status); return r.json(); }).then(function (pack) {
@@ -1311,9 +1311,7 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
       });
     }).catch(function (e) { if (my === loadSeq) { fail("Couldn't load the built-in song (" + e.message + ')'); } throw e; });
   }
-  document.querySelectorAll('.song').forEach(function (b) {
-    b.addEventListener('click', function () { if (b.dataset.song === 'demo') loadDemo(); else loadPack(b.dataset.song).catch(function () {}); });
-  });
+  $('demoBtn').addEventListener('click', function () { closePanels(); loadDemo(); });
   /* if tapping Load opens nothing (some in-app viewers block file pickers), say so instead of failing silently */
   var fileInput = $('file'), pickTimer = null, pickLeft = false;
   fileInput.addEventListener('click', function () {
@@ -1322,18 +1320,18 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
   });
   window.addEventListener('blur', function () { pickLeft = true; });
   document.addEventListener('visibilitychange', function () { if (document.hidden) pickLeft = true; });
-  fileInput.addEventListener('change', function () { clearTimeout(pickTimer); var f = this.files && this.files[0]; this.value = ''; if (f) loadFile(f); });
+  fileInput.addEventListener('change', function () { clearTimeout(pickTimer); var f = this.files && this.files[0]; this.value = ''; if (f) { closePanels(); loadFile(f); } });
 
   /* ink toggles */
   document.querySelectorAll('.ink').forEach(function (b) {
     b.addEventListener('click', function () {
-      var l = b.dataset.layer; S.vis[l] = !S.vis[l]; b.setAttribute('aria-pressed', String(S.vis[l])); if (l === 'words') capKey = '';
+      var l = b.dataset.layer; S.vis[l] = !S.vis[l]; b.setAttribute('aria-pressed', String(S.vis[l]));
       S.dirty = true;
     });
   });
 
   /* lab */
-  var labPanel = $('labPanel');
+  var labPanel = $('labPanel'), panels = ['songPanel', 'lyricsPanel', 'labPanel'].map($);
   function labVal(k, v) { return k === 'secs' ? v.toFixed(1) + ' s' : k === 'ink' || k === 'weight' ? '×' + v.toFixed(2) : Math.round(v * 100) + '%'; }
   function labUI() {
     labPanel.querySelectorAll('.seg').forEach(function (g) {
@@ -1361,16 +1359,50 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
     r.addEventListener('input', function () { var k = r.dataset.key; L[k] = parseFloat(r.value); labApply(k); });
   });
   $('labReset').addEventListener('click', function () { L = Object.assign({}, LAB_DEF); labApply('all'); });
-  function setLab(open) {
-    labPanel.hidden = !open; $('labBtn').setAttribute('aria-expanded', String(open));
-    document.body.classList.toggle('lab-open', open);
-    /* bring the print to the top of the screen, where it stays while the drawer is open */
-    if (open) { var top = plate.parentNode.getBoundingClientRect().top; if (top > 1) window.scrollBy(0, top); }
+  /* Song, Lyrics and Lab: one panel at a time, below the print (the print shrinks to sit above it) */
+  var panelBtns = document.querySelectorAll('[data-panel]');
+  function openPanel(id) {
+    panels.forEach(function (p) { p.hidden = p.id !== id; });
+    panelBtns.forEach(function (b) { b.setAttribute('aria-expanded', String(b.dataset.panel === id)); });
+    hideBubble(); wakeHud();
   }
-  $('labBtn').addEventListener('click', function () { setLab(labPanel.hidden); });
-  $('labDone').addEventListener('click', function () { setLab(false); $('labBtn').focus({ preventScroll: true }); });
+  function closePanels() {
+    var was = panels.filter(function (p) { return !p.hidden; })[0];
+    panels.forEach(function (p) { p.hidden = true; });
+    panelBtns.forEach(function (b) { b.setAttribute('aria-expanded', 'false'); });
+    hideBubble(); wakeHud();
+    var opener = was && document.querySelector('[data-panel="' + was.id + '"]'); if (opener && document.activeElement && was.contains(document.activeElement)) opener.focus({ preventScroll: true });
+  }
+  panelBtns.forEach(function (b) { b.addEventListener('click', function () { openPanel(b.dataset.panel); }); });
+  document.querySelectorAll('[data-close]').forEach(function (b) { b.addEventListener('click', closePanels); });
   $('labPlay').addEventListener('click', togglePlay);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !labPanel.hidden) setLab(false); });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && (panelOpen() || !bubble.hidden)) { if (!bubble.hidden) hideBubble(); else closePanels(); } });
+  /* each setting's explanation pops up in a bubble from its label, above it when there is room */
+  var bubble = $('bubble'), bubbleFor = null;
+  function hideBubble() { if (bubbleFor) bubbleFor.setAttribute('aria-expanded', 'false'); bubble.hidden = true; bubbleFor = null; }
+  labPanel.querySelectorAll('.k[data-tip]').forEach(function (k) {
+    k.addEventListener('click', function () {
+      if (bubbleFor === k) { hideBubble(); return; }
+      hideBubble(); bubbleFor = k; k.setAttribute('aria-expanded', 'true');
+      bubble.textContent = k.dataset.tip; bubble.hidden = false;
+      var pr = labPanel.getBoundingClientRect(), kr = k.getBoundingClientRect(), head = labPanel.querySelector('.panel-head').getBoundingClientRect();
+      var bh = bubble.offsetHeight, above = kr.top - bh - 12 > head.bottom, x = Math.max(12, kr.left - pr.left - 6);
+      bubble.classList.toggle('above', above); bubble.classList.toggle('below', !above);
+      bubble.style.left = x + 'px';
+      bubble.style.top = (kr.top - pr.top + labPanel.scrollTop + (above ? -bh - 10 : kr.height + 10)) + 'px';
+      bubble.style.setProperty('--tail', Math.max(12, Math.min(kr.width - 10, 24) + kr.left - pr.left - x - 6) + 'px');
+    });
+  });
+  document.addEventListener('pointerdown', function (e) { if (bubbleFor && !bubble.contains(e.target) && !bubbleFor.contains(e.target)) hideBubble(); });
+  /* lab tabs; the last one used is remembered on this device */
+  var tabBtns = labPanel.querySelectorAll('[role="tab"]');
+  function showTab(name) {
+    tabBtns.forEach(function (t) { t.setAttribute('aria-selected', String(t.dataset.tab === name)); t.tabIndex = t.dataset.tab === name ? 0 : -1; });
+    labPanel.querySelectorAll('.pane').forEach(function (p) { p.hidden = p.dataset.pane !== name; });
+    hideBubble(); store.set('pitchscape:tab', name);
+  }
+  tabBtns.forEach(function (t) { t.addEventListener('click', function () { showTab(t.dataset.tab); }); });
+  showTab(labPanel.querySelector('[data-tab="' + store.get('pitchscape:tab') + '"]') ? store.get('pitchscape:tab') : 'colour');
   labUI();
   /* the key is typed once: after that it shows as a line, and the field (and the keyboard) only comes back on Change */
   var keyIn = $('lab-key'), keySaved = $('keySaved');
@@ -1381,7 +1413,7 @@ body.lab-open .app { padding-bottom: 60svh; }  /* room to scroll the print up to
   keyIn.addEventListener('change', function () {
     var v = keyIn.value.trim(); if (v) store.set('pitchscape:key', v); else store.del('pitchscape:key');
     keyUI();
-    if (v && S.retry) { var again = S.retry; S.retry = null; again(); return; }
+    if (v && S.retry) { var again = S.retry; S.retry = null; closePanels(); again(); return; }
     say(v ? 'Server key saved.' : 'Server key removed.');
   });
   if (L.font !== 'grotesque') ensureFont(L.font).then(function () { layoutWords(); S.dirty = true; });
