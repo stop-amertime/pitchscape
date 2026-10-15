@@ -61,12 +61,13 @@ def main():
             f'Content-Type: audio/wav\r\n\r\n').encode() + audio + f'\r\n--{bnd}--\r\n'.encode()
     t0 = time.time()
     j = call(api + '/analyze', key, body, f'multipart/form-data; boundary={bnd}')
+    job, jkey = j.get('job'), j.get('key')
     while j.get('status') not in ('done', 'failed'):
         if time.time() - t0 > 900:
             sys.exit('timed out waiting for the analysis')
         print('  %4.0fs %s' % (time.time() - t0, j.get('stage') or j.get('status')))
         time.sleep(10)
-        j = call(f"{api}/jobs/{j.get('job')}?key={j.get('key')}", key) if j.get('job') else j
+        j = call(f'{api}/jobs/{job}?key={jkey}', key)
     if j['status'] == 'failed':
         sys.exit('analysis failed: ' + j.get('error', '?'))
     pk = j['pack']
