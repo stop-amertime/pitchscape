@@ -147,7 +147,10 @@ The Lab button opens A/B switches, each with a line saying what it does; the pri
 open. Only settings changed from the defaults are kept on the device (`localStorage` key `pitchscape:lab`), so a new
 default reaches anyone who left that setting alone. Colour by instrument (drums share one ink, tuned notes share warm
 inks), by height (the pitch axis, low blue to high pink, whatever made the sound) or by note name (circle-of-fifths
-colours; drums keep the drum ink). Drum ink. Drum marks that follow each hit's sound (spikier when brighter, trailing
+colours; drums keep the drum ink). Palette, for colour by instrument, all real riso inks: Rainbow (an ink each),
+Warm and cool (the tune in warm inks, the backing in cool), Three inks (pink voice, blue bass and keys, sunflower pads,
+pale pink leads, black drums and words) or Two inks (the same with pale blue pads), where shared inks overlap and mix
+as on a real print. Drum marks that follow each hit's sound (spikier when brighter, trailing
 while it rings) or all alike. Kick as a soft smudge or a halftone thud; bass as a soft smear or a sharp line. Word face
 (grotesque, script, serif, mono), sized and weighted by how loudly each word was sung, or fixed. Sliders for shake, tilt
 (CSS 3D: the sheet tips back on kicks and sways with the bass), glow, misprint (each ink jumps out of register on

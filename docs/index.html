@@ -28,6 +28,7 @@
   --green: #00A95C;
   --crimson: #E45D50;
   --drum: #23211F;
+  --c-bass: #3255A4; --c-voice: #00838A; --c-keys: #FF6C2F; --c-pads: #FFB511; --c-leads: #E45D50; --c-words: #00838A;
   --on-blue: #F4F5F1;
   --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
   --mono: "DM Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -71,7 +72,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; }
 .caption { border-top: 1px dashed var(--rule); padding: 10px 14px 12px; display: grid; gap: 4px; min-height: 64px; }
 .cap-now { margin: 0; font: 650 clamp(17px, 4.6vw, 21px)/1.3 var(--display); text-wrap: balance; color: var(--upcoming); min-width: 0; overflow-wrap: anywhere; }
 .cap-now .on { color: var(--ink); }
-.cap-now .cur { color: var(--teal); }
+.cap-now .cur { color: var(--c-words); }
 .cap-next { margin: 0; font: 400 12.5px/1.35 var(--mono); color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
 
 /* transport */
@@ -206,7 +207,7 @@ body.lab-open .plate { height: clamp(240px, 44svh, 560px); }
 
   <section class="lab" id="labPanel" aria-label="Lab" hidden>
     <div class="lab-row"><span class="lab-k" id="lk-colour">Colour</span><div class="seg" data-key="colour" role="group" aria-labelledby="lk-colour" aria-describedby="ld-colour"><button type="button" id="lab-colour-inst" data-v="inst">By instrument</button><button type="button" id="lab-colour-height" data-v="height">By height</button><button type="button" id="lab-colour-note" data-v="note">By note</button></div><span class="lab-d" id="ld-colour">What sets a mark&rsquo;s colour: its instrument, how high it sits, or which note it is.</span></div>
-    <div class="lab-row"><span class="lab-k" id="lk-drumInk">Drum ink</span><div class="seg" data-key="drumInk" role="group" aria-labelledby="lk-drumInk" aria-describedby="ld-drumInk"><button type="button" id="lab-drumInk-black" data-v="black">Black</button><button type="button" id="lab-drumInk-pink" data-v="pink">Pink</button><button type="button" id="lab-drumInk-purple" data-v="purple">Purple</button></div><span class="lab-d" id="ld-drumInk">The one colour every drum prints in.</span></div>
+    <div class="lab-row"><span class="lab-k" id="lk-palette">Palette</span><div class="seg" data-key="palette" role="group" aria-labelledby="lk-palette" aria-describedby="ld-palette"><button type="button" id="lab-palette-rainbow" data-v="rainbow">Rainbow</button><button type="button" id="lab-palette-warmcool" data-v="warmcool">Warm and cool</button><button type="button" id="lab-palette-three" data-v="three">Three inks</button><button type="button" id="lab-palette-two" data-v="two">Two inks</button></div><span class="lab-d" id="ld-palette">The inks for Colour: By instrument. Rainbow: an ink for each instrument. Warm and cool: the tune in warm inks, the backing in cool ones. Three and two inks: instruments share inks, and where they overlap the inks mix.</span></div>
     <div class="lab-row"><span class="lab-k" id="lk-drums">Drum marks</span><div class="seg" data-key="drums" role="group" aria-labelledby="lk-drums" aria-describedby="ld-drums"><button type="button" id="lab-drums-sound" data-v="sound">Follow the sound</button><button type="button" id="lab-drums-simple" data-v="simple">All alike</button></div><span class="lab-d" id="ld-drums">Follow the sound: brighter hits print spikier and ringing ones trail. All alike: only how hard each is hit changes it.</span></div>
     <div class="lab-row"><span class="lab-k" id="lk-kick">Kick</span><div class="seg" data-key="kick" role="group" aria-labelledby="lk-kick" aria-describedby="ld-kick"><button type="button" id="lab-kick-smudge" data-v="smudge">Smudge</button><button type="button" id="lab-kick-halftone" data-v="halftone">Halftone</button></div><span class="lab-d" id="ld-kick">A soft smudge, or a screen of dots like a printed photo.</span></div>
     <div class="lab-row"><span class="lab-k" id="lk-bass">Bass</span><div class="seg" data-key="bass" role="group" aria-labelledby="lk-bass" aria-describedby="ld-bass"><button type="button" id="lab-bass-smudge" data-v="smudge">Smudge</button><button type="button" id="lab-bass-line" data-v="line">Line</button></div><span class="lab-d" id="ld-bass">A soft smear, or a sharp line whose edge shows the tone.</span></div>
@@ -226,7 +227,7 @@ body.lab-open .plate { height: clamp(240px, 44svh, 560px); }
 
   <section class="inks" aria-label="Inks: tap one to lift it off the print">
     <div class="ink-grid">
-      <button class="ink" type="button" data-layer="bass" aria-pressed="true" style="--c: var(--blue)">
+      <button class="ink" type="button" data-layer="bass" aria-pressed="true" style="--c: var(--c-bass)">
         <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 15c3-5 5-5 8 0s5 5 8 0 4-5 6-2v5c-2-3-3-3-6 2s-5 5-8 0-5-5-8 0z" fill="currentColor"/></svg>
         <span class="nm">Bass</span></button>
       <button class="ink" type="button" data-layer="kick" aria-pressed="true" style="--c: var(--drum)">
@@ -241,19 +242,19 @@ body.lab-open .plate { height: clamp(240px, 44svh, 560px); }
       <button class="ink" type="button" data-layer="toms" aria-pressed="true" style="--c: var(--drum)">
         <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><circle cx="12" cy="13.5" r="7.2" fill="currentColor"/><circle cx="21.4" cy="8.6" r="1.6" fill="currentColor"/><circle cx="21" cy="19.2" r="1.1" fill="currentColor"/></svg>
         <span class="nm">Toms</span></button>
-      <button class="ink" type="button" data-layer="voice" aria-pressed="true" style="--c: var(--teal)">
+      <button class="ink" type="button" data-layer="voice" aria-pressed="true" style="--c: var(--c-voice)">
         <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M1.5 17c4-1 5-9 9.5-9s4.5 7 8.5 7c2.6 0 3.6-2.4 5-4v4c-1.6 2-3 4-5.2 4-4.5 0-5-7-8.4-7S6 19 1.5 21z" fill="currentColor"/></svg>
         <span class="nm">Voice / lead</span></button>
-      <button class="ink" type="button" data-layer="keys" aria-pressed="true" style="--c: var(--orange)">
+      <button class="ink" type="button" data-layer="keys" aria-pressed="true" style="--c: var(--c-keys)">
         <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 6.5h3.5L24 11.6v2.8L5.5 19.5H2z" fill="currentColor"/></svg>
         <span class="nm">Keys &amp; plucks</span></button>
-      <button class="ink" type="button" data-layer="pads" aria-pressed="true" style="--c: var(--sun)">
+      <button class="ink" type="button" data-layer="pads" aria-pressed="true" style="--c: var(--c-pads)">
         <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M1.5 13C8 12.6 13 6 24.5 6v14C13 20 8 13.4 1.5 13z" fill="currentColor" opacity=".85"/></svg>
         <span class="nm">Pads &amp; strings</span></button>
-      <button class="ink" type="button" data-layer="leads" aria-pressed="true" style="--c: var(--crimson)">
+      <button class="ink" type="button" data-layer="leads" aria-pressed="true" style="--c: var(--c-leads)">
         <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 8h4v1.6h4V8h4v1.6h4V8h4v10h-4v-1.6h-4V18h-4v-1.6H6V18H2z" fill="currentColor"/></svg>
         <span class="nm">Organ &amp; leads</span></button>
-      <button class="ink" type="button" data-layer="words" aria-pressed="true" style="--c: var(--teal)">
+      <button class="ink" type="button" data-layer="words" aria-pressed="true" style="--c: var(--c-words)">
         <svg viewBox="0 0 26 26" aria-hidden="true"><text x="13" y="18" text-anchor="middle" font-family="Bricolage Grotesque, system-ui, sans-serif" font-weight="700" font-size="13" fill="currentColor">Aa</text></svg>
         <span class="nm">Words</span></button>
     </div>
@@ -1301,7 +1302,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
 
   /* ------------------------------------------------------------ lab settings (A/B switches, kept on this device) */
   var LAB_DEF = {
-    colour: 'inst', drumInk: 'black', drums: 'sound', kick: 'smudge', bass: 'smudge', font: 'grotesque', wordSize: 'voice',
+    colour: 'inst', palette: 'rainbow', drums: 'sound', kick: 'smudge', bass: 'smudge', font: 'grotesque', wordSize: 'voice',
     shake: reduceMotion ? 0 : 0.25, tilt: reduceMotion ? 0 : 0.5, pulse: reduceMotion ? 0 : 0.6, slip: reduceMotion ? 0 : 0.35,
     secs: 0, ink: 1, weight: 1, grain: 0.5
   };
@@ -1398,12 +1399,23 @@ if (typeof module !== 'undefined') module.exports = DSP;
     }
   }
   function heightHex(y) { return HLUT[Math.round(clamp((H - 12 - y) / Math.max(1, H - 28), 0, 1) * 95)] || C.ink; }
-  function drumHex() { return L.drumInk === 'pink' ? C.pink : L.drumInk === 'purple' ? C.purple : C.ink; }
-  var GROUP = { bass: 'blue', voice: 'teal', keys: 'orange', pads: 'sun', leads: 'crimson' };
+  /* palettes: the ink each kind of sound prints in, all real riso inks. Rainbow gives every instrument its own ink.
+     Warm and cool prints what carries the tune in warm inks and the backing in cool ones. Three inks and two inks
+     share inks between instruments, as a real riso print would, so overlaps mix into new colours; a pale ink there is
+     a tint of a full one (the same drum printed through a screen), so the voice keeps the only solid pink. Drums
+     print in black throughout, and words in an ink dark enough to read. */
+  var PALETTES = {
+    rainbow: { bass: '#3255A4', voice: '#00838A', words: '#00838A', keys: '#FF6C2F', pads: '#FFB511', leads: '#E45D50', drum: '#23211F' },
+    warmcool: { bass: '#3255A4', voice: '#FF48B0', words: '#914E72', keys: '#00838A', pads: '#5EC8E5', leads: '#FF6C2F', drum: '#23211F' },
+    three: { bass: '#3255A4', voice: '#FF48B0', words: '#23211F', keys: '#3255A4', pads: '#FFB511', leads: '#F794CA', drum: '#23211F' },
+    two: { bass: '#3255A4', voice: '#FF48B0', words: '#23211F', keys: '#3255A4', pads: '#99AACA', leads: '#F794CA', drum: '#23211F' }
+  };
+  function pal() { return PALETTES[L.palette] || PALETTES.rainbow; }
+  function drumHex() { return pal().drum; }
   function tint(group, hz, y) {
     if (L.colour === 'height') return heightHex(y != null ? y : yOf(hz || 1000));
     if (L.colour === 'note' && group !== 'drum' && hz > 0) { var pc = ((Math.round(DSP.ftom(hz)) % 12) + 12) % 12; return NOTE_FIFTHS[(pc * 7) % 12]; }
-    return group === 'drum' ? drumHex() : C[GROUP[group]];
+    return pal()[group];
   }
   function inkA(a) { return Math.min(1, a * L.ink); }
 
@@ -1689,7 +1701,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
     for (var i = lowerBound(S.words, now - WIN - 0.8, 't'); i < S.words.length && S.words[i].t <= now; i++) {
       var w = S.words[i], x = xOf(w.t, now); if (x + w.px < -4) continue;
       var age = now - w.t, k = age < 0.09 ? age / 0.09 : 1, y = w.y - w.lane * w.lh;
-      ctx.font = w.font; ctx.fillStyle = tint('voice', w.hz, y);
+      ctx.font = w.font; ctx.fillStyle = tint('words', w.hz, y);
       ctx.globalAlpha = inkA(0.4 + 0.58 * k);
       if (k < 1) { ctx.save(); ctx.translate(x, y); var sc = 1.25 - 0.25 * k; ctx.scale(sc, sc); ctx.fillText(w.text, 0, 0); ctx.restore(); }
       else ctx.fillText(w.text, x, y);
@@ -2322,7 +2334,9 @@ if (typeof module !== 'undefined') module.exports = DSP;
       var k = r.dataset.key, v = k === 'secs' ? (L.secs > 0 ? L.secs : WIN) : L[k];
       r.value = String(v); $('lab-' + k + '-v').textContent = labVal(k, v);
     });
-    document.documentElement.style.setProperty('--drum', drumHex());
+    var P = pal(), root = document.documentElement.style;
+    root.setProperty('--drum', P.drum);
+    ['bass', 'voice', 'keys', 'pads', 'leads', 'words'].forEach(function (k) { root.setProperty('--c-' + k, P[k]); });
   }
   function labApply(k) {
     saveLab();
