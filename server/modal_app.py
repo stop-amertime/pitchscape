@@ -29,6 +29,7 @@ SITE = '/usr/local/lib/python3.11/site-packages'
 app = modal.App('pitchscape')
 cache = modal.Volume.from_name('pitchscape-cache', create_if_missing=True)      # durable; first TiB free
 progress = modal.Dict.from_name('pitchscape-progress', create_if_missing=True)   # transient stage messages
+running = modal.Dict.from_name('pitchscape-running', create_if_missing=True)     # song -> the job analysing it
 CACHE = '/cache'
 
 
@@ -124,7 +125,19 @@ def api():
         cached = await read_pack(key)
         if cached is not None:
             return {'status': 'done', 'pack': cached}
+        # the same song sent again while it is still being analysed (a reload, a second tab): follow that job
+        job = await running.get.aio(key)
+        if job:
+            try:
+                pack = await modal.FunctionCall.from_id(job).get.aio(timeout=0)
+            except TimeoutError:
+                return {'status': 'queued', 'job': job, 'key': key}
+            except Exception:                       # it failed or its output expired: start afresh
+                pass
+            else:
+                return {'status': 'done', 'pack': pack}
         call = await analyze.spawn.aio(data, key, file.filename or 'song.mp3')
+        await running.put.aio(key, call.object_id)
         return {'status': 'queued', 'job': call.object_id, 'key': key}
 
     @web.get('/jobs/{job}')

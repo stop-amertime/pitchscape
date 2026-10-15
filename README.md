@@ -6,9 +6,10 @@ follows the sound's tone: smooth edges for pure tones, sawtooth edges for bright
 noise. Ink strength follows loudness, so quiet passages print pale and thin. Lyrics can be pasted in and are printed
 along the voice line, at the moment and pitch each word is sung.
 
-It started life as a claude.ai artifact, where large models could not load, so it has its own lightweight analysis
-engine (`src/dsp.js`) that runs on the phone. The heavier, model-based analysis (stems, drum transcription, notes,
-word timing) is moving to a server (`server/`), with the in-browser engine kept as the instant preview.
+It started life as a claude.ai artifact, where large models could not load, so it grew its own lightweight analysis
+engine (`src/dsp.js`) that ran on the phone. Songs are now analysed on a server with established models (`server/`),
+and the page draws nothing until that analysis is in: the in-browser engine was too often wrong to show. The page still
+uses it for lyric placement and the demo song's audio; the tests and benches below still measure it.
 
 ## What's here
 
@@ -71,18 +72,18 @@ Deploying needs three repository secrets: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECR
 modal.com/settings/tokens) and `PITCHSCAPE_PASSPHRASE` (any phrase; the page asks for it once, so strangers cannot spend
 the GPU credit). The workflow writes the server's address to `docs/config.json`, which the page reads.
 
-In the page, put the passphrase in Lab → Server key once. A song is known by the SHA-256 of its file. If its full
-analysis exists, on the device (IndexedDB) or on the server (a JSON file per song in a Modal Volume, kept for good; the
-first TiB a month is free), it loads at once: no upload, no analysis on the phone. Otherwise it gets the quick
-on-phone analysis straight away, is uploaded for the full one, and switches over when that arrives (with the words
-Whisper heard, unless you have placed lyrics for that song yourself). Both stores are keyed by `PIPELINE_VERSION` in
+In the page, put the passphrase in Lab → Server key once. A song is known by the SHA-256 of its file. If its analysis
+exists, on the device (IndexedDB) or on the server (a JSON file per song in a Modal Volume, kept for good; the first TiB
+a month is free), it loads at once. Otherwise it is uploaded, the sheet shows each stage of the analysis, and the song
+plays once the analysis is in (with the words Whisper heard, unless you have placed lyrics for that song yourself).
+The demo song goes the same way: rendered on the phone, then analysed once like any other song. Both stores are keyed by `PIPELINE_VERSION` in
 `server/modal_app.py` as well: bump it when the analysis changes and songs are analysed afresh. The audio itself is
 never kept. After each deploy the workflow sends a generated 12-second clip through the live server
 (`server/smoke_test.py`).
 
 ## How it works
 
-**In the browser (any song you load):** `src/dsp.js`
+**In the browser (no longer drawn; kept for lyric placement and the benches):** `src/dsp.js`
 1. Mid/side split and resample to 22,050 Hz. STFT with a 2048 window and 512 hop (23 ms per frame).
 2. Harmonic/percussive separation by median filtering (time medians keep sustained tones, frequency medians keep hits).
 3. Drums: onset detection on percussive energy in three bands (kick 35 to 140 Hz, snare 0.8 to 5 kHz with a noisiness
@@ -142,13 +143,19 @@ Steps (times measured on a 3-minute song, 2 CPU cores):
 
 ## The Lab
 
-The Lab button opens A/B switches, kept on the device (`localStorage` key `pitchscape:lab`); the print stays pinned at
-the top while it is open. Colour by instrument (drums share one ink, tuned notes share warm inks), by height (the pitch
-axis, low blue to high pink, whatever made the sound) or by note name (circle-of-fifths colours; drums keep the drum
-ink). Drum ink. Drums printed from each hit's own spectrum and ring time, or as the older fixed shapes. Kick as a
-halftone thud, a smudge, or the older ring. Word face (grotesque, script, serif, mono), sized and weighted by how loudly
-each word was sung, or fixed. Sliders for shake, tilt (CSS 3D: the sheet tips back on kicks and leans with the bass),
-thud glow, registration slip, seconds on screen, ink strength, stroke weight and paper grain.
+The Lab button opens A/B switches, each with a line saying what it does; the print stays pinned at the top while it is
+open. Only settings changed from the defaults are kept on the device (`localStorage` key `pitchscape:lab`), so a new
+default reaches anyone who left that setting alone. Colour by instrument (drums share one ink, tuned notes share warm
+inks), by height (the pitch axis, low blue to high pink, whatever made the sound) or by note name (circle-of-fifths
+colours; drums keep the drum ink). Drum ink. Drum marks that follow each hit's sound (spikier when brighter, trailing
+while it rings) or all alike. Kick as a soft smudge or a halftone thud; bass as a soft smear or a sharp line. Word face
+(grotesque, script, serif, mono), sized and weighted by how loudly each word was sung, or fixed. Sliders for shake, tilt
+(CSS 3D: the sheet tips back on kicks and sways with the bass), glow, misprint (each ink jumps out of register on
+kicks), seconds on screen, ink strength, thickness and speckle (paper showing through the ink).
+
+Every line that is sounding has a round pen tip where it is being printed. Each drum prints one compact mark per hit,
+where the hit is loudest: a kick as a soft thud at its boom, a tom as a round drop at its note, a snare as a spiky
+splat at its crack, a hat as a tight fleck and a cymbal as a fine spray at their sizzle.
 
 ## Data formats
 
