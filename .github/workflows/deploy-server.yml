@@ -1,0 +1,47 @@
+name: deploy server
+
+on:
+  push:
+    branches: [main]
+    paths: ['server/**', '.github/workflows/deploy-server.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+      PITCHSCAPE_PASSPHRASE: ${{ secrets.PITCHSCAPE_PASSPHRASE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check secrets
+        run: |
+          missing=""
+          [ -n "$MODAL_TOKEN_ID" ] || missing="$missing MODAL_TOKEN_ID"
+          [ -n "$MODAL_TOKEN_SECRET" ] || missing="$missing MODAL_TOKEN_SECRET"
+          [ -n "$PITCHSCAPE_PASSPHRASE" ] || missing="$missing PITCHSCAPE_PASSPHRASE"
+          if [ -n "$missing" ]; then echo "::error::Add these repository secrets:$missing"; exit 1; fi
+      - run: pip install modal
+      - name: Store the upload passphrase on Modal
+        run: modal secret create pitchscape PITCHSCAPE_PASSPHRASE="$PITCHSCAPE_PASSPHRASE" --force
+      - name: Deploy
+        run: modal deploy -m server.modal_app
+      - name: Tell the page where the server is
+        run: |
+          url=$(python -c "import modal; print(modal.Function.from_name('pitchscape', 'api').get_web_url())")
+          echo "Server: $url" >> "$GITHUB_STEP_SUMMARY"
+          printf '{"api": "%s"}\n' "$url" > docs/config.json
+          if ! git diff --quiet -- docs/config.json || [ -n "$(git status --porcelain docs/config.json)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898+github-actions[bot]@users.noreply.github.com"
+            git add docs/config.json
+            git commit -m "Point the page at the deployed server"
+            git push
+          fi

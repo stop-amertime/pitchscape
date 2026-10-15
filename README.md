@@ -45,6 +45,32 @@ Push the repo, then in the repo settings under Pages choose "Deploy from a branc
 The site is fully static. Commercial audio stays out of this public repo (`.gitignore` blocks `*.mp3`, `*.m4a` and
 `docs/*.pack.json`): the built-in song is the synthetic demo, and you load your own songs from your device.
 
+## The analysis server
+
+`server/pipeline.py` turns a song into a pack using established, trained models; `server/modal_app.py` runs it on a
+GPU at [Modal](https://modal.com) behind a small upload API, and `.github/workflows/deploy-server.yml` deploys it on
+every push to `main` that touches `server/`.
+
+| Layer | Model | Licence |
+| --- | --- | --- |
+| stems | Demucs htdemucs (Meta) | MIT |
+| drums: kick, snare, toms, hi-hat, cymbals | ADTOF Frame_RNN (Zehren, Alunno, Bientinesi), via `thebluescreen/adtof-drums-onnx` | CC BY-NC-SA 4.0, non-commercial |
+| notes | Basic Pitch (Spotify) | Apache-2.0 |
+| bass line | pYIN (librosa) | ISC |
+| voice line | CREPE (torchcrepe) | MIT |
+| words | Whisper (faster-whisper) | MIT |
+
+The pipeline only wires these together and measures plain properties of what they found (loudness, brightness, how
+long a hit rings, how a note starts and fades). On Made in the Dark, ADTOF found no drum hits at all in the stems that
+hold no drums (the old in-browser detector found hundreds there: piano read as hats, voice read as snares), and on the
+full mix 99% of its snares, 93% of its hats and 84% of its kicks matched the hits it found in the isolated drum stem.
+Whisper's word starts landed within 0.3 s of the forced-alignment reference for 84% of words (small model, CPU).
+
+Run it locally (Python 3.11, ffmpeg): `python -m server.pipeline SONG.mp3 OUT.json` (`--stems DIR` reuses Demucs stems).
+Deploying needs three repository secrets: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` (a token from
+modal.com/settings/tokens) and `PITCHSCAPE_PASSPHRASE` (any phrase; the page asks for it once, so strangers cannot spend
+the GPU credit). The workflow writes the server's address to `docs/config.json`, which the page reads.
+
 ## How it works
 
 **In the browser (any song you load):** `src/dsp.js`
