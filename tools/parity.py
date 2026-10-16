@@ -1,7 +1,7 @@
 """Compare the JavaScript pipeline (src/pipeline, run by tools/analyse.mjs) with the Python one (server/pipeline.py),
 stage by stage, on the test songs (tools/fetch_test_songs.sh).
 
-  python tools/parity.py stems [name-substring ...] [--device cuda]
+  python tools/parity.py stems|tone [name-substring ...] [--device cuda]
 
 Outputs go to testsongs/parity/<song>/ (git-ignored with testsongs/); a summary is printed and written there as
 <stage>.json. Needs the Python pipeline's environment, Node, and the models from tools/export_models.py.
@@ -19,6 +19,11 @@ matched within 10 ms by kind: matched, missing (Python only) and extra (JS only)
 and at the authors' thresholds (margin >= 1); for matched hits, the differences in margin, strength, ring, kick Hz
 and the 16-band profile, and how far the activations differ. The 22.05 kHz resample is measured alone: the JS
 resample against librosa's (SDR), and the details again with Python's 22.05 kHz signal given to the JS.
+
+tone: roughness (asper) and sharpness (acum) of a slice every 0.5 s of vocals, bass, other, guitar and piano from
+Python's stems (py-s0), Python (pipeline._tone_slice in its process pool) against JS (tools/parity_tone.mjs) three ways:
+js_vs_python (JS resampling and level, as the JS pipeline runs), port_alone (JS on Python's own 48 kHz stems: MOSQITO's
+port only) and resampling_alone (the two JS runs). Python's results are kept in tone/py.json; delete it to measure again.
 """
 import json, os, subprocess, sys, time
 
@@ -90,6 +95,92 @@ def stems(song, path, outdir, device):
         run = read_stems(kept)
         res['pipeline_shift_vs_python'] = {s: compare(ref[s], run[s]) for s in SOURCES}
     return res
+
+
+TONE_NAMES = ('vocals', 'bass', 'other', 'guitar', 'piano')
+
+
+def tone(song, path, outdir, device, workers=8):
+    """pipeline.tone's measurements against src/pipeline/tone.mjs, slice by slice, on Python's stems (py-s0): a slice
+    every 0.5 s of each stem the tone stage reads. Python: the pipeline's own resampling, level and process pool
+    (_tone_init, _tone_slice). JS (tools/parity_tone.mjs): from the same 44.1 kHz stems with its own resampling, and
+    from Python's 48 kHz stems (the MOSQITO port alone)."""
+    import concurrent.futures, multiprocessing
+    from server import pipeline as P
+    py = os.path.join(outdir, 'py-s0')
+    if not os.path.exists(os.path.join(py, 'timing.json')):
+        py_separate(path, py, device, 0)
+    d = os.path.join(outdir, 'tone')
+    os.makedirs(os.path.join(d, 'py48'), exist_ok=True)
+    pyres = os.path.join(d, 'py.json')
+    if not os.path.exists(pyres):
+        st = {k: v.astype(np.float32) for k, v in read_stems(py).items()}
+        t0 = time.time()
+        mix = P.to_rate(sum(v.mean(0) for v in st.values()), 44100, P.TONE_SR)
+        gain = 0.0632 / (float(np.sqrt(np.mean(mix ** 2))) + 1e-12)
+        paths = {}
+        for name in TONE_NAMES:
+            y = (P.to_rate(st[name].mean(0), 44100, P.TONE_SR) * gain).astype(np.float32)
+            y.tofile(os.path.join(d, 'py48', name + '.f32'))
+            paths[name] = os.path.join(d, 'py48', name + '.npy')
+            np.save(paths[name], y)
+        t1 = time.time()
+        dur = st['vocals'].shape[1] / 44100
+        keys = [(name, k * 0.5) for name in TONE_NAMES for k in range(int(dur / 0.5) + 1)]
+        ctx = multiprocessing.get_context('spawn')
+        with concurrent.futures.ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=P._tone_init,
+                                                    initargs=(paths,)) as ex:
+            res = list(ex.map(P._tone_slice, keys, chunksize=8))
+        t2 = time.time()
+        for p in paths.values():
+            os.remove(p)
+        json.dump({'names': TONE_NAMES, 'keys': keys}, open(os.path.join(d, 'keys.json'), 'w'))
+        json.dump({'gain': gain, 'workers': workers, 'resample_s': round(t1 - t0, 2), 'slices_s': round(t2 - t1, 2),
+                   'res': res}, open(pyres, 'w'))
+    subprocess.run(['node', os.path.join(ROOT, 'tools', 'parity_tone.mjs'), d, py, '--workers', str(workers)],
+                   check=True)
+    p, j = json.load(open(pyres)), json.load(open(os.path.join(d, 'js.json')))
+    keys = json.load(open(os.path.join(d, 'keys.json')))['keys']
+    P_, J, Q = (np.array(x, np.float64) for x in (p['res'], j['full'], j['pyin']))
+
+    def diff(a, b):
+        """|a - b| over slices that either side measured (not near-silent): percentiles in asper and acum, how many
+        differ by more than 0.01, how often harshness at the defaults (> 0.3) disagrees, and the largest."""
+        live = (a != 0).any(1) | (b != 0).any(1)
+        d_ = np.abs(a - b)[live]
+        ha = np.array([P.harshness(*x) > 0.3 for x in a]); hb = np.array([P.harshness(*x) > 0.3 for x in b])
+        gate = ((a == 0).all(1) != (b == 0).all(1))
+        worst = np.argsort(-np.abs(a - b).max(1))[:5]
+        q = lambda c, x: float('%.3g' % np.percentile(d_[:, c], x)) if len(d_) else 0.0
+        return {'slices': len(a), 'measured': int(live.sum()),
+                'asper': {'p50': q(0, 50), 'p95': q(0, 95), 'p99': q(0, 99), 'max': q(0, 100),
+                          'over_0.01': int((d_[:, 0] > 0.01).sum())},
+                'acum': {'p50': q(1, 50), 'p95': q(1, 95), 'p99': q(1, 99), 'max': q(1, 100),
+                         'over_0.01': int((d_[:, 1] > 0.01).sum())},
+                'harsh_disagree': int((ha != hb).sum()), 'harsh_slices': int(ha.sum()),
+                'silence_gate_disagree': int(gate.sum()),
+                'worst': [[keys[i][0], keys[i][1], [round(x, 4) for x in a[i]], [round(x, 4) for x in b[i]]]
+                          for i in worst]}
+
+    return {'js_vs_python': diff(P_, J), 'port_alone': diff(P_, Q), 'resampling_alone': diff(Q, J),
+            'gain': {'python': p['gain'], 'js': j['gain']}, 'signal_48k': j['signal'],
+            'timing': {'python': {k: p[k] for k in ('workers', 'resample_s', 'slices_s')},
+                       'js': {k: j[k] for k in ('workers', 'warm_s', 'resample_s', 'slices_s', 'slices_pyin_s')}}}
+
+
+def print_tone(song, res):
+    for k in ('js_vs_python', 'port_alone', 'resampling_alone'):
+        r = res[k]
+        print('%-40s %-17s %5d/%-5d slices  asper p50 %.1e p99 %.1e max %.1e  acum p50 %.1e p99 %.1e max %.1e  '
+              'harsh>0.3 disagree %d/%d  gate %d' % (
+                  song if k == 'js_vs_python' else '', k, r['measured'], r['slices'], r['asper']['p50'],
+                  r['asper']['p99'], r['asper']['max'], r['acum']['p50'], r['acum']['p99'], r['acum']['max'],
+                  r['harsh_disagree'], r['harsh_slices'], r['silence_gate_disagree']), flush=True)
+    t = res['timing']
+    print('%-40s python %.1f s (+%.1f s resampling), js %.1f s (+%.1f s resampling), %d workers each' % (
+        '', t['python']['slices_s'], t['python']['resample_s'], t['js']['slices_s'], t['js']['resample_s'],
+        t['js']['workers']), flush=True)
+
 
 
 def py_drums(stem, out):
@@ -235,7 +326,7 @@ def print_drums(song, res):
         r['max_abs']), flush=True)
 
 
-STAGES = {'stems': stems, 'drums': drums}
+STAGES = {'stems': stems, 'drums': drums, 'tone': tone}
 
 if __name__ == '__main__':
     args = sys.argv[1:]
@@ -258,6 +349,9 @@ if __name__ == '__main__':
         summary[song] = res
         if stage == 'drums':
             print_drums(song, res)
+            continue
+        if stage == 'tone':
+            print_tone(song, res)
             continue
         line = '  '.join('%s %5.1f' % (s, r['sdr']) for s, r in res['js_vs_python'].items())
         print('%-40s JS vs Python SDR dB: %s' % (song, line), flush=True)

@@ -117,7 +117,7 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
   -66 dBFS). The page plays with the browser's decoder, so a browser analysis matches what is heard.
 - `node tools/analyse.mjs SONG --stems DIR [--shifts 0]` runs what exists so far (stems, then drums);
   `--stems-in DIR --out DIR` starts from stems already made (Python's, to compare a stage on the same input).
-  `python tools/parity.py stems|drums [song...]` compares each stage with Python on the test songs (stems: SDR, and
+  `python tools/parity.py stems|drums|tone [song...]` compares each stage with Python on the test songs (stems: SDR, and
   levels in dBFS, since a near-silent stem has a low SDR however small the difference).
 - A model's manifest entry can say `"ep": "cpu"` (set in export_models.py, with the measurement): both runtimes then
   run it on the CPU (Node: CPU provider; browser: wasm) whatever the GPU.
@@ -143,6 +143,20 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
   WebGPU 32 s, against 3.7 s and 17 s on the CPU, for the same hits. scipy 1.17's uniform_filter1d sums each window
   afresh: emulating it with a running sum moved margins by an ulp.
   `python tools/browser_check.py`, then `tools/browser_check.html?song=NAME`, runs the same modules in Chrome.
+- Tone (`tone.mjs`, `tone.dsp.mjs`): MOSQITO 1.2.1's roughness_dw and sharpness_din_freq (with loudness_zwst_freq
+  and scipy's Butterworth third-octave bands) transcribed line by line, quirks kept; slices in batches of 16 on the
+  workers. MOSQITO needs 9600-point FFTs, so `vendor/fft64.wasm` is rustfft 6.4.1 built by `tools/fft64/build.sh`
+  (Rust here needs `cargo +stable-x86_64-pc-windows-gnu`: the MSVC linker is missing). `python tools/parity.py tone`:
+  a slice every 0.5 s of vocals, bass, other, guitar and piano from Python's stems, all nine songs: 9327 measured
+  slices (of 19680; the rest near-silent on both sides), harshness at the defaults (> 0.3) disagrees on 0 of 1900, the
+  silence gate on 0, and no slice differs by 0.01 asper or acum. Roughness: median 1e-8 asper, 99th percentile under
+  5e-6, largest 2.5e-3 (Fluoride bass at 60 s, 0.1122 against 0.1146, present with Python's own 48 kHz signal, so in
+  the port; not traced). Sharpness: largest 4e-6 acum. With Python's 48 kHz stems as input (the port alone)
+  sharpness agrees to 2e-12 and roughness to a median of 1e-16; resampling and level alone (JS's 48 kHz stems are
+  131-139 dB SNR against librosa's; the gain differs by 1e-7 since numpy takes the mean square in float32) move
+  roughness by up to 9e-4. pipeline.tone itself (made-up notes and pitch tracks, guitar solo): the same 541 slices,
+  within 5e-6. Speed, 8 workers each: Python's process pool 942 s for the nine songs, JS 70 s (13x); 48 kHz
+  resampling 0.8-2.5 s a song. Not yet run in Chrome.
 - Stems so far (htdemucs_6s, all nine test songs, shifts=0 on both sides): 35-75 dB SDR against PyTorch on every
   audible stem, with the difference at or below -75 dBFS. For scale, the pipeline's own random shift moves stems by
   2-22 dB. Chrome on the RTX 5080: a 222 s song in 15 s with the shader cache warm (plus 2.5 s to create the session),
