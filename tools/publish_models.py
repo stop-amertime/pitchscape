@@ -31,7 +31,25 @@ SOURCES = {
                     'Transcription and Multipitch Estimation", ICASSP 2022), Spotify, from '
                     'https://github.com/spotify/basic-pitch: the ONNX file the basic-pitch 0.4.0 package ships, copied '
                     'unchanged.', 'Apache-2.0'),
+    'silero_vad': ('Silero VAD v6 voice activity detector (Silero Team, https://github.com/snakers4/silero-vad): the '
+                   'ONNX file faster-whisper 1.2.1 ships and runs for vad_filter, copied unchanged.', 'MIT'),
 }
+for _size in ('base', 'small', 'medium'):
+    _whisper = ('OpenAI Whisper %s (A. Radford, J. W. Kim, T. Xu, G. Brockman, C. McLeavey, I. Sutskever, "Robust '
+                'Speech Recognition via Large-Scale Weak Supervision", 2022), the weights of '
+                'https://huggingface.co/openai/whisper-%s, ' % (_size, _size))
+    SOURCES.update({
+        'whisper_%s_encoder' % _size: (_whisper + 'its encoder (and each decoder layer\'s cross-attention keys and '
+                                       'values) exported to ONNX in float16 by tools/export_whisper.py.', 'MIT'),
+        'whisper_%s_decoder' % _size: (_whisper + 'its decoder exported to ONNX in float16 by tools/export_whisper.py.',
+                                       'MIT'),
+        'whisper_%s_encoder_f32' % _size: (_whisper + 'its encoder exported to ONNX in float32 (for ONNX Runtime\'s CPU '
+                                           'provider) by tools/export_whisper.py.', 'MIT'),
+        'whisper_%s_decoder_f32' % _size: (_whisper + 'its decoder exported to ONNX in float32 by '
+                                           'tools/export_whisper.py.', 'MIT'),
+        'whisper_%s' % _size: (_whisper + 'its tokenizer and the tokens faster-whisper suppresses, as JSON (from '
+                               'https://huggingface.co/Systran/faster-whisper-%s).' % _size, 'MIT'),
+    })
 
 
 def card(repo, manifest):

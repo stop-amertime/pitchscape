@@ -225,6 +225,33 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
   repeatable; the JS dithers the same way by default (`stats.dither = false` to compare). numpy 2 keeps float32 when
   an array meets a Python float (env_follow, thresholds, percentile + 1e-9), so those run in float32 here too. On
   Windows, two servers can listen on the same port (another session's took half the requests): pick a free one.
+- Words (`words.mjs`, `tags.mjs`, `whisper.mjs`, `whisper.dsp.mjs`): `songInfo(bytes, name, sha)` is song_info with its
+  own tag reader (ID3v1/v2, MP3 Xing/LAME/VBRI, MP4, FLAC, Ogg Vorbis/Opus, WAV; FFmpeg 9.0.2's key names and length
+  arithmetic, no ffprobe); `lyricsFor(info, dur, vocals44, rt)` is lyrics_for: LRCLIB (header `Lrclib-Client` where a
+  browser forbids User-Agent; LRCLIB allows it cross-origin), find_lyrics, parse_lrc, difflib's matching blocks, and
+  place_words. Whisper is a port of faster-whisper 1.2.1's transcribe and the CTranslate2 parts it calls (Silero VAD v6,
+  log-mel, language, the temperature fallback with CTranslate2's beam search and best_of sampling as one batch, the
+  logits processors, align's median filter and DTW, word merging), on our own ONNX export (`tools/export_whisper.py`:
+  one input per layer for the encoder's keys and values and the cache, and an `order` input that reorders the cache
+  for the beams). Medium, as the pipeline: float16 for the browser (715 + 919 MB to download, cached once), float32
+  for Node's CPU (ONNX Runtime's CPU provider has no float16 products; onnxruntime-node cannot keep tensors on the GPU,
+  so its decoder runs on the CPU). Smaller models time words worse against medium: small and base 3-20 % within 0.1 s,
+  0.16-0.3 s early, where medium against itself is 93-100 %.
+  `python tools/parity.py words`, all nine songs, Node: songInfo identical to song_info on all nine; the same LRCLIB
+  record or the same reason for none on all nine (Code Monkey: none at this length). Placed words within 0.1 s of
+  Python's: Dropping Out 100 %, Incoherent 96 %, Hey Ruth 83 %, Fluoride 78 % (Python against its own second run:
+  100, 100, 100, 95 %). faster-whisper is not repeatable where a window falls back to sampling (Fluoride: four Python
+  runs heard 189, 243, 309 and 193 words). Where nothing samples, the port is CTranslate2's to the token: on Fluoride
+  and Hey Ruth every greedy window has the same tokens and scores within 0.005 of CTranslate2 float32 on the CPU, and
+  Hey Ruth's 4th window loops to 224 tokens and falls back in both, where CTranslate2 float16 on the GPU (the pipeline)
+  decodes it cleanly; Chrome's float16 falls back there too. Chrome 155, RTX 5080: Dropping Out (no fallback) same
+  record, same matched share, 97 % of heard words within 0.1 s, Whisper 32.5 s (Python on the GPU 26-33 s); Hey Ruth
+  112 s; Fluoride 133 s. Node: 47-235 s a song (decoder on the CPU, 100 ms a step). `tools/browser_words.html?song=NAME`
+  runs the stage in a browser (served by browser_check.py).
+- Learned: the decoder's time is dispatch, not arithmetic: a step costs about 3 ms a layer on WebGPU whatever the
+  precision or batch (base 21 ms, small 30, medium 73; five beams cost the same as one), so beams and best_of go in one
+  batch. Slicing one stacked [layers, ...] input copies it on every call (ONNX Runtime's CPU provider spent more on
+  that than on the step). An empty cache ([b, heads, 0, dh]) works on WebGPU.
 
 ## Versions: bump them together
 

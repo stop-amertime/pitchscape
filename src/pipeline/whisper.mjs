@@ -211,10 +211,14 @@ async function features(audio, nMels, rt) {
   const padded = new Float32Array(audio.length + 160);           // padding=160
   padded.set(audio);
   const L = padded.length, P = N_FFT / 2;
-  if (L <= P) throw new Error('whisper: audio too short');
-  const x = new Float32Array(L + 2 * P);                          // center: reflect P samples at each end
-  x.set(padded, P);
-  for (let i = 0; i < P; i++) { x[P - 1 - i] = padded[i + 1]; x[P + L + i] = padded[L - 2 - i]; }
+  // center: np.pad(mode='reflect') by P at each end, reflected again where the signal is shorter than P (no speech
+  // leaves only the 160 samples of padding)
+  const x = new Float32Array(L + 2 * P), period = 2 * (L - 1);
+  for (let i = 0; i < x.length; i++) {
+    let k = ((i - P) % period + period) % period;
+    if (k >= L) k = period - k;
+    x[i] = padded[k];
+  }
   const frames = 1 + Math.floor((x.length - N_FFT) / HOP) - 1;  // the last frame is dropped (stft[..., :-1])
   const filters = melFilters(nMels), pool = rt.pool;
   const per = Math.ceil(frames / pool.size), parts = [];
@@ -244,7 +248,7 @@ function window(f, nMels, seek, size) {
 class Model {
   constructor(rt, size, tok, enc, dec, j) {
     Object.assign(this, {rt, size, tok, enc, dec, L: j.layers, H: j.heads, dh: j.width / j.heads,
-                         calls: 0, ms: 0, encMs: 0, temps: []});
+                         calls: 0, ms: 0, encMs: 0, attempts: []});
   }
 
   static async load(rt, size) {
@@ -474,7 +478,7 @@ async function generateWithFallback(model, mem, random) {
     if (compressionRatio > COMPRESSION_RATIO_THRESHOLD) fallback = true; else belowCr.push(result);
     if (avgLogprob < LOG_PROB_THRESHOLD) fallback = true;
     if (noSpeechProb > NO_SPEECH_THRESHOLD && avgLogprob < LOG_PROB_THRESHOLD) fallback = false;
-    model.temps.push(temperature);
+    model.attempts.push({temperature, tokens: n, score: +best.score.toFixed(4), compression_ratio: +compressionRatio.toFixed(3)});
     if (!fallback) { result.done = true; break; }
   }
   if (!result.done) {
@@ -700,9 +704,12 @@ export async function heardWords(vocals16, rt, {size = 'medium', stats = {}, ran
   for (const c of chunks) { audio.set(vocals16.subarray(c.start, c.end), o); o += c.end - c.start; }
   stats.vad_ms = performance.now() - t0;
   stats.speech_s = n / SR;
+  let t = performance.now();
   const {j, model} = await Model.load(rt, size);
-  const f = await features(audio.length ? audio : new Float32Array(1), j.n_mels, rt);
-  stats.features_ms = performance.now() - t0 - stats.vad_ms;
+  stats.load_ms = performance.now() - t;
+  t = performance.now();
+  const f = await features(audio, j.n_mels, rt);
+  stats.features_ms = performance.now() - t;
   // the language, from the first 30 s
   const t1 = performance.now();
   const mem0 = await model.encode(window(f, j.n_mels, 0, Math.min(f.frames, N_FRAMES)));
@@ -748,7 +755,8 @@ export async function heardWords(vocals16, rt, {size = 'medium', stats = {}, ran
     progress(Math.min(seek, contentFrames) / Math.max(1, contentFrames));
   }
   Object.assign(stats, {decoder_calls: model.calls, decoder_ms: model.ms, encoder_ms: model.encMs,
-                       temperatures: model.temps.join(' ')});
+                       temperatures: model.attempts.map(x => x.temperature).join(' '),
+                       attempts: model.attempts});
   stats.windows = windows;
   stats.tokens = steps;
   stats.whisper_ms = performance.now() - t1;

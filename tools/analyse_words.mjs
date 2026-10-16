@@ -44,9 +44,9 @@ if (opt['heard-only']) {
 const secs = ms => ms == null ? null : +(ms / 1000).toFixed(2);
 const w = stats.whisper || {};
 const timing = {song: path.basename(pos[0]), size: opt.size || 'medium', eps: rt.eps, words_s: secs(performance.now() - t0),
-  lrclib_s: secs(stats.lrclib_ms), vad_s: secs(w.vad_ms), features_s: secs(w.features_ms), whisper_s: secs(w.whisper_ms),
+  lrclib_s: secs(stats.lrclib_ms), vad_s: secs(w.vad_ms), load_s: secs(w.load_ms), features_s: secs(w.features_ms), whisper_s: secs(w.whisper_ms),
   speech_s: w.speech_s, windows: w.windows, tokens: w.tokens, decoder_calls: w.decoder_calls, decoder_s: secs(w.decoder_ms),
-  encoder_s: secs(w.encoder_ms), temperatures: w.temperatures};
+  encoder_s: secs(w.encoder_ms), temperatures: w.temperatures, attempts: w.attempts};
 writeFileSync(path.join(opt.out, 'words.json'), JSON.stringify({info, lyrics, found, heard, language}, null, 1));
 writeFileSync(path.join(opt.out, 'timing.json'), JSON.stringify(timing, null, 1));
 log(JSON.stringify({found, timing}));

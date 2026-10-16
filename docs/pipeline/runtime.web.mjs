@@ -1,6 +1,7 @@
 // The pipeline's runtime in the browser: ONNX Runtime Web on WebGPU, models fetched once and kept in the Cache API,
 // audio decoded by the browser, CPU work on module Workers. The Node counterpart is runtime.node.mjs; the stage
-// modules see only what both provide (session, ep, eps, where, pool, decode, sha256, close; see runtime.node.mjs).
+// modules see only what both provide (session, file, release, keeps, ep, eps, where, pool, decode, sha256, close; see
+// runtime.node.mjs).
 import {createPool} from './pool.mjs';
 
 const ORT = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/';
@@ -28,34 +29,44 @@ export async function webRuntime({models = MODELS, ep = 'webgpu', log = () => {}
       return {post: (m, t) => w.postMessage(m, t), onMessage: f => { w.onmessage = e => f(e.data); }, terminate: () => w.terminate()};
     }),
     close() { rt.pool.terminate(); },
+    keeps: ep === 'webgpu',
+    /** A manifest file that is not a model (e.g. a tokenizer), as bytes. */
+    file: name => model(base, manifest[name], (a, b) => progress(name, a, b), log),
+    /** Frees outputs a session kept on the GPU. */
+    release(...ts) { for (const t of ts) if (t && t.location === 'gpu-buffer') t.dispose(); },
     decode: (bytes, sr, channels) => decode(bytes, sr, channels),
     async sha256(bytes) {
       return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
     },
-    async session(name) {
-      if (cache[name]) return cache[name];
+    /** keep: outputs to leave on the GPU (returned as they are, to feed back in and release; see keeps); ep: a provider
+     * for this session instead of the runtime's ('cpu' runs on wasm). */
+    async session(name, {keep = [], ep: want = null} = {}) {
+      const key = [name, want, ...keep].join('|');
+      if (cache[key]) return cache[key];
       const bytes = await model(base, manifest[name], (a, b) => progress(name, a, b), log);
       // a model the manifest says runs better on the CPU (tools/export_models.py says why) runs on wasm
-      const use = manifest[name].ep === 'cpu' ? 'wasm' : ep;
-      const sess = await ort.InferenceSession.create(bytes, {executionProviders: [use], graphOptimizationLevel: 'all'});
+      const use = want ? (want === 'cpu' ? 'wasm' : want) : manifest[name].ep === 'cpu' ? 'wasm' : ep;
+      const opts = {executionProviders: [use], graphOptimizationLevel: 'all'};
+      if (keep.length && use === 'webgpu') opts.preferredOutputLocation = Object.fromEntries(keep.map(k => [k, 'gpu-buffer']));
+      const sess = await ort.InferenceSession.create(bytes, opts);
       log(`${name}: running on ${use}`);
       rt.eps[name] = use;
       const call = async t => {
         const out = await sess.run(t), res = {};
-        for (const [k, v] of Object.entries(out)) res[k] = {data: await v.getData(true), dims: v.dims};
+        for (const [k, v] of Object.entries(out)) res[k] = v.location === 'gpu-buffer' ? v : {data: await v.getData(true), dims: v.dims};
         return res;
       };
-      cache[name] = {
+      cache[key] = {
         run(feeds) {
           const t = {};
-          for (const [k, v] of Object.entries(feeds)) t[k] = new ort.Tensor(v.type || 'float32', v.data, v.dims);
+          for (const [k, v] of Object.entries(feeds)) t[k] = v instanceof ort.Tensor ? v : new ort.Tensor(v.type || 'float32', v.data, v.dims);
           if (use === 'wasm') return call(t);
           const r = gpu.then(() => call(t));         // GPU models take turns
           gpu = r.catch(() => {});
           return r;
         },
       };
-      return cache[name];
+      return cache[key];
     },
   };
   return rt;
