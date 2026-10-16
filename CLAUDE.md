@@ -55,12 +55,17 @@ Corollaries the user has stated or endorsed:
 - Never ask for secrets in chat. Repository secrets: `MODAL_TOKEN_ID`, `MODAL_TOKEN_SECRET`, `PITCHSCAPE_PASSPHRASE`.
 - Plain copy in the UI: say what the user does not know and what they will do differently. Lab explanations live in
   the ⓘ bubbles (`data-tip`), each also as visually hidden text for screen readers.
-- The screen is only the print. Controls appear on tap and fade; Song / Lyrics / Lab open as panels below the print.
+- It opens on the splash (pick a song: from the device, by link, the demo or a tried-and-tested free song). Then the
+  screen is only the print. Controls (play, seek, Change song) appear on tap and fade with a faint Lab cog in the top
+  corner; the Lab opens as a panel below the print. No lyrics pasting: words come from the server or there are none.
 
 ## The flow, end to end
 
 1. **Load** (`openSong` in app.html): the page hashes the file (SHA-256) and looks for its analysis: IndexedDB
-   (`pack:<pipeline>:<sha>`), then `GET /packs/<sha>`.
+   (`pack:<pipeline>:<sha>`), then `GET /packs/<sha>`. A link (`loadLink`) goes straight to `POST /analyze` with `url`:
+   the server downloads it (`server/fetch.py`: public addresses only, checked at every redirect, 80 MB, 60 s; Drive and
+   Dropbox share links become download links), keeps it in the library and answers with its `sha256`; the page then
+   plays `GET /library/<sha>/audio`. The same file by link or upload is the same sha and the same pack.
 2. **Analyse** (`analyse`): otherwise `POST /analyze` with the file; poll `GET /jobs/<job>?key=<version:sha>` and show
    each stage (`STAGES` maps the pipeline's progress messages to text). The page plays only once the analysis is in.
 3. **Server** (`modal_app.py`): caches packs at `/cache/v<version>/<sha>.json` on a Modal Volume; keeps each song's
@@ -135,8 +140,7 @@ changed). The page draws only current packs; an older one is analysed again (clo
   (copy an existing `.row`: `data-tip` text, the `vh` span, `data-key`), formatting in `labVal`, and add the key to
   `CUTS` if moving it must re-run `applyCuts`. Settings save as a diff from the defaults (`pitchscape:lab`).
 - Must fit a 390 x 844 phone with no page scroll; check `prefers-reduced-motion`; system fonts plus self-hosted ones.
-- `localStorage`: `pitchscape:key` (server passphrase), `pitchscape:lab`, `pitchscape:lyrics:<song>` (pasted lyrics
-  win over the server's). IndexedDB `pitchscape`/`packs`.
+- `localStorage`: `pitchscape:key` (server passphrase), `pitchscape:lab`, `pitchscape:tab`. IndexedDB `pitchscape`/`packs`.
 
 ## Testing and checking
 
@@ -187,4 +191,5 @@ changed). The page draws only current packs; an older one is analysed again (clo
   `audio-separator`), backing harmonies via Basic Pitch on that stem, bracketed LRCLIB lines placed on the backing line;
   following Spotify playback by ISRC (the pack's `song`); AcoustID fingerprints for files without tags.
 - Legacy: `tools/add_song.sh`, `align.py`, `build_pack.js` and friends built packs for songs published with the page
-  (`SONGS` in app.html, now empty). They predate the server and are not part of the current flow.
+  (the page no longer loads them). They predate the server and are not part of the current flow; nor are dsp.js's
+  pasted-lyrics, tap-along and LRC helpers, which the page stopped using when lyrics pasting went.

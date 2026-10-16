@@ -12,6 +12,7 @@ its file: the audio as it came (audio.mp3 etc.), its cover art if the file has o
 analysis for each pipeline version (pack-v5.json etc.). So a song is analysed once per version, and with
 --update-library every song in the library is brought up to the current version without being sent again.
 
+  POST /analyze                   a `file`, or a `url` to an audio file, which this server downloads (server/fetch.py)
   GET /library                    every song kept: its sha256, song.json and which versions are analysed
   GET /library/<sha256>/audio     the song's audio;  /library/<sha256>/cover  its cover art
 
@@ -219,16 +220,23 @@ def handler(jobs):
             body = self.rfile.read(n)
             msg = email.parser.BytesParser(policy=email.policy.HTTP).parsebytes(
                 b'Content-Type: ' + self.headers.get('Content-Type', '').encode() + b'\r\n\r\n' + body)
-            part = next((p for p in msg.iter_parts() if p.get_param('name', header='content-disposition') == 'file'), None)
-            if part is None:
-                return self.reply({'detail': 'No file in the upload.'}, 400)
-            data, name = part.get_payload(decode=True), part.get_filename() or 'song.mp3'
+            parts = {p.get_param('name', header='content-disposition'): p for p in msg.iter_parts()}
+            if 'file' in parts:
+                data, name = parts['file'].get_payload(decode=True), parts['file'].get_filename() or 'song.mp3'
+            elif 'url' in parts:
+                from server.fetch import Refused, fetch
+                try:
+                    data, name = fetch(parts['url'].get_content().strip())
+                except Refused as e:
+                    return self.reply({'detail': str(e)}, e.status)
+            else:
+                return self.reply({'detail': 'Send a file or a link.'}, 400)
             sha = jobs.keep(data, name)
             pack = jobs.cached(PIPELINE_VERSION + ':' + sha)
             if pack is not None:
-                return self.reply({'status': 'done', 'pack': pack})
+                return self.reply({'status': 'done', 'pack': pack, 'sha256': sha})
             key = jobs.submit(sha)
-            return self.reply({'status': 'queued', 'job': key.split(':', 1)[1][:16], 'key': key})
+            return self.reply({'status': 'queued', 'job': key.split(':', 1)[1][:16], 'key': key, 'sha256': sha})
 
         def log_message(self, fmt, *a):
             if not re.match(r'"GET /jobs/', fmt % a):

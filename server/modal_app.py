@@ -1,13 +1,16 @@
 """Pitchscape analysis server on Modal (https://modal.com).
 
-  POST /analyze        multipart form field `file` (the song); header `X-Pitchscape-Key: <passphrase>`
-                       -> {"status": "done", "pack": {...}}                 the same audio was analysed before
-                       -> {"status": "queued", "job": "<id>", "key": "<k>"}  analysis started
+  POST /analyze        multipart form field `file` (the song), or `url` (a link to an audio file, which the server
+                       downloads: see server/fetch.py); header `X-Pitchscape-Key: <passphrase>`
+                       -> {"status": "done", "pack": {...}, "sha256": "..."}       the same audio was analysed before
+                       -> {"status": "queued", "job": "<id>", "key": "<k>", "sha256": "..."}  analysis started
+                       A file by link and the same file uploaded have the same SHA-256, so the same analysis.
   GET  /jobs/{job}?key=<k>   (same header)
                        -> {"status": "running", "stage": "..."} | {"status": "done", "pack": {...}}
                           | {"status": "failed", "error": "..."}
   GET  /packs/{sha256}  (same header) -> {"status": "done", "pack": {...}} or 404
                        lets the page ask for a song it has fingerprinted before uploading anything
+  GET  /library/{sha256}/audio  (same header) -> the song's audio as it was sent, for playing a song opened by link
 
 Results are kept for good in a Modal Volume, one JSON file per song, named by the audio's SHA-256 (and the pipeline
 version), so a song is only ever analysed once. Each song's audio and what identifies it (title, artist, ISRC...: see
@@ -64,7 +67,8 @@ gpu_image = (
     .run_function(_download_models)
     .add_local_python_source('server')
 )
-web_image = modal.Image.debian_slim(python_version='3.11').pip_install('fastapi[standard]', 'python-multipart')
+web_image = (modal.Image.debian_slim(python_version='3.11').pip_install('fastapi[standard]', 'python-multipart')
+             .add_local_python_source('server'))
 
 
 # no CPU or memory reservation: with one (8 cores, 16 GiB beside an L4) jobs sat unstarted. A container may use idle
@@ -98,7 +102,9 @@ def analyze(audio: bytes, key: str, name: str):
 @modal.asgi_app()
 @modal.concurrent(max_inputs=20)
 def api():
-    from fastapi import FastAPI, File, Header, HTTPException, UploadFile
+    from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+    from fastapi.responses import FileResponse
+    from server.fetch import Refused, fetch
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.middleware.gzip import GZipMiddleware
 
@@ -128,16 +134,37 @@ def api():
     async def hello():
         return {'service': 'pitchscape', 'version': PIPELINE_VERSION}
 
+    async def keep_audio(sha, data, name):
+        """A song opened by link into the library now, so the page can play it from here at once."""
+        kept = f'{CACHE}/library/{sha}'
+        if os.path.isdir(kept) and any(f.startswith('audio.') for f in os.listdir(kept)):
+            return
+        os.makedirs(kept, exist_ok=True)
+        with open(f'{kept}/audio{(os.path.splitext(name)[1] or ".mp3").lower()}', 'wb') as fh:
+            fh.write(data)
+        await cache.commit.aio()
+
     @web.post('/analyze')
-    async def submit(file: UploadFile = File(...), x_pitchscape_key: str = Header('')):
+    async def submit(file: UploadFile = File(None), url: str = Form(''), x_pitchscape_key: str = Header('')):
         check(x_pitchscape_key)
-        data = await file.read()
-        if len(data) > 80_000_000:
-            raise HTTPException(413, 'That file is over 80 MB.')
-        key = PIPELINE_VERSION + ':' + hashlib.sha256(data).hexdigest()
+        if file is not None:
+            data, name = await file.read(), file.filename or 'song.mp3'
+            if len(data) > 80_000_000:
+                raise HTTPException(413, 'That file is over 80 MB.')
+        elif url:
+            try:
+                data, name = await asyncio.to_thread(fetch, url)
+            except Refused as e:
+                raise HTTPException(e.status, str(e))
+        else:
+            raise HTTPException(400, 'Send a file or a link.')
+        sha = hashlib.sha256(data).hexdigest()
+        key = PIPELINE_VERSION + ':' + sha
+        if file is None:
+            await keep_audio(sha, data, name)
         cached = await read_pack(key)
         if cached is not None:
-            return {'status': 'done', 'pack': cached}
+            return {'status': 'done', 'pack': cached, 'sha256': sha}
         # the same song sent again while it is still being analysed (a reload, a second tab): follow that job, unless
         # it looks stuck (no stage reported after 8 minutes) or is older than any job can run
         entry = await running.get.aio(key)
@@ -150,15 +177,15 @@ def api():
             try:
                 pack = await modal.FunctionCall.from_id(job).get.aio(timeout=0)
             except TimeoutError:
-                return {'status': 'queued', 'job': job, 'key': key}
+                return {'status': 'queued', 'job': job, 'key': key, 'sha256': sha}
             except Exception:                       # it failed or its output expired: start afresh
                 pass
             else:
-                return {'status': 'done', 'pack': pack}
-        call = await analyze.spawn.aio(data, key, file.filename or 'song.mp3')
+                return {'status': 'done', 'pack': pack, 'sha256': sha}
+        call = await analyze.spawn.aio(data, key, name)
         await progress.put.aio(key, None)
         await running.put.aio(key, {'job': call.object_id, 't': time.time()})
-        return {'status': 'queued', 'job': call.object_id, 'key': key}
+        return {'status': 'queued', 'job': call.object_id, 'key': key, 'sha256': sha}
 
     @web.get('/jobs/{job}')
     async def poll(job: str, key: str, x_pitchscape_key: str = Header('')):
@@ -180,5 +207,22 @@ def api():
         if not pack:
             raise HTTPException(404, 'Not analysed yet.')
         return {'status': 'done', 'pack': pack}
+
+    @web.get('/library/{sha}/audio')
+    async def song_audio(sha: str, x_pitchscape_key: str = Header('')):
+        check(x_pitchscape_key)
+        if not re.fullmatch(r'[0-9a-f]{64}', sha):
+            raise HTTPException(400, 'Not a SHA-256.')
+        kept = f'{CACHE}/library/{sha}'
+        for attempt in range(2):
+            found = sorted(f for f in os.listdir(kept) if f.startswith('audio.')) if os.path.isdir(kept) else []
+            if found:
+                return FileResponse(f'{kept}/{found[0]}', headers={'Cache-Control': 'private, max-age=86400'})
+            if not attempt:
+                try:
+                    await cache.reload.aio()            # kept since by another container
+                except Exception:
+                    pass
+        raise HTTPException(404, "The server hasn't kept this song's audio.")
 
     return web
