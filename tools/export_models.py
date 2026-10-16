@@ -17,6 +17,11 @@ GRU layers step through the song a frame at a time. A 240 s song on the RTX 5080
 WebGPU provider against 3.7 s on its CPU provider; Chrome 32 s on WebGPU against 17 s on wasm (one thread: the page is
 not cross-origin isolated). The same hits either way.
 
+crepe_full: CREPE's 'full' network (Kim et al. 2018) as torchcrepe 0.0.24 ships it (MIT), the model the pipeline's
+voice stage runs on the GPU. Input frames [N, 1024] (16 kHz, each normalised to zero mean and unit standard deviation,
+as torchcrepe.preprocess); output probabilities [N, 360] (the network's sigmoid, 20 cents a bin from about 32 Hz).
+The framing, the decoding (torchcrepe's Viterbi) and the filters are done in JavaScript (src/pipeline/voice.mjs).
+
 basic_pitch: Basic Pitch ICASSP 2022 (Bittner et al., Spotify, Apache-2.0), the ONNX file the basic-pitch 0.4.0
 package ships (nmp.onnx, the one server/pipeline.py runs: it runs Basic Pitch on ONNX, TensorFlow uninstalled), copied
 unchanged. Input serving_default_input_2:0 [windows, 43844, 1] (mono, 22.05 kHz, 2 s windows less one hop; the
@@ -134,6 +139,32 @@ def export_adtof():
                   'samplerate': 44100, 'ep': 'cpu'}
 
 
+def export_crepe():
+    import torchcrepe
+    model = torchcrepe.Crepe('full')
+    model.load_state_dict(torch.load(os.path.join(os.path.dirname(torchcrepe.__file__), 'assets', 'full.pth'),
+                                     map_location='cpu', weights_only=True))
+    model.eval()
+    path = os.path.join(OUT, 'crepe_full.onnx')
+    torch.manual_seed(0)
+    x = torch.randn(64, 1024)
+    x = (x - x.mean(1, keepdim=True)) / x.std(1, keepdim=True)
+    torch.onnx.export(model, (x,), path, input_names=['frames'], output_names=['probabilities'],
+                      dynamic_axes={'frames': {0: 'n'}, 'probabilities': {0: 'n'}}, opset_version=17, dynamo=False,
+                      do_constant_folding=True)
+    import onnxruntime as ort
+    sess = ort.InferenceSession(path, providers=['CPUExecutionProvider'])
+    for n in (64, 7):
+        with torch.no_grad():
+            want = model(x[:n]).numpy()
+        got = sess.run(None, {'frames': x[:n].numpy()})[0]
+        err = float(np.abs(got - want).max())
+        print('crepe_full: ONNX vs PyTorch on %d random frames, largest difference %.1e' % (n, err))
+        assert err < 1e-4
+    return path, {'source': 'torchcrepe 0.0.24 (https://github.com/maxrmorrison/torchcrepe), model full',
+                  'licence': 'MIT', 'samplerate': 16000, 'window': 1024, 'bins': 360, 'cents_per_bin': 20}
+
+
 def export_basic_pitch():
     import shutil
     import basic_pitch
@@ -156,7 +187,8 @@ def sha256(path):
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
     sys.path.insert(0, ROOT)
-    EXPORTS = {'htdemucs_6s': export_demucs, 'adtof_frame_rnn': export_adtof, 'basic_pitch': export_basic_pitch}
+    EXPORTS = {'htdemucs_6s': export_demucs, 'adtof_frame_rnn': export_adtof, 'basic_pitch': export_basic_pitch,
+               'crepe_full': export_crepe}
     want = sys.argv[1:] or list(EXPORTS)
     mpath = os.path.join(OUT, 'manifest.json')
     manifest = json.load(open(mpath)) if os.path.exists(mpath) else {}

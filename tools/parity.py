@@ -20,6 +20,22 @@ and at the authors' thresholds (margin >= 1); for matched hits, the differences 
 and the 16-band profile, and how far the activations differ. The 22.05 kHz resample is measured alone: the JS
 resample against librosa's (SDR), and the details again with Python's 22.05 kHz signal given to the JS.
 
+  python tools/parity.py bass [name-substring ...]
+
+bass: Python's bass_line against the JS stage (src/pipeline/bass.mjs) on the same bass stem (py-s0/bass.wav), and
+again with Python's own 22.05 kHz signal given to the JS. Reported: pYIN's voicing decision, frame by frame (how
+many frames agree), its pitch where both say voiced (cents), the same for bassHz (after the loudness floor), and the
+largest differences in bassN and bassBr.
+
+  python tools/parity.py voice [name-substring ...] [--device cuda]
+
+voice: Python's voice_line with CREPE 'full' (the model the pipeline uses on a GPU; on --device) against the JS stage
+(src/pipeline/voice.mjs, ONNX Runtime's WebGPU provider) on the same vocal stem (py-s0/vocals.wav), both without
+torchcrepe's random dither (it adds up to 20 cents of noise to every pitch, so two runs of Python differ), against
+Python as the pipeline runs it (vs_tf32: PyTorch's TF32 convolutions on the GPU) and in float32 (vs_fp32). Reported:
+CREPE's 10 ms pitch (cents) and periodicity, the frames heard (leadHz) with their pitch in cents, the largest
+differences in leadP, leadL, leadN, leadBr, leadNz and noiseRef, librosa's onsets and the final onsets.
+
 tone: roughness (asper) and sharpness (acum) of a slice every 0.5 s of vocals, bass, other, guitar and piano from
 Python's stems (py-s0), Python (pipeline._tone_slice in its process pool) against JS (tools/parity_tone.mjs) three ways:
 js_vs_python (JS resampling and level, as the JS pipeline runs), port_alone (JS on Python's own 48 kHz stems: MOSQITO's
@@ -342,6 +358,251 @@ def print_drums(song, res):
     print('%-40s activations max diff %s; resample SDR %.1f dB, max diff %.1e' % (
         '', '%.1e' % a['max_abs_diff'] if a['max_abs_diff'] is not None else 'frames %s' % a['frames'], r['sdr'],
         r['max_abs']), flush=True)
+
+
+def py_bass(stem, out):
+    """server/pipeline.py bass_line on a stem file, as analyze() runs it, keeping pYIN's own output."""
+    import soundfile as sf
+    import librosa
+    from server import pipeline as P
+    d44 = sf.read(stem, dtype='float32')[0].T
+    F = max(16, int(np.ceil(d44.shape[1] / 44100 * P.SR / P.HOP)))
+    t = time.time()
+    y = P.to_rate(d44.mean(0), 44100, P.SR)
+    t1 = time.time()
+    real, raw = librosa.pyin, {}
+
+    def keep(*a, **k):
+        raw['f0'], raw['voiced'], _ = r = real(*a, **k)
+        return r
+    librosa.pyin = keep
+    try:
+        bassN, bassHz, bassBr = P.bass_line(y, F)
+    finally:
+        librosa.pyin = real
+    t2 = time.time()
+    os.makedirs(out, exist_ok=True)
+    sf.write(os.path.join(out, 'bass22.wav'), y, P.SR, subtype='FLOAT')
+    json.dump({'F': F, 'bassN': bassN.tolist(), 'bassHz': bassHz.tolist(), 'bassBr': bassBr.tolist(),
+               'f0': [None if not np.isfinite(v) else float(v) for v in raw['f0']],
+               'voiced': raw['voiced'].astype(int).tolist()}, open(os.path.join(out, 'bass.json'), 'w'))
+    json.dump({'resample_s': round(t1 - t, 2), 'bass_line_s': round(t2 - t1, 2)},
+              open(os.path.join(out, 'timing.json'), 'w'))
+
+
+def cents(a, b):
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    return np.abs(1200 * np.log2(b / a))
+
+
+def stat(x):
+    x = np.asarray(x, float)
+    return {'max': float(x.max()) if len(x) else 0.0, 'median': float(np.median(x)) if len(x) else 0.0,
+            'n': int(len(x))}
+
+
+def arr_diff(a, b):
+    """Largest difference, how many entries differ at all, and over 1e-6 / 1e-3."""
+    a, b = np.asarray(a, np.float64), np.asarray(b, np.float64)
+    n = min(len(a), len(b))
+    d = np.abs(a[:n] - b[:n])
+    return {'max': float(d.max()) if n else 0.0, 'differ': int((d > 0).sum()), 'over_1e6': int((d > 1e-6).sum()),
+            'over_1e3': int((d > 1e-3).sum()), 'frames': [len(a), len(b)]}
+
+
+def pitch_diff(pa, pb):
+    """Frames where each has a pitch (> 0 / finite): how many agree on that, and cents where both have one."""
+    pa = np.nan_to_num(np.asarray(pa, np.float64))
+    pb = np.nan_to_num(np.asarray(pb, np.float64))
+    n = min(len(pa), len(pb))
+    pa, pb = pa[:n], pb[:n]
+    ya, yb = pa > 0, pb > 0
+    both = ya & yb
+    c = cents(pa[both], pb[both])
+    return {'frames': n, 'python': int(ya.sum()), 'js': int(yb.sum()), 'agree': int((ya == yb).sum()),
+            'python_only': int((ya & ~yb).sum()), 'js_only': int((yb & ~ya).sum()),
+            'cents': dict(stat(c), over_1=int((c > 1).sum()), over_10=int((c > 10).sum()),
+                          over_100=int((c > 100).sum()))}
+
+
+def bass(song, path, outdir, device):
+    stem = os.path.join(outdir, 'py-s0', 'bass.wav')
+    if not os.path.exists(stem):
+        stems(song, path, outdir, device)
+    py, js, js22 = (os.path.join(outdir, d) for d in ('py-bass', 'js-bass', 'js-bass-py22'))
+    if not os.path.exists(os.path.join(py, 'timing.json')):
+        py_bass(stem, py)
+    node = ['node', os.path.join(ROOT, 'tools', 'analyse.mjs'), '--stems-in', os.path.join(outdir, 'py-s0'),
+            '--stages', 'bass']
+    if not os.path.exists(os.path.join(js, 'bass.json')):
+        subprocess.run(node + ['--out', js], check=True)
+    if not os.path.exists(os.path.join(js22, 'bass.json')):
+        subprocess.run(node + ['--out', js22, '--bass22', os.path.join(py, 'bass22.wav')], check=True)
+    P = json.load(open(os.path.join(py, 'bass.json')))
+    res = {}
+    for label, d in (('own_22k', js), ('python_22k', js22)):
+        J = json.load(open(os.path.join(d, 'bass.json')))
+        res[label] = {'pyin': pitch_diff([v or 0 for v in P['f0']], [v or 0 for v in J['f0']]),
+                      'voiced_flag_agree': int(np.sum(np.array(P['voiced']) == np.array(J['voiced']))),
+                      'bassHz': pitch_diff(P['bassHz'], J['bassHz']),
+                      'bassN': arr_diff(P['bassN'], J['bassN']), 'bassBr': arr_diff(P['bassBr'], J['bassBr'])}
+    res['timing'] = {'python': json.load(open(os.path.join(py, 'timing.json'))),
+                     'js': json.load(open(os.path.join(js, 'timing.json')))}
+    return res
+
+
+def print_pitch(name, r):
+    c = r['cents']
+    return '%s %d/%d agree (py %d js %d, -%d +%d), cents max %.2g median %.2g, %d over 1' % (
+        name, r['agree'], r['frames'], r['python'], r['js'], r['python_only'], r['js_only'], c['max'], c['median'],
+        c['over_1'])
+
+
+def print_bass(song, res):
+    for label in ('own_22k', 'python_22k'):
+        r = res[label]
+        print('%-40s %-10s %s' % (song if label == 'own_22k' else '', label, print_pitch('pyin voiced', r['pyin'])))
+        print('%-40s %-10s %s' % ('', '', print_pitch('bassHz', r['bassHz'])))
+        print('%-40s %-10s bassN max %.1e (%d differ, %d over 1e-6)  bassBr max %.1e (%d differ, %d over 1e-3)' % (
+            '', '', r['bassN']['max'], r['bassN']['differ'], r['bassN']['over_1e6'], r['bassBr']['max'],
+            r['bassBr']['differ'], r['bassBr']['over_1e3']), flush=True)
+    t = res['timing']
+    print('%-40s time: python bass_line %.2f s; js %.2f s (yin %.2f, viterbi %.2f, brightness %.2f)' % (
+        '', t['python']['bass_line_s'], t['js']['bass_stage_s'], t['js']['bass_yin_s'], t['js']['bass_viterbi_s'],
+        t['js']['bass_brightness_s']), flush=True)
+
+
+
+def py_voice(stem, out, device, tf32=True):
+    """server/pipeline.py voice_line on a stem file with CREPE 'full' and no dither, keeping CREPE's filtered 10 ms
+    frames and librosa's onsets. tf32: PyTorch's default for cuDNN convolutions (as the pipeline runs); False for
+    float32 throughout."""
+    import soundfile as sf
+    import librosa, torch, torchcrepe
+    from server import pipeline as P
+    v44 = sf.read(stem, dtype='float32')[0].T
+    F = max(16, int(np.ceil(v44.shape[1] / 44100 * P.SR / P.HOP)))
+    raw, real = {}, {}
+
+    def wrap(mod, name, key):
+        real[(mod, name)] = f = getattr(mod, name)
+
+        def g(*a, **k):
+            r = f(*a, **k)
+            raw[key] = r
+            return r
+        setattr(mod, name, g)
+    real_predict = torchcrepe.predict
+
+    def predict(*a, **k):
+        k['model'] = 'full'                   # voice_line picks 'tiny' on the CPU; the pipeline's GPU run uses 'full'
+        t = time.time()
+        r = real_predict(*a, **k)
+        if device == 'cuda':
+            torch.cuda.synchronize()
+        raw['crepe_s'] = time.time() - t
+        return r
+    real_dither = torchcrepe.convert.dither
+    torchcrepe.predict = predict
+    torchcrepe.convert.dither = lambda cents: cents
+    real_tf32 = torch.backends.cudnn.allow_tf32
+    torch.backends.cudnn.allow_tf32 = tf32
+    wrap(torchcrepe.filter, 'median', 'per')
+    wrap(torchcrepe.filter, 'mean', 'pitch')
+    wrap(librosa.onset, 'onset_detect', 'inner')
+    try:
+        P.voice_line(v44[:, :44100], 16, device)                  # warm-up: loads the model
+        raw.clear()
+        t = time.time()
+        res = P.voice_line(v44, F, device)
+        secs = time.time() - t
+    finally:
+        torchcrepe.predict, torchcrepe.convert.dither = real_predict, real_dither
+        torch.backends.cudnn.allow_tf32 = real_tf32
+        for (mod, name), f in real.items():
+            setattr(mod, name, f)
+    leadHz, leadP, leadL, leadN, leadBr, leadNz, noiseRef, onsets = res
+    os.makedirs(out, exist_ok=True)
+    fin = lambda a: [float(v) if np.isfinite(v) else None for v in a]
+    json.dump({'F': F, 'leadHz': leadHz.tolist(), 'leadP': leadP.tolist(), 'leadL': leadL.tolist(),
+               'leadN': leadN.tolist(), 'leadBr': leadBr.tolist(), 'leadNz': leadNz.tolist(), 'noiseRef': noiseRef,
+               'onsets': onsets, 'pitch': fin(raw['pitch'][0].cpu().numpy()), 'per': fin(raw['per'][0].cpu().numpy()),
+               'inner': [int(i) for i in raw['inner']]}, open(os.path.join(out, 'voice.json'), 'w'))
+    json.dump({'voice_line_s': round(secs, 2), 'crepe_s': round(raw['crepe_s'], 2), 'device': device, 'tf32': tf32,
+               'gpu': torch.cuda.get_device_name() if device == 'cuda' else None},
+              open(os.path.join(out, 'timing.json'), 'w'))
+
+
+def onset_diff(a, b, tol=1e-6):
+    """Onsets [t, gap, end, weight]: how many match exactly (all four within tol), Python only, JS only."""
+    key = lambda o: tuple(round(v / tol) for v in o)
+    A, B = {key(o) for o in a}, {key(o) for o in b}
+    return {'python': len(a), 'js': len(b), 'matched': len(A & B), 'python_only': len(A - B), 'js_only': len(B - A)}
+
+
+def voice_diff(P, J):
+    num = lambda a: np.array([np.nan if v is None else v for v in a], np.float64)
+    pp, jp, ppr, jpr = num(P['pitch']), num(J['pitch']), num(P['per']), num(J['per'])
+    n = min(len(pp), len(jp))
+    c = cents(pp[:n], jp[:n])
+    res = {'crepe': {'frames': [len(pp), len(jp)],
+                     'cents': dict(stat(c[np.isfinite(c)]), over_1=int((c > 1).sum()), over_10=int((c > 10).sum()),
+                                   over_100=int((c > 100).sum())),
+                     'periodicity': arr_diff(np.nan_to_num(ppr[:n]), np.nan_to_num(jpr[:n]))},
+           'leadHz': pitch_diff(P['leadHz'], J['leadHz']),
+           'noiseRef': [abs(a - b) for a, b in zip(P['noiseRef'], J['noiseRef'])],
+           'inner_onsets': {'python': len(P['inner']), 'js': len(J['inner']),
+                            'matched': len(set(P['inner']) & set(J['inner']))},
+           'onsets': onset_diff(P['onsets'], J['onsets'])}
+    for k in ('leadP', 'leadL', 'leadN', 'leadBr', 'leadNz'):
+        res[k] = arr_diff(P[k], J[k])
+    return res
+
+
+def voice(song, path, outdir, device):
+    stem = os.path.join(outdir, 'py-s0', 'vocals.wav')
+    if not os.path.exists(stem):
+        stems(song, path, outdir, device)
+    py, js = os.path.join(outdir, 'py-voice'), os.path.join(outdir, 'js-voice')
+    if not os.path.exists(os.path.join(py, 'timing.json')):
+        py_voice(stem, py, device)
+    if not os.path.exists(os.path.join(js, 'voice.json')):
+        subprocess.run(['node', os.path.join(ROOT, 'tools', 'analyse.mjs'), '--stems-in', os.path.join(outdir, 'py-s0'),
+                        '--stages', 'voice', '--no-dither', '--out', js], check=True)
+    py32 = os.path.join(outdir, 'py-voice-fp32')
+    if device == 'cuda' and not os.path.exists(os.path.join(py32, 'timing.json')):
+        py_voice(stem, py32, device, tf32=False)
+    J = json.load(open(os.path.join(js, 'voice.json')))
+    res = {'vs_tf32': voice_diff(json.load(open(os.path.join(py, 'voice.json'))), J)}
+    if os.path.exists(os.path.join(py32, 'voice.json')):
+        res['vs_fp32'] = voice_diff(json.load(open(os.path.join(py32, 'voice.json'))), J)
+    res['timing'] = {'python': json.load(open(os.path.join(py, 'timing.json'))),
+                     'js': json.load(open(os.path.join(js, 'timing.json')))}
+    return res
+
+
+def print_voice(song, res):
+    for label in ('vs_tf32', 'vs_fp32'):
+        if label not in res:
+            continue
+        r = res[label]
+        c = r['crepe']
+        print('%-40s %-8s CREPE 10 ms frames %s: pitch cents max %.2g median %.2g (%d over 1, %d over 10, %d over 100); '
+              'periodicity max %.1e (%d over 1e-3)' % (
+                  song if label == 'vs_tf32' else '', label, c['frames'], c['cents']['max'], c['cents']['median'],
+                  c['cents']['over_1'], c['cents']['over_10'], c['cents']['over_100'], c['periodicity']['max'],
+                  c['periodicity']['over_1e3']))
+        print('%-40s %-8s %s' % ('', '', print_pitch('leadHz heard', r['leadHz'])))
+        print('%-40s %-8s %s; noiseRef diff %s' % ('', '', '  '.join(
+            '%s %.1e (%d over 1e-3)' % (k, r[k]['max'], r[k]['over_1e3']) for k in ('leadP', 'leadL', 'leadN', 'leadBr', 'leadNz')),
+            ' '.join('%.1e' % d for d in r['noiseRef'])))
+        o, i = r['onsets'], r['inner_onsets']
+        print('%-40s %-8s librosa onsets %d/%d matched (js %d); onsets %d/%d matched (-%d +%d)' % (
+            '', '', i['matched'], i['python'], i['js'], o['matched'], o['python'], o['python_only'], o['js_only']))
+    t = res['timing']
+    print('%-40s time: python voice_line %.2f s (CREPE %.2f s, %s); js %.2f s (CREPE network %.2f s on %s)' % (
+        '', t['python']['voice_line_s'], t['python']['crepe_s'], t['python']['gpu'] or 'cpu', t['js']['voice_stage_s'],
+        t['js']['crepe_s'], t['js']['voice_ep']), flush=True)
 
 
 def py_ear_inputs(stems_dir, out, device):
@@ -678,7 +939,8 @@ def print_notes(song, res):
               tj.get('resample_s', 0)), flush=True)
 
 
-STAGES = {'stems': stems, 'drums': drums, 'notes': notes, 'tone': tone, 'ear': ear}
+STAGES = {'stems': stems, 'drums': drums, 'notes': notes, 'tone': tone, 'ear': ear, 'bass': bass, 'voice': voice}
+PRINT = {'bass': print_bass, 'voice': print_voice}
 
 if __name__ == '__main__':
     args = sys.argv[1:]
@@ -699,6 +961,9 @@ if __name__ == '__main__':
         res = STAGES[stage](song, os.path.join(SONGS, f), outdir, device)
         json.dump(res, open(os.path.join(outdir, stage + '.json'), 'w'), indent=1)
         summary[song] = res
+        if stage in PRINT:
+            PRINT[stage](song, res)
+            continue
         if stage in ('drums', 'ear'):
             (print_drums if stage == 'drums' else print_ear)(song, res)
             continue
