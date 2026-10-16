@@ -10,7 +10,9 @@ SR, DUR = 22050, 12.0
 
 
 def clip():
-    n, rnd = int(SR * DUR), random.Random(7)
+    # a new seed each run: the noise in the snares and hats differs, so the file is new to the server and is really
+    # analysed (the same clip would come back from the cache, testing nothing the deploy changed)
+    n, rnd = int(SR * DUR), random.Random(time.time_ns())
     x = [0.0] * n
     def add(t0, f):
         s0 = int(t0 * SR)
