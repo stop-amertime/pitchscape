@@ -1,0 +1,10 @@
+{
+  "name": "pitchscape",
+  "private": true,
+  "description": "Pitchscape's analysis pipeline in JavaScript (src/pipeline), run by Node here and by the page in the browser.",
+  "type": "commonjs",
+  "dependencies": {
+    "fft.js": "4.0.4",
+    "onnxruntime-node": "1.30.0"
+  }
+}

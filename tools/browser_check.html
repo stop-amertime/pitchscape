@@ -1,0 +1,71 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Pipeline in the browser: check</title>
+<style>body{font:14px system-ui;margin:16px;background:#fff;color:#111}pre{white-space:pre-wrap}</style>
+<p>Runs src/pipeline in this browser on a test song and compares it with the Python pipeline's output.
+Served by <code>python tools/browser_check.py</code>; query: <code>?song=NAME&amp;shifts=0&amp;ep=webgpu</code>.</p>
+<pre id="log"></pre>
+<script type="module">
+import {webRuntime, decode} from '../src/pipeline/runtime.web.mjs';
+import {separate} from '../src/pipeline/stems.mjs';
+
+const q = new URLSearchParams(location.search);
+const song = q.get('song') || 'brad-sucks-fluoride', shifts = +(q.get('shifts') ?? 0), ep = q.get('ep') || 'webgpu';
+const R = {song, shifts, ep, ua: navigator.userAgent};
+const el = document.getElementById('log');
+const log = (...a) => { const s = a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' '); el.textContent += s + '\n'; };
+
+function readWav(buf) {          // 32-bit float WAV (soundfile's FLOAT) -> [channels]
+  const v = new DataView(buf);
+  let o = 12, fmt, data;
+  while (o < v.byteLength) {
+    const id = String.fromCharCode(...new Uint8Array(buf, o, 4)), size = v.getUint32(o + 4, true);
+    if (id === 'fmt ') fmt = {ch: v.getUint16(o + 10, true), bits: v.getUint16(o + 22, true)};
+    if (id === 'data') data = [o + 8, size];
+    o += 8 + size + (size & 1);
+  }
+  if (fmt.bits !== 32) throw new Error('expected 32-bit float WAV');
+  const all = new Float32Array(buf.slice(data[0], data[0] + data[1])), n = all.length / fmt.ch;
+  return Array.from({length: fmt.ch}, (_, c) => { const y = new Float32Array(n); for (let i = 0; i < n; i++) y[i] = all[i * fmt.ch + c]; return y; });
+}
+
+try {
+  if (ep === 'webgpu') {
+    const ad = await navigator.gpu?.requestAdapter({powerPreference: 'high-performance'});
+    if (!ad) throw new Error('no WebGPU adapter');
+    R.adapter = {vendor: ad.info.vendor, arch: ad.info.architecture};
+  }
+  let t = performance.now();
+  const rt = await webRuntime({models: '../models/', ep, log, ...(q.get('workers') ? {workers: +q.get('workers')} : {}), progress: (n, a, b) => a === b && log(`${n}: downloaded ${(b / 1e6).toFixed(1)} MB`)});
+  R.workers = rt.pool.size;
+  const bytes = await (await fetch(`../testsongs/${song}.mp3`)).arrayBuffer();
+  const mix = await decode(bytes, 44100);
+  R.seconds = mix[0].length / 44100;
+  R.decode_s = +((performance.now() - t) / 1000).toFixed(2);
+  log(`decoded ${R.seconds.toFixed(1)} s in ${R.decode_s} s; ${R.workers} workers`);
+  t = performance.now();
+  await rt.session('htdemucs_6s');
+  R.session_s = +((performance.now() - t) / 1000).toFixed(2);
+  t = performance.now();
+  const st = {};
+  const stems = await separate(mix, rt, {shifts, stats: st, progress: (k, n) => k % 10 && k < n || log(`stems: ${k}/${n}`)});
+  R.stems_s = +((performance.now() - t) / 1000).toFixed(2);
+  R.stems_gpu_s = +(st.gpu_ms / 1000).toFixed(2);
+  R.heap_mb = performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1e6) : null;
+  log(`stems in ${R.stems_s} s (GPU ${R.stems_gpu_s} s)`);
+  // against Python's (tools/parity.py stems): over both channels, SDR and the levels in dB full scale
+  R.vs_python = {};
+  for (const [name, ch] of Object.entries(stems)) {
+    const r = await fetch(`../testsongs/parity/${song}/py-s${shifts}/${name}.wav`);
+    if (!r.ok) { R.vs_python = null; break; }
+    const ref = readWav(await r.arrayBuffer());
+    let a = 0, e = 0, n = 0;
+    for (let c = 0; c < 2; c++) for (let i = 0; i < Math.min(ref[c].length, ch[c].length); i++, n++) { a += ref[c][i] ** 2; e += (ref[c][i] - ch[c][i]) ** 2; }
+    R.vs_python[name] = {sdr: +(10 * Math.log10(a / e)).toFixed(1), ref_dbfs: +(10 * Math.log10(a / n)).toFixed(1), err_dbfs: +(10 * Math.log10(e / n)).toFixed(1)};
+  }
+  log('vs Python', R.vs_python);
+  rt.close();
+  R.done = true;
+} catch (e) { R.error = String(e && e.stack || e); log('ERROR', R.error); }
+fetch('/result', {method: 'POST', body: JSON.stringify(R)});
+</script>

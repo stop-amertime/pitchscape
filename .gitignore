@@ -7,3 +7,5 @@ __pycache__/
 docs/*.pack.json
 testsongs/
 .venv/
+node_modules/
+models/

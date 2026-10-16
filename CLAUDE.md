@@ -92,6 +92,30 @@ Corollaries the user has stated or endorsed:
    with edge wave from harshness), `smudge` (bass and kick as soft dabs on their own layer), `pen` (dot at "now").
    Snare, hats and cymbals print in a strip along the top (`BEAT_H`); toms and kicks on the sheet at their pitch.
 
+## The JavaScript pipeline (in progress)
+
+Agreed direction: one pipeline in JavaScript (`src/pipeline/`) replaces `server/pipeline.py`. It runs in the page on
+the user's GPU (WebGPU, no key), and on Modal under Node for phones. The Python stays only as the reference it is
+checked against. Stages are ported one by one; until all are in, the Python pipeline is the one in use.
+
+- Plain ES modules with no DOM. `runtime.node.mjs` and `runtime.web.mjs` give them the same things: `session(name)`
+  (ONNX Runtime: onnxruntime-node or onnxruntime-web), `pool` (worker threads, `worker.mjs` / `pool.mjs`) and
+  `close()`. Nothing is imported by package name: module workers in the browser have no import map, so libraries are
+  vendored under `vendor/` (fft.js).
+- Models are converted to ONNX by `python tools/export_models.py` into `models/` (git-ignored; where they are hosted
+  is not settled yet). `models/manifest.json` has each file's SHA-256, and the browser keys its Cache API copy on it.
+- `node tools/analyse.mjs SONG --stems DIR [--shifts 0]` runs what exists so far (stems).
+  `python tools/parity.py stems [song...]` compares each stage with Python on the test songs (SDR, and levels in dBFS,
+  since a near-silent stem has a low SDR however small the difference).
+  `python tools/browser_check.py`, then `tools/browser_check.html?song=NAME`, runs the same modules in Chrome.
+- Stems so far (htdemucs_6s, all nine test songs, shifts=0 on both sides): 35-75 dB SDR against PyTorch on every
+  audible stem, with the difference at or below -75 dBFS. For scale, the pipeline's own random shift moves stems by
+  2-22 dB. Chrome on the RTX 5080: a 222 s song in 15 s with the shader cache warm (plus 2.5 s to create the session),
+  or 27 s plus 6.5 s cold. The GPU is the limit: 0.34 s per 7.8 s segment, with the STFT on 5+ workers.
+- Learned: ONNX Runtime's DirectML provider returns wrong numbers on htdemucs_6s (-32 dB against the CPU provider),
+  so Node on Windows uses its WebGPU provider. Chrome with `--user-data-dir` on a Windows 8.3 short path
+  (`ADMT9N~1`) cannot open CacheStorage. Port 8770 is refused on this laptop.
+
 ## Versions: bump them together
 
 When the analysis output changes: bump `PIPELINE_VERSION` in `server/modal_app.py` (the deploy writes it into
@@ -130,7 +154,8 @@ changed). The page draws only current packs; an older one is analysed again (clo
 - After a push to `server/**`, the deploy workflow's smoke test sends a generated clip through the live server; it
   waits until the server reports the new version (the old container answers for minutes after a deploy).
 - Before committing: `node src/build.js`, `node tests/engine_test.js`, `python tests/route_test.py`,
-  `python -m py_compile server/*.py tools/*.py`, and a syntax check of the built script.
+  `python -m py_compile server/*.py tools/*.py`, a syntax check of the built script, and `node --check` on each
+  `src/pipeline/*.mjs` (`npm install` once for the Node tools).
 
 ## Things learned the hard way
 
