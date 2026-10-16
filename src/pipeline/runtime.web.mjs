@@ -5,10 +5,12 @@ import {createPool} from './pool.mjs';
 
 const ORT = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/';
 const CACHE = 'pitchscape-models';
+// tools/publish_models.py puts models/ here (public; Hugging Face allows cross-origin downloads)
+export const MODELS = 'https://huggingface.co/stopamertime/pitchscape-models/resolve/main/';
 
-/** models: the URL of the folder holding manifest.json and the .onnx files (tools/export_models.py).
+/** models: the URL of the folder holding manifest.json and the .onnx files (default: the published ones).
  * ep: 'webgpu' (the default) or 'wasm'. progress(name, loaded bytes, total bytes) while a model downloads. */
-export async function webRuntime({models, ep = 'webgpu', log = () => {}, progress = () => {},
+export async function webRuntime({models = MODELS, ep = 'webgpu', log = () => {}, progress = () => {},
                                   workers = Math.max(1, Math.min(8, (navigator.hardwareConcurrency || 4) - 2))} = {}) {
   const ort = await import(ORT + 'ort.webgpu.min.mjs');
   ort.env.wasm.wasmPaths = ORT;

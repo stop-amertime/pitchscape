@@ -107,8 +107,14 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
   (ONNX Runtime: onnxruntime-node or onnxruntime-web), `pool` (worker threads, `worker.mjs` / `pool.mjs`) and
   `close()`. Nothing is imported by package name: module workers in the browser have no import map, so libraries are
   vendored under `vendor/` (fft.js).
-- Models are converted to ONNX by `python tools/export_models.py` into `models/` (git-ignored; where they are hosted
-  is not settled yet). `models/manifest.json` has each file's SHA-256, and the browser keys its Cache API copy on it.
+- Models are converted to ONNX by `python tools/export_models.py` into `models/` (git-ignored) and published by
+  `python tools/publish_models.py stopamertime/pitchscape-models` to https://huggingface.co/stopamertime/pitchscape-models
+  (public, the user's account; `hf auth login` once). The browser runtime fetches from there by default.
+  `models/manifest.json` has each file's SHA-256, and the browser keys its Cache API copy on it. Add each new model's
+  source and licence to `SOURCES` in publish_models.py (it refuses one without).
+- Browser decoding is not ffmpeg's: on a 44.1 kHz MP3 they agree to about -82 dBFS, but on a 22.05 kHz MP3 Chrome's
+  output was one MP3 frame (1152 samples) shorter, and the stems then matched Python less closely (down to about
+  -66 dBFS). The page plays with the browser's decoder, so a browser analysis matches what is heard.
 - `node tools/analyse.mjs SONG --stems DIR [--shifts 0]` runs what exists so far (stems).
   `python tools/parity.py stems [song...]` compares each stage with Python on the test songs (SDR, and levels in dBFS,
   since a near-silent stem has a low SDR however small the difference).
