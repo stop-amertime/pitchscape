@@ -1,6 +1,6 @@
 // The pipeline's runtime in the browser: ONNX Runtime Web on WebGPU, models fetched once and kept in the Cache API,
 // audio decoded by the browser, CPU work on module Workers. The Node counterpart is runtime.node.mjs; the stage
-// modules see only what both provide (session, ep, pool, close).
+// modules see only what both provide (session, ep, eps, where, pool, decode, sha256, close; see runtime.node.mjs).
 import {createPool} from './pool.mjs';
 
 const ORT = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.30.0/dist/';
@@ -17,14 +17,21 @@ export async function webRuntime({models = MODELS, ep = 'webgpu', log = () => {}
   const base = new URL(models.endsWith('/') ? models : models + '/', location.href);
   const manifest = await (await fetch(new URL('manifest.json', base), {cache: 'no-cache'})).json();
   const cache = {};
+  let gpu = Promise.resolve();
   const rt = {
     ep,
+    eps: {},
+    where: 'browser',
     manifest,
     pool: createPool(workers, () => {
       const w = new Worker(new URL('./worker.mjs', import.meta.url), {type: 'module'});
       return {post: (m, t) => w.postMessage(m, t), onMessage: f => { w.onmessage = e => f(e.data); }, terminate: () => w.terminate()};
     }),
     close() { rt.pool.terminate(); },
+    decode: (bytes, sr, channels) => decode(bytes, sr, channels),
+    async sha256(bytes) {
+      return [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(b => b.toString(16).padStart(2, '0')).join('');
+    },
     async session(name) {
       if (cache[name]) return cache[name];
       const bytes = await model(base, manifest[name], (a, b) => progress(name, a, b), log);
@@ -32,13 +39,20 @@ export async function webRuntime({models = MODELS, ep = 'webgpu', log = () => {}
       const use = manifest[name].ep === 'cpu' ? 'wasm' : ep;
       const sess = await ort.InferenceSession.create(bytes, {executionProviders: [use], graphOptimizationLevel: 'all'});
       log(`${name}: running on ${use}`);
+      rt.eps[name] = use;
+      const call = async t => {
+        const out = await sess.run(t), res = {};
+        for (const [k, v] of Object.entries(out)) res[k] = {data: await v.getData(true), dims: v.dims};
+        return res;
+      };
       cache[name] = {
-        async run(feeds) {
+        run(feeds) {
           const t = {};
-          for (const [k, v] of Object.entries(feeds)) t[k] = new ort.Tensor('float32', v.data, v.dims);
-          const out = await sess.run(t), res = {};
-          for (const [k, v] of Object.entries(out)) { res[k] = {data: await v.getData(true), dims: v.dims}; }
-          return res;
+          for (const [k, v] of Object.entries(feeds)) t[k] = new ort.Tensor(v.type || 'float32', v.data, v.dims);
+          if (use === 'wasm') return call(t);
+          const r = gpu.then(() => call(t));         // GPU models take turns
+          gpu = r.catch(() => {});
+          return r;
         },
       };
       return cache[name];
