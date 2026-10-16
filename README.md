@@ -133,6 +133,14 @@ words Whisper heard (base model, CPU; the server uses medium); the rest were spr
 The whole thing, page and analysis, runs on a PC with no Modal and no passphrase. A CUDA GPU (NVIDIA) analyses a song in
 a couple of minutes; on a CPU it takes several.
 
+On Windows, double-click **`Pitchscape.bat`**. The first time it checks for Python 3.11 and ffmpeg (and says how to
+install whichever is missing: `winget install Python.Python.3.11`, `winget install Gyan.FFmpeg`), makes its own Python
+environment in `.venv` and installs everything, with the GPU build of PyTorch if there is an NVIDIA card (a few GB, once).
+Every time, it starts the server and opens the page in the browser; close its window to stop it. It installs again only
+when `server/requirements.txt` changes. Options go after it, e.g. `Pitchscape.bat --update-library`.
+
+By hand (any system):
+
 1. Install Python 3.11 and ffmpeg (on the PATH: `ffmpeg -version` should work in a new terminal).
 2. In the repository folder, make a virtual environment and install the pipeline:
    ```
@@ -146,10 +154,20 @@ a couple of minutes; on a CPU it takes several.
    Pitchscape does not use.)
 3. `python -m server.local`, then open http://localhost:8000.
 
-The first song downloads the models (Demucs, ADTOF, Whisper: about 2 GB, once). Results are kept in
-`~/.pitchscape/cache`, so a song opens at once the second time; a new pipeline version analyses afresh. The page is built
+The first song downloads the models (Demucs, ADTOF, Whisper: about 2 GB, once). Every song sent to it is kept in a
+library, `~/.pitchscape/library/<sha256>/`: the audio as it came, its cover art, `song.json` (what identifies the
+recording: title, artist, album, track, year, ISRC, MusicBrainz ids, length, every tag) and one analysis per pipeline
+version (`pack-v5.json`...). A song opens at once the second time, and `--update-library` brings every kept song up to a
+new pipeline version without sending anything again. `GET /library` lists the songs kept; `/library/<sha256>/audio`
+and `/cover` serve them. The cloud server keeps the same in its Modal volume (`library/<sha256>/`).
+
+The identity in `song.json` (also in each analysis, as `song`) is what a player for another source would match on.
+For Spotify, say: its Web API finds a recording by ISRC (`isrc:` search) or by artist, title and length, and reports
+what is playing and how far in, which the page could follow to draw the visuals while Spotify plays the sound. The
+analysis must still come from a file of the same recording (Spotify's audio cannot be read), so the length is the
+check that the two are the same version. The page is built
 from `src/` on every load, so an edit to `src/app.html` or `src/dsp.js` shows on the next refresh, with no build step.
-Options: `--device cpu|cuda`, `--whisper small` (a smaller model to time the lyrics), `--port`, `--cache DIR`, and
+Options: `--device cpu|cuda`, `--whisper small` (a smaller model to time the lyrics), `--port`, `--library DIR`, `--open`, and
 `--host 0.0.0.0` to open it from a phone on the same network (at the PC's address, port 8000).
 
 The pipeline alone: `python -m server.pipeline SONG.mp3 OUT.json` (`--stems DIR` reuses Demucs stems).

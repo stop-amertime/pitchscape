@@ -10,7 +10,9 @@
                        lets the page ask for a song it has fingerprinted before uploading anything
 
 Results are kept for good in a Modal Volume, one JSON file per song, named by the audio's SHA-256 (and the pipeline
-version), so a song is only ever analysed once. Audio is not kept.
+version), so a song is only ever analysed once. Each song's audio and what identifies it (title, artist, ISRC...: see
+song_info in pipeline.py) are kept too, in library/<sha256>/ as server/local.py keeps them, so a later pipeline version
+can analyse it again without it being sent.
 Deployed by .github/workflows/deploy-server.yml on every push to main that touches server/.
 """
 import asyncio
@@ -80,6 +82,13 @@ def analyze(audio: bytes, key: str, name: str):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w') as fh:
         json.dump(pack, fh)
+    kept = f'{CACHE}/library/{key.split(":", 1)[1]}'
+    os.makedirs(kept, exist_ok=True)
+    if not any(f.startswith('audio.') for f in os.listdir(kept)):
+        with open(f'{kept}/audio{ext.lower()}', 'wb') as fh:
+            fh.write(audio)
+    with open(f'{kept}/song.json', 'w') as fh:
+        json.dump(pack.get('song'), fh, ensure_ascii=False)
     cache.commit()
     return pack
 

@@ -21,7 +21,7 @@ properties of what they found (how loud, how bright, how long a hit rings, how a
 Usage (local, CPU is fine for testing):
   python -m server.pipeline SONG.mp3 OUT.json [--stems DIR_WITH_drums.wav_etc] [--device cpu|cuda] [--no-words]
 """
-import argparse, base64, difflib, json, math, os, re, subprocess, sys, tempfile, time, unicodedata
+import argparse, base64, difflib, hashlib, json, math, os, re, subprocess, sys, tempfile, time, unicodedata
 import urllib.error, urllib.parse, urllib.request
 
 import numpy as np
@@ -718,24 +718,67 @@ LRCLIB = 'https://lrclib.net/api/'
 UA = 'Pitchscape (https://github.com/stop-amertime/pitchscape)'
 
 
-def song_tags(path, name):
-    """(artist, title, album) from the file's tags, the gaps filled from a file name of the form "Artist - Title"."""
-    tags = {}
+def probe(path):
+    """ffprobe's view of an audio file: its format and streams, with every tag (names lowercased)."""
     try:
-        out = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format_tags:stream_tags', '-of', 'json', path],
+        out = subprocess.run(['ffprobe', '-v', 'error', '-show_format', '-show_streams', '-of', 'json', path],
                              capture_output=True, check=True, timeout=30).stdout
         j = json.loads(out or b'{}')
-        for d in [j.get('format', {}).get('tags', {})] + [st.get('tags', {}) for st in j.get('streams', [])]:
-            for k, v in (d or {}).items():
-                tags.setdefault(k.lower(), str(v).strip())
     except Exception as e:
         log('tags: none read', e)
+        j = {}
+    tags = {}
+    for d in [j.get('format', {}).get('tags', {})] + [st.get('tags', {}) for st in j.get('streams', [])]:
+        for k, v in (d or {}).items():
+            tags.setdefault(k.lower(), str(v).strip())
+    return j, tags
+
+
+def song_tags(path, name, tags=None):
+    """(artist, title, album) from the file's tags, the gaps filled from a file name of the form "Artist - Title"."""
+    if tags is None:
+        tags = probe(path)[1]
     artist, title = tags.get('artist') or tags.get('album_artist') or '', tags.get('title', '')
     stem = re.sub(r'^\s*\d{1,3}\s*[-._)]?\s+', '', os.path.splitext(os.path.basename(name or ''))[0].replace('_', ' '))
     if ' - ' in stem:
         a, t = stem.split(' - ', 1)
         artist, title = artist or a.strip(), title or t.strip()
     return artist, title, tags.get('album', '')
+
+
+def song_info(path, name, sha=None):
+    """What identifies this recording, for finding it again elsewhere (a streaming service, MusicBrainz): the usual
+    tags under plain names, the identifiers taggers write (ISRC, MusicBrainz ids), the file's own facts, and every tag
+    as it came. ISRC is the one code that names a recording across services; length tells versions apart."""
+    j, tags = probe(path)
+    fmt = j.get('format', {})
+    audio = next((st for st in j.get('streams', []) if st.get('codec_type') == 'audio'), {})
+    def tag(*names):
+        for n in names:
+            if tags.get(n):
+                return tags[n]
+        return None
+    artist, title, album = song_tags(path, name, tags)
+    info = {
+        'title': title or None, 'artist': artist or None, 'album': album or None,
+        'albumArtist': tag('album_artist', 'albumartist', 'album artist'), 'track': tag('track', 'tracknumber'),
+        'disc': tag('disc', 'discnumber'), 'date': tag('date', 'year', 'originaldate', 'tdor'), 'genre': tag('genre'),
+        'composer': tag('composer'), 'label': tag('label', 'publisher', 'organization'),
+        'isrc': tag('isrc', 'tsrc'),
+        'musicbrainz': {k: v for k, v in {
+            'recording': tag('musicbrainz_trackid', 'musicbrainz track id', 'musicbrainz_recordingid'),
+            'release': tag('musicbrainz_albumid', 'musicbrainz album id'),
+            'artist': tag('musicbrainz_artistid', 'musicbrainz artist id'),
+            'track': tag('musicbrainz_releasetrackid', 'musicbrainz release track id')}.items() if v},
+        'duration': float(fmt['duration']) if fmt.get('duration') else None,
+        'file': {'name': os.path.basename(name or path), 'sha256': sha, 'format': fmt.get('format_name'),
+                 'codec': audio.get('codec_name'), 'bitrate': int(fmt['bit_rate']) if fmt.get('bit_rate') else None,
+                 'sampleRate': int(audio['sample_rate']) if audio.get('sample_rate') else None,
+                 'channels': audio.get('channels'),
+                 'cover': any(st.get('disposition', {}).get('attached_pic') for st in j.get('streams', []))},
+        'tags': tags,
+    }
+    return info
 
 
 class Unreachable(Exception):
@@ -815,7 +858,14 @@ def heard_words(vocals44, device, size):
     """Whisper's words, with when each starts and ends: [(word, start, end)], and the language it heard."""
     from faster_whisper import WhisperModel
     v16 = to_rate(vocals44.mean(0), 44100, 16000).astype(np.float32)
-    model = WhisperModel(size, device='cuda' if device != 'cpu' else 'cpu', compute_type='float16' if device != 'cpu' else 'int8')
+    try:
+        model = WhisperModel(size, device='cuda' if device != 'cpu' else 'cpu', compute_type='float16' if device != 'cpu' else 'int8')
+    except Exception as e:
+        # on a home PC faster-whisper sometimes cannot find CUDA's libraries; the CPU times the words the same, slower
+        if device == 'cpu':
+            raise
+        log('words: Whisper could not start on the GPU (%s); timing the words on the CPU' % e)
+        model = WhisperModel(size, device='cpu', compute_type='int8')
     segments, info = model.transcribe(v16, word_timestamps=True, vad_filter=True, condition_on_previous_text=False)
     words = [(w.word.strip(), float(w.start), float(w.end)) for seg in segments for w in (seg.words or []) if w.word.strip()]
     return words, info.language
@@ -917,6 +967,8 @@ def lyrics_for(path, name, dur, vocals44, device, size):
 def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, progress=log, title=None, name=None):
     from huggingface_hub import hf_hub_download
     t_start = time.time()
+    with open(path, 'rb') as fh:
+        song = song_info(path, name or path, hashlib.sha256(fh.read()).hexdigest())
     mix44 = decode(path, 44100)
     dur = mix44.shape[1] / 44100
     F = max(16, math.ceil(dur * SR / HOP))
@@ -974,7 +1026,8 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
                    'bass': 'pYIN', 'voice': 'CREPE', 'tone': 'MOSQITO roughness_dw, sharpness_din', 'width': 'Glasberg & Moore roex excitation patterns',
                    'words': 'LRCLIB, timed by Whisper' if words else None},
         'noteStems': list(NOTE_STEMS),
-        'title': title or os.path.splitext(os.path.basename(path))[0], 'artist': '', 'audio': None,
+        'title': song['title'] or title or os.path.splitext(os.path.basename(path))[0], 'artist': song['artist'] or '',
+        'audio': None, 'song': dict(song, lrclib=(found or {}).get('lrclib')),
         'dur': dur, 'dt': DT, 'frames': F, 'stereo': True, 'noiseRef': noiseRef,
         'segStride': SEGW, 'eventStride': EVW,
         'arrays': {'bassN': b64f32(bassN), 'bassHz': b64f32(bassHz), 'bassBr': b64f32(bassBr),

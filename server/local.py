@@ -3,9 +3,17 @@
     python -m server.local                 then open http://localhost:8000
     python -m server.local --port 8123 --device cpu --whisper small --cache D:/pitchscape-cache
 
-It answers the same routes as the Modal server (server/modal_app.py), runs server/pipeline.py on this machine (on a
-CUDA GPU if PyTorch sees one, otherwise on the CPU) one song at a time, and keeps each result in the cache folder
-(default ~/.pitchscape/cache), named like the Modal cache, so a song is analysed once per pipeline version.
+It answers the same routes as the Modal server (server/modal_app.py) and runs server/pipeline.py on this machine (on
+a CUDA GPU if PyTorch sees one, otherwise on the CPU), one song at a time.
+
+Every song it is sent is kept in a library (default ~/.pitchscape/library), one folder per song named by the SHA-256 of
+its file: the audio as it came (audio.mp3 etc.), its cover art if the file has one (cover.jpg), what identifies it
+(song.json: title, artist, album, ISRC, MusicBrainz ids, length, every tag; see song_info in pipeline.py) and its
+analysis for each pipeline version (pack-v5.json etc.). So a song is analysed once per version, and with
+--update-library every song in the library is brought up to the current version without being sent again.
+
+  GET /library                    every song kept: its sha256, song.json and which versions are analysed
+  GET /library/<sha256>/audio     the song's audio;  /library/<sha256>/cover  its cover art
 
 The page is built from src/ on every load (the same steps as src/build.js), so an edit to src/app.html or src/dsp.js
 shows on the next refresh. Setup: see "Run it on your own computer" in README.md.
@@ -33,56 +41,113 @@ def build_page():
 
 
 class Jobs:
-    """One song analysed at a time, in a worker thread; each job's latest stage is kept for the page to show."""
+    """The library, and one song analysed at a time in a worker thread; each job's latest stage is kept for the page."""
 
-    def __init__(self, cache, device, whisper):
-        self.cache, self.device, self.whisper = cache, device, whisper
+    def __init__(self, library, device, whisper):
+        self.lib, self.device, self.whisper = library, device, whisper
         self.q, self.state, self.lock = queue.Queue(), {}, threading.Lock()
+        os.makedirs(self.lib, exist_ok=True)
         threading.Thread(target=self.work, daemon=True).start()
 
-    def path(self, key):
+    def folder(self, sha):
+        return os.path.join(self.lib, sha)
+
+    def audio(self, sha):
+        d = self.folder(sha)
+        return next((os.path.join(d, f) for f in sorted(os.listdir(d)) if f.startswith('audio.')), None) if os.path.isdir(d) else None
+
+    def pack_path(self, key):
         version, sha = key.split(':', 1)
-        return os.path.join(self.cache, 'v' + version, sha + '.json')
+        return os.path.join(self.folder(sha), 'pack-v%s.json' % version)
 
     def cached(self, key):
-        p = self.path(key)
+        p = self.pack_path(key)
         if os.path.exists(p):
             with open(p, encoding='utf-8') as fh:
                 return json.load(fh)
         return None
 
-    def submit(self, data, name):
-        key = PIPELINE_VERSION + ':' + hashlib.sha256(data).hexdigest()
+    def keep(self, data, name):
+        """The song into the library (once): its audio as it came, its cover art, and what identifies it."""
+        from server.pipeline import song_info
+        sha = hashlib.sha256(data).hexdigest()
+        d = self.folder(sha)
+        if self.audio(sha) is None:
+            os.makedirs(d, exist_ok=True)
+            ext = (os.path.splitext(name)[1] or '.mp3').lower()
+            f = os.path.join(d, 'audio' + ext)
+            with open(f + '.part', 'wb') as fh:
+                fh.write(data)
+            os.replace(f + '.part', f)
+            info = song_info(f, name, sha)
+            if info['file']['cover']:
+                import subprocess
+                subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', f, '-an', '-frames:v', '1', os.path.join(d, 'cover.jpg')],
+                               capture_output=True)
+            self.write(os.path.join(d, 'song.json'), info)
+        return sha
+
+    def write(self, path, obj):
+        with open(path + '.part', 'w', encoding='utf-8') as fh:
+            json.dump(obj, fh, ensure_ascii=False)
+        os.replace(path + '.part', path)
+
+    def submit(self, sha):
+        key = PIPELINE_VERSION + ':' + sha
         with self.lock:
             st = self.state.get(key)
             if st and st['status'] in ('queued', 'running'):
                 return key
             self.state[key] = {'status': 'queued', 'stage': None}
-        self.q.put((key, data, name))
+        self.q.put(key)
         return key
+
+    def update_library(self):
+        n = 0
+        for sha in sorted(os.listdir(self.lib)):
+            if re.fullmatch(r'[0-9a-f]{64}', sha) and self.audio(sha) and self.cached(PIPELINE_VERSION + ':' + sha) is None:
+                self.submit(sha)
+                n += 1
+        return n
+
+    def listing(self):
+        out = []
+        for sha in sorted(os.listdir(self.lib)):
+            d = self.folder(sha)
+            if not re.fullmatch(r'[0-9a-f]{64}', sha) or not self.audio(sha):
+                continue
+            try:
+                with open(os.path.join(d, 'song.json'), encoding='utf-8') as fh:
+                    song = json.load(fh)
+            except Exception:
+                song = None
+            versions = sorted(m.group(1) for m in (re.fullmatch(r'pack-v(.+)\.json', f) for f in os.listdir(d)) if m)
+            out.append({'sha256': sha, 'song': song, 'versions': versions, 'cover': os.path.exists(os.path.join(d, 'cover.jpg'))})
+        return out
 
     def work(self):
         from server.pipeline import analyze, log
         while True:
-            key, data, name = self.q.get()
+            key = self.q.get()
+            sha = key.split(':', 1)[1]
             self.state[key] = {'status': 'running', 'stage': None}
             t0 = time.time()
             try:
-                with tempfile.TemporaryDirectory() as tmp:
-                    f = os.path.join(tmp, 'song' + (os.path.splitext(name)[1] or '.mp3'))
-                    with open(f, 'wb') as fh:
-                        fh.write(data)
+                f = self.audio(sha)
+                try:
+                    with open(os.path.join(self.folder(sha), 'song.json'), encoding='utf-8') as fh:
+                        name = json.load(fh)['file']['name']
+                except Exception:
+                    name = os.path.basename(f)
 
-                    def progress(*a):
-                        msg = ' '.join(str(x) for x in a)
-                        self.state[key]['stage'] = msg
-                        log(msg)
-                    pack = analyze(f, device=self.device, whisper_size=self.whisper, title=os.path.splitext(name)[0],
-                                   name=name, progress=progress)
-                p = self.path(key)
-                os.makedirs(os.path.dirname(p), exist_ok=True)
-                with open(p, 'w', encoding='utf-8') as fh:
-                    json.dump(pack, fh)
+                def progress(*a):
+                    msg = ' '.join(str(x) for x in a)
+                    self.state[key]['stage'] = msg
+                    log(msg)
+                pack = analyze(f, device=self.device, whisper_size=self.whisper, title=os.path.splitext(name)[0],
+                               name=name, progress=progress)
+                self.write(self.pack_path(key), pack)
+                self.write(os.path.join(self.folder(sha), 'song.json'), pack['song'])
                 self.state[key] = {'status': 'done'}
                 print('analysed %s in %.0f s' % (name, time.time() - t0), flush=True)
             except Exception as e:
@@ -129,6 +194,16 @@ def handler(jobs):
             if m:
                 pack = jobs.cached(PIPELINE_VERSION + ':' + m.group(1))
                 return self.reply({'status': 'done', 'pack': pack}) if pack else self.reply({'detail': 'Not analysed yet.'}, 404)
+            if path == '/library':
+                return self.reply(jobs.listing())
+            m = re.fullmatch(r'/library/([0-9a-f]{64})/(audio|cover)', path)
+            if m:
+                f = jobs.audio(m.group(1)) if m.group(2) == 'audio' else os.path.join(jobs.folder(m.group(1)), 'cover.jpg')
+                if not f or not os.path.exists(f):
+                    return self.reply({'detail': 'Not kept.'}, 404)
+                import mimetypes
+                with open(f, 'rb') as fh:
+                    return self.send(fh.read(), mimetypes.guess_type(f)[0] or 'application/octet-stream')
             m = re.fullmatch(r'/jobs/([^/]+)', path)
             if m:
                 key = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get('key', [''])[0]
@@ -148,11 +223,11 @@ def handler(jobs):
             if part is None:
                 return self.reply({'detail': 'No file in the upload.'}, 400)
             data, name = part.get_payload(decode=True), part.get_filename() or 'song.mp3'
-            key = PIPELINE_VERSION + ':' + hashlib.sha256(data).hexdigest()
-            pack = jobs.cached(key)
+            sha = jobs.keep(data, name)
+            pack = jobs.cached(PIPELINE_VERSION + ':' + sha)
             if pack is not None:
                 return self.reply({'status': 'done', 'pack': pack})
-            key = jobs.submit(data, name)
+            key = jobs.submit(sha)
             return self.reply({'status': 'queued', 'job': key.split(':', 1)[1][:16], 'key': key})
 
         def log_message(self, fmt, *a):
@@ -167,16 +242,26 @@ def main():
     ap.add_argument('--host', default='127.0.0.1', help='0.0.0.0 to let a phone on the same network open it')
     ap.add_argument('--device', default='auto', help='cuda, cpu or auto (cuda when PyTorch sees a GPU)')
     ap.add_argument('--whisper', help='Whisper model size for timing the lyrics (default: medium on a GPU, base on CPU)')
-    ap.add_argument('--cache', default=os.path.join(os.path.expanduser('~'), '.pitchscape', 'cache'))
+    ap.add_argument('--library', default=os.path.join(os.path.expanduser('~'), '.pitchscape', 'library'))
+    ap.add_argument('--update-library', action='store_true', help='analyse every kept song not yet analysed by this version')
+    ap.add_argument('--open', action='store_true', help='open the page in the browser once the server is up')
     a = ap.parse_args()
     device = a.device
     if device == 'auto':
         import torch
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    jobs = Jobs(a.cache, device, a.whisper)
-    print('Pitchscape %s on %s, results kept in %s' % (PIPELINE_VERSION, device.upper(), a.cache))
-    print('open http://%s:%d' % ('localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host, a.port), flush=True)
-    ThreadingHTTPServer((a.host, a.port), handler(jobs)).serve_forever()
+    jobs = Jobs(a.library, device, a.whisper)
+    url = 'http://%s:%d' % ('localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host, a.port)
+    server = ThreadingHTTPServer((a.host, a.port), handler(jobs))
+    print('Pitchscape %s on %s; songs kept in %s' % (PIPELINE_VERSION, device.upper(), a.library))
+    if a.update_library:
+        n = jobs.update_library()
+        print('analysing %d kept song%s with version %s' % (n, '' if n == 1 else 's', PIPELINE_VERSION))
+    print('open', url, flush=True)
+    if a.open:
+        import webbrowser
+        threading.Timer(0.5, webbrowser.open, (url,)).start()
+    server.serve_forever()
 
 
 if __name__ == '__main__':

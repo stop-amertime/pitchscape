@@ -2436,13 +2436,18 @@ if (typeof module !== 'undefined') module.exports = DSP;
       if (!pack || my !== loadSeq) return;
       setAudioSrc(URL.createObjectURL(blob));
       if (demo) finishLoad(packToRes(pack), title, 'demo', DSP.DEMO_LYRICS, 16.9);
-      else { finishLoad(packToRes(pack), title, sha ? 'sha:' + sha : 'file:' + fileName, null, 0); useServerLyrics(pack); }
+      else { finishLoad(packToRes(pack), songName(pack, title), sha ? 'sha:' + sha : 'file:' + fileName, null, 0); useServerLyrics(pack); }
       say('');
     }).catch(function (e) {
       if (my !== loadSeq) return;
       fail((e && e.message) || "Couldn't open that file.");
       if (e && e.needsKey) { S.retry = retry; openPanel('songPanel'); }
     });
+  }
+  /* the song's name from its tags (title and artist), or the file's name when it has none */
+  function songName(pack, fallback) {
+    var sg = pack.song || {};
+    return sg.title ? sg.title + (sg.artist ? ' \u00b7 ' + sg.artist : '') : fallback;
   }
   function keyError(text) { var e = new Error(text); e.needsKey = true; return e; }
   function analyse(blob, fileName, sha, my) {
