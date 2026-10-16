@@ -275,7 +275,11 @@ class Model {
     const b = rows.length, n = rows[0].length, t = performance.now(), feeds = {};
     feeds.tokens = {data: Int32Array.from(rows.flat()), dims: [b, n], type: 'int32'};
     feeds.order = {data: order ? Int32Array.from(order) : Int32Array.from({length: b}, (_, i) => i), dims: [b], type: 'int32'};
-    const empty = {data: new Float32Array(0), dims: [b, this.H, 0, this.dh]};
+    // the cache is in the precision of the encoder's keys (float16 in the browser since the decoder graph of
+    // tools/export_whisper.py's build_decoder; float32 before it, and in Node)
+    const k0 = mem.k[0], half = k0.type ? k0.type === 'float16' : !(k0.data instanceof Float32Array);
+    const empty = half ? {data: new Uint16Array(0), dims: [b, this.H, 0, this.dh], type: 'float16'}
+                       : {data: new Float32Array(0), dims: [b, this.H, 0, this.dh]};
     for (let i = 0; i < this.L; i++) {
       feeds['pk' + i] = cache ? cache.k[i] : empty;
       feeds['pv' + i] = cache ? cache.v[i] : empty;

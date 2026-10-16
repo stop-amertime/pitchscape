@@ -234,24 +234,33 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
   log-mel, language, the temperature fallback with CTranslate2's beam search and best_of sampling as one batch, the
   logits processors, align's median filter and DTW, word merging), on our own ONNX export (`tools/export_whisper.py`:
   one input per layer for the encoder's keys and values and the cache, and an `order` input that reorders the cache
-  for the beams). Medium, as the pipeline: float16 for the browser (715 + 919 MB to download, cached once), float32
+  for the beams; the decoder graph built by hand, `build_decoder`, checked against a PyTorch transcription to 2.4e-6).
+  Medium, as the pipeline: float16 for the browser (715 + 813 MB to download, cached once; cache in float16), float32
   for Node's CPU (ONNX Runtime's CPU provider has no float16 products; onnxruntime-node cannot keep tensors on the GPU,
   so its decoder runs on the CPU). Smaller models time words worse against medium: small and base 3-20 % within 0.1 s,
   0.16-0.3 s early, where medium against itself is 93-100 %.
   `python tools/parity.py words`, all nine songs, Node: songInfo identical to song_info on all nine; the same LRCLIB
   record or the same reason for none on all nine (Code Monkey: none at this length). Placed words within 0.1 s of
-  Python's: Dropping Out 100 %, Incoherent 96 %, Hey Ruth 83 %, Fluoride 78 % (Python against its own second run:
+  Python's: Dropping Out 100 %, Incoherent 100 %, Hey Ruth 83 %, Fluoride 99 % (Python against its own second run:
   100, 100, 100, 95 %). faster-whisper is not repeatable where a window falls back to sampling (Fluoride: four Python
   runs heard 189, 243, 309 and 193 words). Where nothing samples, the port is CTranslate2's to the token: on Fluoride
   and Hey Ruth every greedy window has the same tokens and scores within 0.005 of CTranslate2 float32 on the CPU, and
   Hey Ruth's 4th window loops to 224 tokens and falls back in both, where CTranslate2 float16 on the GPU (the pipeline)
   decodes it cleanly; Chrome's float16 falls back there too. Chrome 155, RTX 5080: Dropping Out (no fallback) same
-  record, same matched share, 97 % of heard words within 0.1 s, Whisper 32.5 s (Python on the GPU 26-33 s); Hey Ruth
-  112 s; Fluoride 133 s. Node: 47-235 s a song (decoder on the CPU, 100 ms a step). `tools/browser_words.html?song=NAME`
+  record, same matched share, 98 % of heard words within 0.1 s; Hey Ruth and Fluoride the same records. Decoder step,
+  medium, Chrome (median, old graph and new alternating in one page): 66-69 -> 43-52 ms for one row, 77-80 -> 44-52 ms
+  for five; GPU time 44 -> 23 ms a step. The whole Whisper run on Dropping Out, both in one Chrome session with the
+  laptop busy: 60 -> 45 s (decoder 122 -> 105 ms a call: a real call adds the prompt steps and reading the logits).
+  Node: 38-183 s a song (decoder on the CPU, 85-107 ms a call; 47-235 s before). `tools/browser_words.html?song=NAME`
   runs the stage in a browser (served by browser_check.py).
-- Learned: the decoder's time is dispatch, not arithmetic: a step costs about 3 ms a layer on WebGPU whatever the
-  precision or batch (base 21 ms, small 30, medium 73; five beams cost the same as one), so beams and best_of go in one
-  batch. Slicing one stacked [layers, ...] input copies it on every call (ONNX Runtime's CPU provider spent more on
+- Learned: a step costs about the same for five rows as for one (beams and best_of go in one batch), but it is GPU
+  arithmetic, not dispatch: fusing PyTorch's export into 521 dispatches from 1242 changed nothing. Chrome's profiler
+  (session `enableProfiling`, Chrome with `--enable-webgpu-developer-features` or its GPU times are rounded) showed
+  where it went: ONNX Runtime's WebGPU matrix product is slow when one token makes a 1024-wide output (1024 x 1024
+  84 us, 4096 x 1024 285 us; split along the input into 8 or 4 batched products and summed, 48 and 137 us), casts
+  between float32 and float16 (11 ms a step), and MultiHeadAttention's fast path copying the encoder's 1500 keys and
+  values at every step (4 ms): so q, k, v come from one product, the cross-attention is plain products, and the cache is
+  float16. On the CPU the split makes it slower, so the float32 graph does not split. Slicing one stacked [layers, ...] input copies it on every call (ONNX Runtime's CPU provider spent more on
   that than on the step). An empty cache ([b, heads, 0, dh]) works on WebGPU.
 
 ## Versions: bump them together
