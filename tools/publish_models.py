@@ -22,6 +22,11 @@ SOURCES = {
                         'Frame_RNN_adtofAll_0 from https://github.com/MZehren/ADTOF, as converted to ONNX (with '
                         "madmom's spectrogram in the graph) at https://huggingface.co/thebluescreen/adtof-drums-onnx; "
                         'copied unchanged. Non-commercial use only.', 'CC BY-NC-SA 4.0'),
+    'basic_pitch': ('Basic Pitch ICASSP 2022 polyphonic note transcription (R. Bittner, J. J. Bosch, D. Rubinstein, '
+                    'G. Meseguer-Brocal, S. Ewert, "A Lightweight Instrument-Agnostic Model for Polyphonic Note '
+                    'Transcription and Multipitch Estimation", ICASSP 2022), Spotify, from '
+                    'https://github.com/spotify/basic-pitch: the ONNX file the basic-pitch 0.4.0 package ships, copied '
+                    'unchanged.', 'Apache-2.0'),
 }
 
 

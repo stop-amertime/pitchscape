@@ -115,9 +115,9 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
 - Browser decoding is not ffmpeg's: on a 44.1 kHz MP3 they agree to about -82 dBFS, but on a 22.05 kHz MP3 Chrome's
   output was one MP3 frame (1152 samples) shorter, and the stems then matched Python less closely (down to about
   -66 dBFS). The page plays with the browser's decoder, so a browser analysis matches what is heard.
-- `node tools/analyse.mjs SONG --stems DIR [--shifts 0]` runs what exists so far (stems, then drums);
-  `--stems-in DIR --out DIR` starts from stems already made (Python's, to compare a stage on the same input).
-  `python tools/parity.py stems|drums|tone [song...]` compares each stage with Python on the test songs (stems: SDR, and
+- `node tools/analyse.mjs SONG --stems DIR [--shifts 0]` runs what exists so far (stems, then drums and notes;
+  `--stages notes` picks); `--stems-in DIR --out DIR` starts from stems already made (Python's, to compare a stage on
+  the same input). `python tools/parity.py stems|drums|notes|tone [song...]` compares each stage with Python on the test songs (stems: SDR, and
   levels in dBFS, since a near-silent stem has a low SDR however small the difference).
 - A model's manifest entry can say `"ep": "cpu"` (set in export_models.py, with the measurement): both runtimes then
   run it on the CPU (Node: CPU provider; browser: wasm) whatever the GPU.
@@ -157,6 +157,24 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
   roughness by up to 9e-4. pipeline.tone itself (made-up notes and pitch tracks, guitar solo): the same 541 slices,
   within 5e-6. Speed, 8 workers each: Python's process pool 942 s for the nine songs, JS 70 s (13x); 48 kHz
   resampling 0.8-2.5 s a song. Not yet run in Chrome.
+- Notes (`notes.mjs`, `notes.dsp.mjs`): Basic Pitch's own ONNX file (`nmp.onnx` from basic-pitch 0.4.0, the one the
+  Python runs) with run_inference's windowing; its note creation (onsets inferred from frames, the melodia trick with a
+  tree over frames for the global argmax, pitch bends, model_frames_to_time); then notes_from_stem, raw_bends,
+  smooth_bend (scipy's median and Gaussian filters, its summation order), join_bends, note_details (lazy STFT columns,
+  runs of notes split over the workers) and the leak dropping. numpy's arithmetic is followed where it shows: means
+  by pairwise summation (float32 for Basic Pitch's amplitude), percentile's lerp, interp, and numpy 2's float32
+  `abs` of complex64 (`larger * sqrt(fma(r, r, 1))`, not the correctly rounded magnitude: a third of the bins differ)
+  and float32 `log` (the AVX2 Remez polynomial, matched on 2M values). `python tools/parity.py notes`, all nine songs,
+  Python's stems: with Python's 22.05 kHz signals and one window per model call (the port alone), all 72815 Basic
+  Pitch events identical and all 36370 notes matched, 28594 bit-identical and every one within 1e-12 (fade and vibrato
+  depth in the last bits: np.convolve's and log10's rounding). As the JS runs (its own resample, 8 windows a call:
+  ONNX Runtime's output then moves by up to 1.8e-7), 36366 of 36370 matched, 4 missing and 3 extra, 2 changed family
+  and 1 vibrato; 72801 of 72815 events have the same frames, pitch and bends. Those few come from the resample (131 dB),
+  not the batching: with Python's signals and 8 a call, Fluoride matched every note and event. Speed on the CPU
+  provider, a busy laptop: Python's notes_by_stem 700 s for the nine songs (19-139 s each), JS 126 s (9-20 s; the
+  model 101 s of it; decoding and details overlap it on 8 workers). Basic Pitch on Fluoride (222 s): Node CPU 4.7 s
+  a stem at 8 a call (12 s one at a time), Node WebGPU 4.1 s for all three (within 1.3e-6, the same notes); Chrome
+  WebGPU 0.75 s a stem warm (the whole stage 4.8 s, 5915 notes as Python), wasm 17.4 s a stem. So no `"ep": "cpu"`: on the GPU everywhere.
 - Stems so far (htdemucs_6s, all nine test songs, shifts=0 on both sides): 35-75 dB SDR against PyTorch on every
   audible stem, with the difference at or below -75 dBFS. For scale, the pipeline's own random shift moves stems by
   2-22 dB. Chrome on the RTX 5080: a 222 s song in 15 s with the shader cache warm (plus 2.5 s to create the session),
