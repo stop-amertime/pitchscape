@@ -55,7 +55,17 @@ def call(url, key, data=None, ctype=None):
 
 def main():
     api, key = sys.argv[1].rstrip('/'), os.environ['PITCHSCAPE_PASSPHRASE']
-    print('server says:', json.loads(urllib.request.urlopen(api + '/', timeout=120).read()))
+    want = sys.argv[2] if len(sys.argv) > 2 else None
+    # after a deploy the old server keeps answering for a few minutes: wait for the new one, or this tests the old
+    t0 = time.time()
+    while True:
+        says = json.loads(urllib.request.urlopen(api + '/', timeout=120).read())
+        if want is None or str(says.get('version')) == want:
+            break
+        if time.time() - t0 > 900:
+            sys.exit('the server still says version %s, not %s' % (says.get('version'), want))
+        time.sleep(15)
+    print('server says:', says)
     audio, bnd = clip(), 'pitchscape-smoke'
     body = (f'--{bnd}\r\nContent-Disposition: form-data; name="file"; filename="smoke-test.wav"\r\n'
             f'Content-Type: audio/wav\r\n\r\n').encode() + audio + f'\r\n--{bnd}--\r\n'.encode()

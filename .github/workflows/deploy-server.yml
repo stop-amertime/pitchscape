@@ -47,4 +47,4 @@ jobs:
             git push
           fi
       - name: Smoke test (a generated clip through the live server)
-        run: python server/smoke_test.py "$(python -c "import json; print(json.load(open('docs/config.json'))['api'])")"
+        run: python server/smoke_test.py "$(python -c "import json; print(json.load(open('docs/config.json'))['api'])")" "$(python -c "from server.modal_app import PIPELINE_VERSION; print(PIPELINE_VERSION)")"
