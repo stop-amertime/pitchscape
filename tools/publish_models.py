@@ -17,6 +17,11 @@ SOURCES = {
     'htdemucs_6s': ('Demucs htdemucs_6s (Hybrid Transformer Demucs, 6 sources), Meta AI, from '
                     'https://github.com/facebookresearch/demucs (demucs 4.1.0). Exported to ONNX without its STFT and '
                     'iSTFT by tools/export_models.py.', 'MIT'),
+    'adtof_frame_rnn': ('ADTOF Frame_RNN drum transcription (M. Zehren, M. Alunno, P. Bientinesi, "High-Quality and '
+                        'Reproducible Automatic Drum Transcription from Crowdsourced Data", Signals 2023), checkpoint '
+                        'Frame_RNN_adtofAll_0 from https://github.com/MZehren/ADTOF, as converted to ONNX (with '
+                        "madmom's spectrogram in the graph) at https://huggingface.co/thebluescreen/adtof-drums-onnx; "
+                        'copied unchanged. Non-commercial use only.', 'CC BY-NC-SA 4.0'),
 }
 
 

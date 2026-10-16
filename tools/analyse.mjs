@@ -1,32 +1,70 @@
-// Run the JavaScript pipeline (src/pipeline) on a song under Node. So far it has one stage, stems.
+// Run the JavaScript pipeline (src/pipeline) on a song under Node. So far: stems, then drums.
 //   node tools/analyse.mjs SONG.mp3 --stems OUT_DIR [--shifts 1] [--ep cuda|webgpu|cpu]
-// writes OUT_DIR/<stem>.wav (32-bit float, 44.1 kHz stereo) and OUT_DIR/timing.json.
+//        writes OUT_DIR/<stem>.wav (32-bit float, 44.1 kHz stereo), OUT_DIR/drums.json and OUT_DIR/timing.json.
+//   node tools/analyse.mjs --stems-in DIR --out OUT_DIR [--drums22 FILE.wav]
+//        starts from stems already made (DIR/<stem>.wav, e.g. Python's, to compare stages on the same input);
+//        --drums22: the drum stem at 22.05 kHz to use instead of resampling it here (to measure the resampler alone).
+// drums.json: {hits: [[t, kind, activation, margin]...], events: [[t, type, strength, hz, ring, 16 bands..., margin]...]}
+// as server/pipeline.py drum_hits and drum_details make them; OUT_DIR/adtof.f32 the activations (frames x 5) and
+// OUT_DIR/drums22.wav the drum stem's mono mix at 22.05 kHz, as resampled here.
 import {mkdirSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {decode, nodeRuntime, wav} from '../src/pipeline/runtime.node.mjs';
-import {separate} from '../src/pipeline/stems.mjs';
+import {separate, SOURCES} from '../src/pipeline/stems.mjs';
+import {drums} from '../src/pipeline/drums.mjs';
 
 const args = process.argv.slice(2), opt = {};
 const pos = [];
 for (let i = 0; i < args.length; i++) args[i].startsWith('--') ? opt[args[i].slice(2)] = args[++i] : pos.push(args[i]);
-if (!pos[0] || !opt.stems) {
-  console.error('usage: node tools/analyse.mjs SONG --stems OUT_DIR [--shifts 1] [--ep cuda|webgpu|cpu]');
+const out = opt.out || opt.stems;
+if (!(pos[0] && opt.stems) && !(opt['stems-in'] && opt.out)) {
+  console.error('usage: node tools/analyse.mjs SONG --stems OUT_DIR [--shifts 1] [--ep cuda|webgpu|cpu]\n' +
+                '       node tools/analyse.mjs --stems-in DIR --out OUT_DIR [--drums22 FILE.wav] [--ep ...]');
   process.exit(2);
 }
 const log = (...a) => console.error(new Date().toTimeString().slice(0, 8), ...a);
+const secs = ms => +(ms / 1000).toFixed(2);
 const t0 = performance.now();
 const rt = await nodeRuntime({ep: opt.ep, log});
-const mix = await decode(pos[0], 44100);
-const tDecode = performance.now();
-log(`decoded ${(mix[0].length / 44100).toFixed(1)} s`);
-const st = {};
-const stems = await separate(mix, rt, {stats: st, shifts: +(opt.shifts ?? 1), progress: (k, n) => k % 10 && k < n || log(`stems: ${k}/${n} segments`)});
-const tStems = performance.now();
-mkdirSync(opt.stems, {recursive: true});
-for (const [name, ch] of Object.entries(stems)) writeFileSync(path.join(opt.stems, name + '.wav'), wav(ch, 44100));
-const timing = {song: path.basename(pos[0]), seconds: mix[0].length / 44100, ep: rt.ep, shifts: +(opt.shifts ?? 1),
-  decode_s: +((tDecode - t0) / 1000).toFixed(2), stems_s: +((tStems - tDecode) / 1000).toFixed(2),
-  stems_gpu_s: +(st.gpu_ms / 1000).toFixed(2), workers: rt.pool.size};
-writeFileSync(path.join(opt.stems, 'timing.json'), JSON.stringify(timing, null, 1));
+mkdirSync(out, {recursive: true});
+const timing = {song: path.basename(pos[0] || opt['stems-in']), workers: rt.pool.size};
+
+let stems;
+if (opt['stems-in']) {
+  stems = {};
+  for (const s of SOURCES) stems[s] = await decode(path.join(opt['stems-in'], s + '.wav'), 44100);
+  timing.seconds = stems.drums[0].length / 44100;
+  log(`stems: read from ${opt['stems-in']}`);
+} else {
+  const mix = await decode(pos[0], 44100);
+  const tDecode = performance.now();
+  log(`decoded ${(mix[0].length / 44100).toFixed(1)} s`);
+  const st = {};
+  stems = await separate(mix, rt, {stats: st, shifts: +(opt.shifts ?? 1), progress: (k, n) => k % 10 && k < n || log(`stems: ${k}/${n} segments`)});
+  const tStems = performance.now();
+  for (const [name, ch] of Object.entries(stems)) writeFileSync(path.join(opt.stems, name + '.wav'), wav(ch, 44100));
+  Object.assign(timing, {seconds: mix[0].length / 44100, ep: rt.ep, shifts: +(opt.shifts ?? 1),
+    decode_s: secs(tDecode - t0), stems_s: secs(tStems - tDecode), stems_gpu_s: secs(st.gpu_ms)});
+}
+
+// the drum stem's mono mix at 22.05 kHz, as pipeline.analyze's st22 (librosa soxr_hq), on a worker
+const tDrums = performance.now();
+let drums22;
+if (opt.drums22) drums22 = (await decode(opt.drums22, 22050, 1))[0];
+else {
+  const [l, r] = stems.drums, mono = new Float32Array(l.length);
+  for (let i = 0; i < l.length; i++) mono[i] = (l[i] + r[i]) / 2;
+  drums22 = await rt.pool.call('./resample.mjs', 'resample', [mono, 44100, 22050], [mono.buffer]);
+}
+timing.resample_s = secs(performance.now() - tDrums);
+const ds = {};
+const res = await drums(stems.drums, drums22, rt, {stats: ds});
+Object.assign(timing, {drums_s: secs(performance.now() - tDrums), adtof_s: secs(ds.adtof_ms),
+  drum_details_s: secs(ds.details_ms), drums_ep: rt.ep, hits: res.hits.length});
+log(`drums: ${res.hits.length} hits`);
+writeFileSync(path.join(out, 'drums.json'), JSON.stringify({hits: res.hits, events: res.events}));
+writeFileSync(path.join(out, 'adtof.f32'), Buffer.from(res.act.buffer, res.act.byteOffset, res.act.byteLength));
+if (!opt.drums22) writeFileSync(path.join(out, 'drums22.wav'), wav([drums22], 22050));
+writeFileSync(path.join(out, 'timing.json'), JSON.stringify(timing, null, 1));
 log(JSON.stringify(timing));
 rt.close();

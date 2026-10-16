@@ -115,9 +115,33 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
 - Browser decoding is not ffmpeg's: on a 44.1 kHz MP3 they agree to about -82 dBFS, but on a 22.05 kHz MP3 Chrome's
   output was one MP3 frame (1152 samples) shorter, and the stems then matched Python less closely (down to about
   -66 dBFS). The page plays with the browser's decoder, so a browser analysis matches what is heard.
-- `node tools/analyse.mjs SONG --stems DIR [--shifts 0]` runs what exists so far (stems).
-  `python tools/parity.py stems [song...]` compares each stage with Python on the test songs (SDR, and levels in dBFS,
-  since a near-silent stem has a low SDR however small the difference).
+- `node tools/analyse.mjs SONG --stems DIR [--shifts 0]` runs what exists so far (stems, then drums);
+  `--stems-in DIR --out DIR` starts from stems already made (Python's, to compare a stage on the same input).
+  `python tools/parity.py stems|drums [song...]` compares each stage with Python on the test songs (stems: SDR, and
+  levels in dBFS, since a near-silent stem has a low SDR however small the difference).
+- A model's manifest entry can say `"ep": "cpu"` (set in export_models.py, with the measurement): both runtimes then
+  run it on the CPU (Node: CPU provider; browser: wasm) whatever the GPU.
+- `resample.mjs` is the shared sample-rate converter: libsoxr itself (the library under librosa's `soxr_hq`, vendored
+  as WebAssembly from wasm-audio-resampler 2.0.0, `vendor/soxr.wasm.mjs`), with librosa's output length. On every
+  test song's drum stem, 44.1 to 22.05 kHz: 131-133 dB SDR against librosa, largest sample difference 4.8e-7;
+  0.2-0.4 s a song on a worker. Use it for every stage's 22.05 kHz signals (`pool.call('./resample.mjs', 'resample',
+  [x, 44100, 22050])`).
+- Drums (`drums.mjs`, `drums.dsp.mjs`): ADTOF's ONNX file as is (it takes 44.1 kHz audio; madmom's spectrogram is in
+  the graph), madmom's peak picking as pipeline.py does it with scipy, drum_details' STFT bands and ring, and
+  librosa 0.11's yin for the kick's pitch. Parity on all nine test songs, from Python's drum stem (py-s0): all 9029
+  hits matched at the same frame and kind, none missing or extra (7 songs with drums; the piano aria and the guitar
+  solo have none on either side); activations bit-identical (ONNX Runtime CPU on both sides); margin, strength and
+  ring identical; profiles within 2.2e-5; kick pitch within 0.01 cent on 2161 of 2162 kicks. The one kick off (Nixsia
+  126.06 s, 37.6 cents) is float32 noise in the reference: librosa computes yin in the input's float32, and on that
+  segment's last frame (half zero padding) it picks 49.2 Hz where librosa in float64 picks 38.0 Hz, as the JS (in
+  double) does; the median moves with it. Swapping in Python's 22.05 kHz signal changes nothing that counts (profiles
+  within 1.7e-5, the same kick). 8138 of the hits pass the authors' thresholds, also all matched. Speed per song
+  (200-240 s, this laptop): ADTOF 1.5-3.9 s on Node's CPU provider (Python's drum_hits 2.9-8.5 s), details 0.3-1.0 s
+  on 8 workers (Python 0.2-2.5 s); Chrome, Nixsia: ADTOF 17 s on wasm, single-threaded, since the page is not
+  cross-origin isolated (same 965 hits, activations within 2.3e-6).
+- Learned: ADTOF's GRUs step one frame at a time, so the GPU is slower: Node's WebGPU provider 39 s, Chrome's
+  WebGPU 32 s, against 3.7 s and 17 s on the CPU, for the same hits. scipy 1.17's uniform_filter1d sums each window
+  afresh: emulating it with a running sum moved margins by an ulp.
   `python tools/browser_check.py`, then `tools/browser_check.html?song=NAME`, runs the same modules in Chrome.
 - Stems so far (htdemucs_6s, all nine test songs, shifts=0 on both sides): 35-75 dB SDR against PyTorch on every
   audible stem, with the difference at or below -75 dBFS. For scale, the pipeline's own random shift moves stems by

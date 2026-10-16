@@ -9,6 +9,13 @@ htdemucs_6s: the network only, from just after HTDemucs._magnitude to just befor
 included). The STFT and iSTFT around it are done in JavaScript (src/pipeline/stems.mjs), as the browser's ONNX
 Runtime cannot run torch's STFT ops on WebGPU. Inputs mix [1,2,343980] and mag [1,4,2048,336] (complex as channels);
 outputs x [1,6,4,2048,336] (each source's spectrogram) and xt [1,6,2,343980] (the time branch).
+
+adtof_frame_rnn: ADTOF Frame_RNN (Zehren et al., CC BY-NC-SA 4.0), already ONNX (the file server/pipeline.py uses):
+downloaded from Hugging Face and copied unchanged. Input waveform [1, samples] (mono, 44.1 kHz; madmom's spectrogram is
+in the graph); output activations [1, frames, 5] at 100 frames per second. Marked to run on the CPU (`ep`): its three
+GRU layers step through the song a frame at a time. A 240 s song on the RTX 5080 laptop: Node 39 s on ONNX Runtime's
+WebGPU provider against 3.7 s on its CPU provider; Chrome 32 s on WebGPU against 17 s on wasm (one thread: the page is
+not cross-origin isolated). The same hits either way.
 """
 import hashlib, json, os, sys
 
@@ -110,6 +117,17 @@ def export_demucs():
                   'nfft': model.nfft, 'hop': model.hop_length}
 
 
+def export_adtof():
+    import shutil
+    from huggingface_hub import hf_hub_download
+    from server.pipeline import ADTOF_REPO, ADTOF_FILE, ADTOF_OUT
+    path = os.path.join(OUT, ADTOF_FILE)
+    shutil.copyfile(hf_hub_download(ADTOF_REPO, ADTOF_FILE), path)
+    return path, {'source': 'https://huggingface.co/' + ADTOF_REPO, 'licence': 'CC BY-NC-SA 4.0',
+                  'outputs': [k for k, _ in ADTOF_OUT], 'thresholds': [t for _, t in ADTOF_OUT], 'fps': 100,
+                  'samplerate': 44100, 'ep': 'cpu'}
+
+
 def sha256(path):
     h = hashlib.sha256()
     with open(path, 'rb') as f:
@@ -120,11 +138,13 @@ def sha256(path):
 
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
-    want = sys.argv[1:] or ['htdemucs_6s']
+    sys.path.insert(0, ROOT)
+    EXPORTS = {'htdemucs_6s': export_demucs, 'adtof_frame_rnn': export_adtof}
+    want = sys.argv[1:] or list(EXPORTS)
     mpath = os.path.join(OUT, 'manifest.json')
     manifest = json.load(open(mpath)) if os.path.exists(mpath) else {}
     for name in want:
-        path, info = {'htdemucs_6s': export_demucs}[name]()
+        path, info = EXPORTS[name]()
         manifest[name] = dict(info, file=os.path.basename(path), bytes=os.path.getsize(path), sha256=sha256(path))
     json.dump(manifest, open(mpath, 'w'), indent=1)
     print(json.dumps(manifest, indent=1))

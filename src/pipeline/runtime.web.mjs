@@ -28,8 +28,10 @@ export async function webRuntime({models = MODELS, ep = 'webgpu', log = () => {}
     async session(name) {
       if (cache[name]) return cache[name];
       const bytes = await model(base, manifest[name], (a, b) => progress(name, a, b), log);
-      const sess = await ort.InferenceSession.create(bytes, {executionProviders: [ep], graphOptimizationLevel: 'all'});
-      log(`${name}: running on ${ep}`);
+      // a model the manifest says runs better on the CPU (tools/export_models.py says why) runs on wasm
+      const use = manifest[name].ep === 'cpu' ? 'wasm' : ep;
+      const sess = await ort.InferenceSession.create(bytes, {executionProviders: [use], graphOptimizationLevel: 'all'});
+      log(`${name}: running on ${use}`);
       cache[name] = {
         async run(feeds) {
           const t = {};

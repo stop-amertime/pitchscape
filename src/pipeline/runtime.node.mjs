@@ -35,7 +35,8 @@ export async function nodeRuntime({ep = null, models = path.join(ROOT, 'models')
       const file = path.join(models, manifest[name].file);
       if (!existsSync(file)) throw new Error(`no ${file}: run python tools/export_models.py ${name}`);
       let sess, err;
-      for (const p of order) {
+      // a model the manifest says runs better on the CPU (tools/export_models.py says why) is not put on the GPU
+      for (const p of manifest[name].ep === 'cpu' ? ['cpu'] : order) {
         try {
           sess = await ort.InferenceSession.create(file, {executionProviders: [p], graphOptimizationLevel: 'all'});
           rt.ep = p;
