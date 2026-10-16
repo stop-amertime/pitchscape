@@ -1197,10 +1197,7 @@ export function start() {
     return (v + (a ? ' ' + a : '')).trim() || 'a graphics card';
   }
   /* the person's choice; until they make one, here when this computer can and is not a phone or tablet */
-  /* the analysis here is still being written (src/pipeline): offered once every stage is in; ?here tries it now */
-  var HERE_READY = /[?&]here\b/.test(location.search);
   function whereNow() {
-    if (!HERE_READY) return 'server';
     var w = store.get('pitchscape:where');
     if (w === 'here' || w === 'server') return w;
     return HERE.ok && !HERE.phone && !HERE.tablet ? 'here' : 'server';
@@ -1211,7 +1208,7 @@ export function start() {
   /* what the where-cards (Where.svelte) show */
   function whereUI() {
     ui.where = whereNow(); ui.local = LOCAL; ui.hasKey = !!store.get('pitchscape:key');
-    ui.here = { ready: HERE_READY, done: HERE.done, ok: HERE.ok, gpu: HERE.gpu, why: HERE.why, small: HERE.phone || HERE.tablet, mem: HERE.mem, cores: HERE.cores, mb: HERE.mb };
+    ui.here = { done: HERE.done, ok: HERE.ok, gpu: HERE.gpu, why: HERE.why, small: HERE.phone || HERE.tablet, mem: HERE.mem, cores: HERE.cores, mb: HERE.mb };
   }
   api.setWhere = function (w) { store.set('pitchscape:where', w); whereUI(); };
   whereUI(); hereReady.then(whereUI);

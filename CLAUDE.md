@@ -275,8 +275,11 @@ changed). The page draws only current packs; an older one is analysed again (clo
     into components piece by piece.
   - Icons: unplugin-icons, any Iconify set (`import X from '~icons/lucide/x'`; `@iconify-json/lucide` installed).
   - Transitions: Svelte's (`svelte/transition`), with lengths through `motion()` (0 under reduced motion).
-  - "This computer" is offered only once every stage is in `src/pipeline` (`HERE_READY` in legacy.js); `?here` turns
-    it on to try.
+  - "This computer" (`analyseHere` in legacy.js) runs `src/pipeline` in a module Worker (`analyse.worker.mjs`); it is
+    the default on a computer with a usable GPU that is not a phone or tablet. A first run downloads about 1.7 GB of
+    models (Whisper medium is most of it), kept in the Cache API. Chrome, RTX 5080: a 276 s song in 186 s warm,
+    Whisper 157 s of it. Every ONNX Runtime call in the browser takes its turn (`turn` in runtime.web.mjs): sessions
+    share one wasm instance, and two calls at once corrupted it.
 - `dsp.js` is the old in-browser analysis engine; the page now only uses its lyric helpers (`parseLyrics`,
   `alignLyrics`, `alignToAnchors`, `parseLRC`...), `mtof`/`ftom`, `DRUM_BANDS` and the demo song synthesis. Drawing
   always comes from a server pack. `tests/*.js` test that engine (`node tests/engine_test.js`).

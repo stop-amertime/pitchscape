@@ -13,8 +13,8 @@
 
   const h = $derived(ui.here);
   const kit = $derived([h.gpu, h.cores ? `${h.cores} cores` : '', h.mem ? (h.mem >= 8 ? '8 GB+' : `${h.mem} GB`) : ''].filter(Boolean).join(' · '));
-  const hereSub = $derived(!h.ready ? 'Coming soon' : !h.done ? 'Checking…' : !h.ok ? h.why : h.small ? 'Slow on a phone: use the server' : kit);
-  const hereOff = $derived(h.ready && h.done && (!h.ok || h.small));
+  const hereSub = $derived(!h.done ? 'Checking…' : !h.ok ? h.why : h.small ? 'Slow on a phone: use the server' : kit);
+  const hereOff = $derived(h.done && (!h.ok || h.small));
   const serverSub = $derived(ui.local ? 'This machine' : ui.hasKey ? 'Key saved' : 'Needs a key');
   const showKey = $derived(withKey && !ui.local && ui.where === 'server');
 
@@ -28,7 +28,7 @@
 <div class="where">
   <h2 class="eyebrow" id="{id}-h">Where songs are analysed</h2>
   <div class="cards" role="group" aria-labelledby="{id}-h">
-    <button type="button" class="card" class:off={hereOff} aria-pressed={ui.where === 'here'} disabled={!h.ready} onclick={() => api.setWhere('here')}>
+    <button type="button" class="card" class:off={hereOff} aria-pressed={ui.where === 'here'} onclick={() => api.setWhere('here')}>
       <Monitor class="ic" aria-hidden="true" />
       <span class="t">This computer</span>
       <span class="s">{hereSub}</span>
