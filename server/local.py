@@ -250,6 +250,14 @@ def main():
     if device == 'auto':
         import torch
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        if device == 'cuda':
+            # a PyTorch build has kernels only for the GPU generations it was compiled for (2.5.1 stops at sm_90, so
+            # an RTX 50-series card, sm_120, crashes on its first operation): use the CPU rather than fail every song
+            cap = 'sm_%d%d' % torch.cuda.get_device_capability()
+            if cap not in torch.cuda.get_arch_list():
+                print('This PyTorch (%s) has no kernels for %s (%s); analysing on the CPU instead.'
+                      % (torch.__version__, torch.cuda.get_device_name(), cap))
+                device = 'cpu'
     jobs = Jobs(a.library, device, a.whisper)
     url = 'http://%s:%d' % ('localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host, a.port)
     server = ThreadingHTTPServer((a.host, a.port), handler(jobs))

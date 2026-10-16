@@ -39,13 +39,15 @@ if errorlevel 1 (
   "%VPY%" -m pip install --upgrade pip
   rem the GPU build of PyTorch when there is an NVIDIA card, the CPU build otherwise
   where nvidia-smi >nul 2>nul
-  if errorlevel 1 (set "TORCH=https://download.pytorch.org/whl/cpu") else (set "TORCH=https://download.pytorch.org/whl/cu124")
-  "%VPY%" -m pip install torch==2.5.1 torchaudio==2.5.1 --index-url !TORCH!
+  if errorlevel 1 (set "TORCH=https://download.pytorch.org/whl/cpu") else (set "TORCH=https://download.pytorch.org/whl/cu128")
+  "%VPY%" -m pip install torch==2.7.1 torchaudio==2.7.1 --index-url !TORCH!
   if errorlevel 1 goto failed
   "%VPY%" -m pip install -r server\requirements.txt
   if errorlevel 1 goto failed
   rem Basic Pitch pulls in TensorFlow, which Pitchscape does not use and which clashes with NumPy 2
   "%VPY%" -m pip uninstall -y tensorflow tensorflow-cpu tensorflow-intel >nul 2>nul
+  rem an uninstall can leave an empty tensorflow folder, which Basic Pitch takes for TensorFlow and fails on
+  if exist ".venv\Lib\site-packages\tensorflow" rmdir /s /q ".venv\Lib\site-packages\tensorflow"
   copy /y server\requirements.txt .venv\pitchscape-requirements.txt >nul
 )
 

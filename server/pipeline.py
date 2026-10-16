@@ -613,9 +613,11 @@ def notes_from_stem(other44):
     from basic_pitch import ICASSP_2022_MODEL_PATH
     from basic_pitch.inference import predict
     from basic_pitch.note_creation import model_frames_to_time
-    with tempfile.NamedTemporaryFile(suffix='.wav') as tmp:
-        sf.write(tmp.name, other44.T, 44100, subtype='FLOAT')
-        out, _, events = predict(tmp.name, ICASSP_2022_MODEL_PATH, onset_threshold=0.5, frame_threshold=HOLD_FLOOR,
+    # a file in a temporary folder, not a NamedTemporaryFile: Windows will not open a file by name while it is held open
+    with tempfile.TemporaryDirectory() as tmpdir:
+        wav = os.path.join(tmpdir, 'stem.wav')
+        sf.write(wav, other44.T, 44100, subtype='FLOAT')
+        out, _, events = predict(wav, ICASSP_2022_MODEL_PATH, onset_threshold=0.5, frame_threshold=HOLD_FLOOR,
                                  minimum_note_length=NOTE_MIN_MS, melodia_trick=True)
     note = out['note']
     times = model_frames_to_time(note.shape[0])

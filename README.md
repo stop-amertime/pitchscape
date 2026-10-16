@@ -146,7 +146,7 @@ By hand (any system):
    ```
    python -m venv .venv
    .venv\Scripts\activate            (Windows; on macOS or Linux: source .venv/bin/activate)
-   pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+   pip install torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
    pip install -r server/requirements.txt
    pip uninstall -y tensorflow tensorflow-cpu tensorflow-intel
    ```
