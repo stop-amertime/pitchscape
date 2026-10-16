@@ -254,7 +254,9 @@ class Ear:
         for lo, hi, ms in self.BANDS:
             L = int(round(ms / 1000 * SR)) // 2 * 2
             n = 1 << max(5, (L - 1).bit_length())
-            hop = max(1, L // 2)
+            # half a window, but at least once per page frame: the 64 ms window's 705 samples left a quarter of the
+            # frames with nothing below 80 Hz
+            hop = max(1, min(L // 2, HOP))
             w = np.hanning(L)
             X = np.abs(librosa.stft(y, n_fft=n, hop_length=hop, win_length=L, window=w, center=True))
             fb = librosa.fft_frequencies(sr=SR, n_fft=n)
@@ -350,15 +352,16 @@ def excitation_widths(fi, Pi, X, hz):
     return out
 
 
-def ear_line(ear, hz, every=2):
+def ear_line(ear, hz, every=2, tone=False):
     """Widths for a pitch line (voice or bass), frame by frame: measured every `every` frames while it sounds and
-    read between. (F, 2 * len(EAR_DB))."""
+    read between. With `tone`, a pure tone's at the line's pitch and the level its stem has there (tone_widths), as
+    for notes. (F, 2 * len(EAR_DB))."""
     F = len(hz)
     out = np.zeros((F, 2 * len(EAR_DB)), np.float32)
     on = np.nonzero(hz > 0)[0]
     done = on[::every]
     for f in done:
-        out[f] = ear.widths(int(f), float(hz[f]))
+        out[f] = tone_widths(float(hz[f]), ear.level(int(f), float(hz[f]))) if tone else ear.widths(int(f), float(hz[f]))
     for f in np.setdiff1d(on, done):
         a, b = f - 1, f + 1
         out[f] = (out[a] + out[b]) / 2 if b < F and hz[a] > 0 and hz[b] > 0 else out[a] if hz[a] > 0 else out[min(b, F - 1)]
@@ -1041,7 +1044,9 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
     bends, holds, widths, where = pack_curves(segs, ears)
     ears = None
     leadEar = ear_line(Ear(st22['vocals'], gain), leadHz)
-    bassEar = ear_line(Ear(st22['bass'], gain), bassHz)
+    # the bass as a pure tone: a bass's octave is often as loud as its note, and so low the two merge along the ear
+    # (with the analysis window's own spread, the measured width filled 17-21 semitones)
+    bassEar = ear_line(Ear(st22['bass'], gain), bassHz, tone=True)
     segs = [r[:13] + [rs[0], rs[1], w[0], w[1]] for r, rs, w in zip(segs, note_rs, where)]
 
     lyrics, found = None, None
@@ -1055,7 +1060,7 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
     sg = np.array(segs, np.float32).reshape(-1) if segs else np.zeros(0, np.float32)
     on = np.array(onsets, np.float32).reshape(-1) if onsets else np.zeros(0, np.float32)
     pack = {
-        'format': 'song-overprint-pack', 'version': 9, 'source': 'pitchscape-server',
+        'format': 'song-overprint-pack', 'version': 10, 'source': 'pitchscape-server',
         'models': {'stems': 'htdemucs_6s', 'drums': 'ADTOF Frame_RNN', 'notes': 'Basic Pitch ICASSP 2022',
                    'bass': 'pYIN', 'voice': 'CREPE', 'tone': 'MOSQITO roughness_dw, sharpness_din', 'width': 'Glasberg & Moore roex excitation patterns',
                    'words': 'LRCLIB, timed by Whisper' if words else None},

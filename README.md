@@ -85,20 +85,21 @@ struck again at the same pitch stay separate notes. On a synthetic plucked note 
 then wobbled, Basic Pitch gave 11 fragments; joined, they are one stroke within 0.35 semitone of the true bend
 throughout. On Made in the Dark, whose guitar barely bends, 3 of 766 guitar notes were joined.
 
-**Thickness is how wide the ear hears each sound**, not a choice of ours. For every voice and bass frame the pipeline
-works out the sound's excitation pattern on its own stem: the stem's spectrum, set to its level in a 70 dB SPL mix and
-read at ISO 532-2's resolutions (windows from 64 ms below 80 Hz to 2 ms above 4 kHz), passed through Glasberg &
-Moore's roex auditory filters, whose lower skirts flatten as the level rises. It sends how far below and above the
-sound's pitch the excitation stays within 1, 3 and 10 dB of its peak (stopping where it rises again towards a
-neighbour). A note's stem (guitar, piano, the rest) usually holds a whole chord, and often other instruments too, so its
-spectrum cannot say which part is the note's: measured that way every note took the chord's width (a median of 12-15
-semitones at 3 dB, walls of spikes). So a note is given the excitation of a pure tone at its pitch (bends included) and
-at the level its stem has within one ERB of it: the textbook roex response, 0.9 ERB at 3 dB for 440 Hz at 60 dB.
-The page prints all of it as ink: solid within 1 dB, lighter to 3 dB, a faint haze to 10 dB, each band eased over
-about 160 ms. So low sounds are wide and high ones narrow; loud sounds spread upward; a voice's breath, noise and
-wavering pitch are wider, because their own spectrum is (a note's are not: its width is the tone's). On real songs the
-voice's 3 dB band is about 4-6 semitones, notes about 3, and the bass's 6-19 (its stem also holds the kick's boom and
-whatever else Demucs put there). more. The Lab's Print tab can switch back to thickness from loudness, and set how strongly the faint bands print.
+**Thickness is how wide the ear hears each sound**, not a choice of ours. For every voice frame the pipeline works
+out the sound's excitation pattern on its own stem: the stem's spectrum, set to its level in a 70 dB SPL mix and read
+at ISO 532-2's resolutions (windows from 64 ms below 80 Hz to 2 ms above 4 kHz, each read at least once per frame),
+passed through Glasberg & Moore's roex auditory filters, whose lower skirts flatten as the level rises. It sends how
+far below and above the sound's pitch the excitation stays within 1, 3 and 10 dB of its peak (stopping where it rises
+again towards a neighbour). Notes and the bass are given the excitation of a pure tone at their pitch (bends
+included) and at the level their stem has within one ERB of it: the textbook roex response, 0.9 ERB at 3 dB for 440 Hz
+at 60 dB. A note's stem (guitar, piano, the rest) usually holds a whole chord, and its spectrum cannot say which part
+is the note's: measured that way every note took the chord's width (a median of 12-15 semitones at 3 dB, walls of
+spikes). A bass's octave is often as loud as its note, and so low the two merge along the ear; with the analysis
+window's own spread its measured width filled 17-21 semitones, a fog. The page prints all of it as ink: solid within
+1 dB, lighter to 3 dB, a faint haze to 10 dB, each band eased over about 160 ms. So low sounds are wide and high ones
+narrow (at 35 Hz one auditory filter spans about an octave); loud sounds spread upward; a voice's breath, noise and
+wavering pitch are wider, because its own spectrum is. On the test songs the 3 dB band's median is 4-6 semitones for
+the voice, about 3 for notes, and 7-9 for bass guitar (12.6 for a 35 Hz synth bass). The Lab's Print tab can switch back to thickness from loudness, and set how strongly the faint bands print.
 
 **No cutoff is baked in.** Every threshold that decides whether something prints is applied by the page, from the
 Lab's Cutoffs tab, so it can be tried on a song without analysing it again. The server finds things down to a floor

@@ -668,7 +668,7 @@ def py_ear(inp, out):
     vEar = None
     bEar = P.Ear(st22['bass'], gain)
     t5 = time.time()
-    bassEar = P.ear_line(bEar, bassHz)
+    bassEar = P.ear_line(bEar, bassHz, tone=True)
     t6 = time.time()
     os.makedirs(out, exist_ok=True)
     np.save(os.path.join(out, 'bends.npy'), np.array(bends, np.float64))
