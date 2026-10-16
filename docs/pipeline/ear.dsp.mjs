@@ -44,7 +44,7 @@ export const LAYOUT = (() => {
   for (const [lo, hi, ms] of BANDS) {
     const L = Math.floor(pyRound(ms / 1000 * SR) / 2) * 2;
     const n = 1 << Math.max(5, 32 - Math.clz32(L - 1));
-    const hop = Math.max(1, L >> 1);
+    const hop = Math.max(1, Math.min(L >> 1, HOP));          // half a window, at least once per page frame
     const w = new Float64Array(n), lpad = (n - L) >> 1;    // np.hanning(L), centred in the frame (librosa pad_center)
     let wsum = 0;
     for (let i = 0; i < L; i++) { w[lpad + i] = 0.5 + 0.5 * Math.cos(Math.PI * (1 - L + 2 * i) / (L - 1)); wsum += w[lpad + i]; }

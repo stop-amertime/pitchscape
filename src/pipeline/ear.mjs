@@ -1,8 +1,8 @@
 // width: how wide each sound spreads along the ear, as server/pipeline.py's width stage measures it (Ear, pack_curves,
 // ear_line): Glasberg & Moore roex excitation patterns per stem, read at ISO 532-2's resolutions, and for every voice
-// and bass frame how far either side of the sound its excitation stays within 1, 3 and 10 dB of its peak. A note's
-// stem may hold a whole chord, so for every note sample (every other one measured, read between) it is the same of
-// a pure tone at its pitch and at the level its stem has there. Patterns are made only for the note stems that have
+// frame how far either side of the sound its excitation stays within 1, 3 and 10 dB of its peak. A note's stem may
+// hold a whole chord, and a bass's octave merges with its note, so for every note sample (every other one measured,
+// read between) and bass frame it is the same of a pure tone at its pitch and at the level its stem has there. Patterns are made only for the note stems that have
 // notes, and for the vocals and bass.
 //
 // Each stem is cut into runs of frames; a worker (ear.dsp.mjs) makes the pattern of its run and measures every width
@@ -112,7 +112,7 @@ export async function ears(st22, gain, segs, leadHz, bassHz, rt, {stats = {}} = 
   let leadEar, bassEar;
   jobs.push(measure(st22.vocals, gain, lead.done, lead.done.map(f => leadHz[f]), rt)
     .then(w => { leadEar = earLine(leadHz, lead.done, lead.on, w); }));
-  jobs.push(measure(st22.bass, gain, bass.done, bass.done.map(f => bassHz[f]), rt)
+  jobs.push(measure(st22.bass, gain, bass.done, bass.done.map(f => bassHz[f]), rt, true)
     .then(w => { bassEar = earLine(bassHz, bass.done, bass.on, w); }));
   await Promise.all(jobs);
   // the odd samples of each note read between their neighbours
