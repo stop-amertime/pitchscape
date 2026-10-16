@@ -12,6 +12,7 @@ self.onmessage = async ({data: {bytes, name, mix, models}}) => {
     const pack = await analyze(bytes, name, rt, {mix, progress: m => self.postMessage({progress: m})});
     self.postMessage({pack});
   } catch (e) {
+    console.error((e && e.stack) || e);
     self.postMessage({error: String((e && e.message) || e).replace(/\.?\s*$/, '.')});
   } finally {
     if (rt) rt.close();

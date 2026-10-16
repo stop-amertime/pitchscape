@@ -254,7 +254,9 @@ class Ear:
         for lo, hi, ms in self.BANDS:
             L = int(round(ms / 1000 * SR)) // 2 * 2
             n = 1 << max(5, (L - 1).bit_length())
-            hop = max(1, L // 2)
+            # half a window, but at least once per page frame: the 64 ms window's 705 samples left a quarter of the
+            # frames with nothing below 80 Hz
+            hop = max(1, min(L // 2, HOP))
             w = np.hanning(L)
             X = np.abs(librosa.stft(y, n_fft=n, hop_length=hop, win_length=L, window=w, center=True))
             fb = librosa.fft_frequencies(sr=SR, n_fft=n)
@@ -290,44 +292,76 @@ class Ear:
         a = np.clip(np.searchsorted(self.f, fi - e / 2) - 1, 0, len(c) - 1)
         b = np.clip(np.searchsorted(self.f, fi + e / 2), 0, len(c) - 1)
         X = 10 * np.log10((c[b] - c[a]) / P_REF ** 2 + 1e-12)
-        p51 = (4 * fc / erb(fc))[:, None]
-        p51k = 4 * 1000 / erb(1000)
-        below = fi[None, :] < fc[:, None]
-        pl = np.maximum(0.1 * p51, p51 - 0.38 * (p51 / p51k) * (X[None, :] - 51))
-        p = np.where(below, pl, p51)
-        g = np.abs(fi[None, :] - fc[:, None]) / fc[:, None]
-        W = (1 + p * g) * np.exp(-p * g)
-        E = 10 * np.log10(W @ Pi / P_REF ** 2 + 1e-12)
-        mid = EAR_SPAN * 8
-        kp = mid - 8 + int(np.argmax(E[mid - 8:mid + 9]))          # the sound's own peak, within a semitone of it
-        out = []
-        for d in EAR_DB:
-            floor = E[kp] - d
-            j = kp
-            while j > 0 and E[j - 1] >= floor and E[j - 1] <= E[j] + 0.5:
-                j -= 1
-            dn = (mid - j) / 8
-            if j > 0 and E[j - 1] < floor and E[j] > E[j - 1]:
-                dn += (E[j] - floor) / (E[j] - E[j - 1]) / 8
-            j = kp
-            while j < len(E) - 1 and E[j + 1] >= floor and E[j + 1] <= E[j] + 0.5:
-                j += 1
-            up = (j - mid) / 8
-            if j < len(E) - 1 and E[j + 1] < floor and E[j] > E[j + 1]:
-                up += (E[j] - floor) / (E[j] - E[j + 1]) / 8
-            out += [max(0.0, dn), max(0.0, up)]
-        return out
+        return excitation_widths(fi, Pi, X, hz)
+
+    def level(self, frame, hz):
+        """The stem's level in dB SPL within one ERB around hz at a frame (as widths() reads each component's), or
+        None where it is silent there."""
+        if frame >= self.P.shape[1] or not hz > 0:
+            return None
+        c = self.cum[:, frame]
+        e = erb(hz)
+        a = int(np.clip(np.searchsorted(self.f, hz - e / 2) - 1, 0, len(c) - 1))
+        b = int(np.clip(np.searchsorted(self.f, hz + e / 2), 0, len(c) - 1))
+        p = c[b] - c[a]
+        return float(10 * np.log10(p / P_REF ** 2 + 1e-12)) if p > 0 else None
 
 
-def ear_line(ear, hz, every=2):
+def tone_widths(hz, level):
+    """excitation_widths of a pure tone at hz and `level` dB SPL alone: how a note would spread along the ear on its
+    own, with nothing else in its stem counted (a polyphonic stem's spectrum holds the whole chord, and gave every
+    note in it the chord's width). The textbook roex response, without the spectral analysis' window leakage."""
+    if not hz > 0 or level is None:
+        return [0.0] * (2 * len(EAR_DB))
+    return excitation_widths(np.array([float(hz)]), np.array([P_REF ** 2 * 10 ** (level / 10)]),
+                             np.array([level], np.float32), hz)
+
+
+def excitation_widths(fi, Pi, X, hz):
+    """(down, up) in semitones from hz for each drop in EAR_DB of the excitation pattern of components at fi Hz with
+    mean-square pressures Pi, each X dB SPL per ERB around it: how far either side of the sound the excitation stays
+    within that many dB of its peak, stopping where it rises again towards a neighbouring sound."""
+    k = np.arange(-EAR_SPAN * 8, EAR_SPAN * 8 + 1)
+    fc = hz * 2 ** (k / 96)
+    p51 = (4 * fc / erb(fc))[:, None]
+    p51k = 4 * 1000 / erb(1000)
+    below = fi[None, :] < fc[:, None]
+    pl = np.maximum(0.1 * p51, p51 - 0.38 * (p51 / p51k) * (X[None, :] - 51))
+    p = np.where(below, pl, p51)
+    g = np.abs(fi[None, :] - fc[:, None]) / fc[:, None]
+    W = (1 + p * g) * np.exp(-p * g)
+    E = 10 * np.log10(W @ Pi / P_REF ** 2 + 1e-12)
+    mid = EAR_SPAN * 8
+    kp = mid - 8 + int(np.argmax(E[mid - 8:mid + 9]))          # the sound's own peak, within a semitone of it
+    out = []
+    for d in EAR_DB:
+        floor = E[kp] - d
+        j = kp
+        while j > 0 and E[j - 1] >= floor and E[j - 1] <= E[j] + 0.5:
+            j -= 1
+        dn = (mid - j) / 8
+        if j > 0 and E[j - 1] < floor and E[j] > E[j - 1]:
+            dn += (E[j] - floor) / (E[j] - E[j - 1]) / 8
+        j = kp
+        while j < len(E) - 1 and E[j + 1] >= floor and E[j + 1] <= E[j] + 0.5:
+            j += 1
+        up = (j - mid) / 8
+        if j < len(E) - 1 and E[j + 1] < floor and E[j] > E[j + 1]:
+            up += (E[j] - floor) / (E[j] - E[j + 1]) / 8
+        out += [max(0.0, dn), max(0.0, up)]
+    return out
+
+
+def ear_line(ear, hz, every=2, tone=False):
     """Widths for a pitch line (voice or bass), frame by frame: measured every `every` frames while it sounds and
-    read between. (F, 2 * len(EAR_DB))."""
+    read between. With `tone`, a pure tone's at the line's pitch and the level its stem has there (tone_widths), as
+    for notes. (F, 2 * len(EAR_DB))."""
     F = len(hz)
     out = np.zeros((F, 2 * len(EAR_DB)), np.float32)
     on = np.nonzero(hz > 0)[0]
     done = on[::every]
     for f in done:
-        out[f] = ear.widths(int(f), float(hz[f]))
+        out[f] = tone_widths(float(hz[f]), ear.level(int(f), float(hz[f]))) if tone else ear.widths(int(f), float(hz[f]))
     for f in np.setdiff1d(on, done):
         a, b = f - 1, f + 1
         out[f] = (out[a] + out[b]) / 2 if b < F and hz[a] > 0 and hz[b] > 0 else out[a] if hz[a] > 0 else out[min(b, F - 1)]
@@ -584,8 +618,8 @@ def notes_by_stem(stems, st22):
 def pack_curves(segs, ears):
     """Each note through time on the page's frame grid (every DT s from t0 to t1): its bend, in semitones from its
     pitch; how sure Basic Pitch is that it still sounds (which the page's "note hold" lever cuts at); and how wide it
-    spreads along the ear (measured every other sample on its own stem and read between). Flat lists, and each
-    note's (start, count) in all of them."""
+    spreads along the ear: a pure tone's excitation at its pitch and at the level its stem has there (tone_widths;
+    every other sample, read between). Flat lists, and each note's (start, count) in all of them."""
     bends, holds, widths, where = [], [], [], []
     for r in segs:
         tb, off, ab = r[13]
@@ -598,7 +632,8 @@ def pack_curves(segs, ears):
         ear, w = ears.get(NOTE_STEMS[int(r[12])]), np.zeros((n, 2 * len(EAR_DB)))
         if ear is not None:
             for j in range(0, n, 2):
-                w[j] = ear.widths(int(round(tt[j] / DT)), 440 * 2 ** ((r[2] + bv[j] - 69) / 12))
+                hz = 440 * 2 ** ((r[2] + bv[j] - 69) / 12)
+                w[j] = tone_widths(hz, ear.level(int(round(tt[j] / DT)), hz))
             for j in range(1, n, 2):
                 w[j] = (w[j - 1] + w[j + 1]) / 2 if j + 1 < n else w[j - 1]
         widths += w.reshape(-1).tolist()
@@ -1009,7 +1044,9 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
     bends, holds, widths, where = pack_curves(segs, ears)
     ears = None
     leadEar = ear_line(Ear(st22['vocals'], gain), leadHz)
-    bassEar = ear_line(Ear(st22['bass'], gain), bassHz)
+    # the bass as a pure tone: a bass's octave is often as loud as its note, and so low the two merge along the ear
+    # (with the analysis window's own spread, the measured width filled 17-21 semitones)
+    bassEar = ear_line(Ear(st22['bass'], gain), bassHz, tone=True)
     segs = [r[:13] + [rs[0], rs[1], w[0], w[1]] for r, rs, w in zip(segs, note_rs, where)]
 
     lyrics, found = None, None
@@ -1023,7 +1060,7 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
     sg = np.array(segs, np.float32).reshape(-1) if segs else np.zeros(0, np.float32)
     on = np.array(onsets, np.float32).reshape(-1) if onsets else np.zeros(0, np.float32)
     pack = {
-        'format': 'song-overprint-pack', 'version': 8, 'source': 'pitchscape-server',
+        'format': 'song-overprint-pack', 'version': 10, 'source': 'pitchscape-server',
         'models': {'stems': 'htdemucs_6s', 'drums': 'ADTOF Frame_RNN', 'notes': 'Basic Pitch ICASSP 2022',
                    'bass': 'pYIN', 'voice': 'CREPE', 'tone': 'MOSQITO roughness_dw, sharpness_din', 'width': 'Glasberg & Moore roex excitation patterns',
                    'words': 'LRCLIB, timed by Whisper' if words else None},

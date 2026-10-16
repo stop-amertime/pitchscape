@@ -1,7 +1,8 @@
 // The CPU work of the width stage (ear.mjs), apart so worker threads can run it (worker.mjs): server/pipeline.py's
 // Ear, excitation patterns from one stem (Glasberg & Moore's roex auditory filters, the lower skirt flattening as the
 // level rises; the spectrum read at the resolutions of ISO 532-2), and Ear.widths, how far either side of a sound
-// its excitation stays within 1, 3 and 10 dB of its peak.
+// its excitation stays within 1, 3 and 10 dB of its peak; and tone_widths, the same of a pure tone at a level the
+// stem has there (Ear.level), for notes, whose stem may hold a whole chord.
 //
 // The Python keeps the pattern on librosa's 4097-point grid (2049 bins x frames, float32). Each ISO 532-2 band lands
 // only on the grid bins its own, coarser FFT reaches (every 2nd bin below 80 Hz ... every 64th above 4050 Hz), about
@@ -43,7 +44,7 @@ export const LAYOUT = (() => {
   for (const [lo, hi, ms] of BANDS) {
     const L = Math.floor(pyRound(ms / 1000 * SR) / 2) * 2;
     const n = 1 << Math.max(5, 32 - Math.clz32(L - 1));
-    const hop = Math.max(1, L >> 1);
+    const hop = Math.max(1, Math.min(L >> 1, HOP));          // half a window, at least once per page frame
     const w = new Float64Array(n), lpad = (n - L) >> 1;    // np.hanning(L), centred in the frame (librosa pad_center)
     let wsum = 0;
     for (let i = 0; i < L; i++) { w[lpad + i] = 0.5 + 0.5 * Math.cos(Math.PI * (1 - L + 2 * i) / (L - 1)); wsum += w[lpad + i]; }
@@ -121,37 +122,21 @@ const P51K = 4 * 1000 / erb(1000);
 const STEP = Float64Array.from({length: NK}, (_, k) => 2 ** ((k - MID) / 96));
 const ZERO = [0, 0, 0, 0, 0, 0];
 
-/** Ear.widths for one frame of a pattern: (down, up) in semitones from hz at each drop in EAR_DB. Pf: the frame's
- * kept bins (C values), cum: their running sum in float32 (the grid's np.cumsum). */
-function widthsAt(Pf, cum, hz, E, X) {
-  const {C, gi, lastLE, fi, ea, eb} = LAYOUT;
-  const fc0 = hz * STEP[0], fcN = hz * STEP[NK - 1];
-  const lo = searchsorted(GRID, fc0 / 1.6), hi = searchsorted(GRID, Math.min(fcN * 1.6, SR / 2 - 1));
-  if (hi - lo < 2) return ZERO;
-  // the kept bins inside the grid's [lo, hi) that carry power
-  let c0 = 0;
-  while (c0 < C && gi[c0] < lo) c0++;
-  let c1 = c0, any = false;
-  while (c1 < C && gi[c1] < hi) { if (Pf[c1] > 0) any = true; c1++; }
-  if (!any) return ZERO;
-  // each component's level in dB SPL per ERB around it (float32, as numpy computes it from the float32 cumsum)
-  const at = j => lastLE[j] >= 0 ? cum[lastLE[j]] : 0;
-  for (let c = c0; c < c1; c++) {
-    const v = f32(f32(f32(at(eb[c]) - at(ea[c])) / f32(P_REF2)) + f32(1e-12));
-    X[c] = f32(f32(10 * f32(Math.log10(v))) - 51);              // X - 51, in float32
-  }
+/** excitation_widths: (down, up) in semitones from hz at each drop in EAR_DB of the excitation of components c0..c1-1
+ * at fi Hz with mean-square pressures P, each X[c] - 51 (float32) dB SPL per ERB around it. E: scratch, NK values. */
+function excitationWidths(fi, P, X, c0, c1, hz, E) {
   E.fill(NaN);
   const level = k => {                                           // the excitation at the k-th filter, dB SPL
     if (E[k] === E[k]) return E[k];
     const fc = hz * STEP[k], p51 = 4 * fc / erb(fc), lowSlope = 0.38 * (p51 / P51K);
     let s = 0;
     for (let c = c0; c < c1; c++) {
-      const P = Pf[c];
-      if (!(P > 0)) continue;
+      const Pc = P[c];
+      if (!(Pc > 0)) continue;
       const f = fi[c];
       const p = f < fc ? Math.max(0.1 * p51, p51 - lowSlope * X[c]) : p51;
       const pg = p * (Math.abs(f - fc) / fc);
-      s += (1 + pg) * Math.exp(-pg) * P;
+      s += (1 + pg) * Math.exp(-pg) * Pc;
     }
     return E[k] = 10 * Math.log10(s / P_REF2 + 1e-12);
   };
@@ -173,10 +158,49 @@ function widthsAt(Pf, cum, hz, E, X) {
   return out;
 }
 
-/** One chunk of the stage: the pattern of frames p0..p1-1 of a stem, and Ear.widths at each (frame, hz) asked for
- * there. y: the stem's samples from sample `from` at 22.05 kHz (the frames' reach: see ear.mjs), n: its length,
- * gain: Ear's gain. Returns Float64Array(frames.length * 6). */
-export function earChunk(y, from, n, gain, p0, p1, frames, hz) {
+/** The float32 level in dB SPL of a float32 mean-square pressure p (numpy's 10 * log10(p / P_REF ** 2 + 1e-12)). */
+const dB32 = p => f32(10 * f32(Math.log10(f32(f32(p / f32(P_REF2)) + f32(1e-12)))));
+
+/** Ear.widths for one frame of a pattern: the stem's own spectrum. Pf: the frame's kept bins (C values), cum: their
+ * running sum in float32 (the grid's np.cumsum). */
+function widthsAt(Pf, cum, hz, E, X) {
+  const {C, gi, lastLE, fi, ea, eb} = LAYOUT;
+  const fc0 = hz * STEP[0], fcN = hz * STEP[NK - 1];
+  const lo = searchsorted(GRID, fc0 / 1.6), hi = searchsorted(GRID, Math.min(fcN * 1.6, SR / 2 - 1));
+  if (hi - lo < 2) return ZERO;
+  // the kept bins inside the grid's [lo, hi) that carry power
+  let c0 = 0;
+  while (c0 < C && gi[c0] < lo) c0++;
+  let c1 = c0, any = false;
+  while (c1 < C && gi[c1] < hi) { if (Pf[c1] > 0) any = true; c1++; }
+  if (!any) return ZERO;
+  // each component's level in dB SPL per ERB around it (float32, as numpy computes it from the float32 cumsum)
+  const at = j => lastLE[j] >= 0 ? cum[lastLE[j]] : 0;
+  for (let c = c0; c < c1; c++) X[c] = f32(dB32(f32(at(eb[c]) - at(ea[c]))) - 51);
+  return excitationWidths(fi, Pf, X, c0, c1, hz, E);
+}
+
+const ONE_F = new Float64Array(1), ONE_P = new Float64Array(1), ONE_X = new Float32Array(1);
+
+/** tone_widths at Ear.level: a pure tone at hz, at the level the stem has within one ERB around it, alone. */
+function toneAt(cum, hz, E) {
+  const {lastLE} = LAYOUT, at = j => lastLE[j] >= 0 ? cum[lastLE[j]] : 0, e = erb(hz);
+  const a = Math.min(N / 2, Math.max(0, searchsorted(GRID, hz - e / 2) - 1));
+  const b = Math.min(N / 2, Math.max(0, searchsorted(GRID, hz + e / 2)));
+  const p = f32(at(b) - at(a));
+  if (!(p > 0)) return ZERO;
+  const L = dB32(p);
+  ONE_F[0] = hz;
+  ONE_P[0] = P_REF2 * 10 ** (L / 10);
+  ONE_X[0] = f32(L - 51);
+  return excitationWidths(ONE_F, ONE_P, ONE_X, 0, 1, hz, E);
+}
+
+/** One chunk of the stage: the pattern of frames p0..p1-1 of a stem, and at each (frame, hz) asked for there the
+ * widths: of the stem's own excitation (Ear.widths), or with `tone` of a pure tone at the stem's level there
+ * (tone_widths at Ear.level). y: the stem's samples from sample `from` at 22.05 kHz (the frames' reach: see
+ * ear.mjs), n: its length, gain: Ear's gain. Returns Float64Array(frames.length * 6). */
+export function earChunk(y, from, n, gain, p0, p1, frames, hz, tone = false) {
   const g = f32(gain), ys = new Float32Array(y.length);
   for (let i = 0; i < y.length; i++) ys[i] = y[i] * g;           // (y22 * gain) in float32
   const P = pattern(ys, from, n, p0, p1), C = LAYOUT.C;
@@ -192,7 +216,7 @@ export function earChunk(y, from, n, gain, p0, p1, frames, hz) {
       for (let c = 0; c < C; c++) cum[c] = s = f32(s + Pf[c]);
       have = f;
     }
-    out.set(widthsAt(Pf, cum, hz[q], E, X), q * 6);
+    out.set(tone ? toneAt(cum, hz[q], E) : widthsAt(Pf, cum, hz[q], E, X), q * 6);
   }
   return out;
 }

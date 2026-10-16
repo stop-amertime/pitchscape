@@ -25,7 +25,7 @@ sound (or the ear) actually does and draw that.
 | height | pitch, on a log axis fitted to the song's range | CREPE (voice), pYIN (bass), Basic Pitch (notes) |
 | a note's path | its pitch through time, bends and vibrato included | Basic Pitch's per-frame pitch bends |
 | colour | which instrument (stem), warm inks for what is out front | Demucs htdemucs_6s stems |
-| thickness | how wide the sound spreads along the ear (excitation pattern) | Glasberg & Moore roex filters, ISO 532-2 resolutions |
+| thickness | how wide the sound spreads along the ear (excitation pattern; for notes and bass, a pure tone's at their pitch and level) | Glasberg & Moore roex filters, ISO 532-2 resolutions |
 | ink density across the stroke | solid within 1 dB of the excitation peak, lighter to 3 dB, haze to 10 dB | same |
 | ink strength along the stroke | loudness, and for struck notes their measured fade | stem RMS, measured decay |
 | edge: smooth ripple to sawtooth | harshness = roughness + sharpness | MOSQITO (Daniel & Weber roughness, DIN 45692 sharpness) |
@@ -182,17 +182,18 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
 - Learned: ONNX Runtime's DirectML provider returns wrong numbers on htdemucs_6s (-32 dB against the CPU provider),
   so Node on Windows uses its WebGPU provider. Chrome with `--user-data-dir` on a Windows 8.3 short path
   (`ADMT9N~1`) cannot open CacheStorage. Port 8770 is refused on this laptop.
-- Width (`ear.mjs`, `ear.dsp.mjs`): `ears(st22, gain, segs, leadHz, bassHz, rt)` is Ear, pack_curves and ear_line.
+- Width (`ear.mjs`, `ear.dsp.mjs`): `ears(st22, gain, segs, leadHz, bassHz, rt)` is Ear, pack_curves and ear_line
+  (notes and bass: tone_widths at Ear.level; voice: Ear.widths).
   Each ISO 532-2 band only reaches the grid bins its own coarser FFT lands on, 90 of the 2049, so a pattern is kept
   as those 90 bins (Python: 2049 x frames float32 per stem, enough to run this laptop out of memory once). Each stem
   is cut into runs of frames; a worker makes its run's pattern and measures every width asked for there, so no
   pattern is held whole. Float32 where numpy is (|X| in complex64, the grid's cumsum, the per-ERB level), double
   elsewhere. `python tools/parity.py ear` (Python's notes, voice and bass lines and 22.05 kHz stems as input, made
-  once into py-ear-in/): on all nine songs, `where`, bends and holds are identical. Widths differ by a median of
-  under 1e-7 semitones, at most 1.4e-4 (no width moves an eighth of a semitone, the walk's step). After the pack's
-  u8 quantisation 5 bytes of ~1.5 million differ, each by one step (0.06 semitones), and every earWidth3dB median is
-  the same. Speed (same input, back to back): Code Monkey Python 85 s, JS 11.2 s on one worker, 1.9 s on 8; Nixsia
-  219 s, 14.9 s, 2.7 s. The STFTs are most of it (~1.3 s a stem on one core); widths are ~0.15 ms each.
+  once into py-ear-in/), pipeline 7, all nine songs: `where`, bends and holds identical; widths within 1.9e-5
+  semitones; after the pack's u8, 1 byte of ~1.5 million differs by one step (0.06 semitones); every earWidth3dB
+  median the same. Speed (same input): Python's width stage 9-25 s a song, the JS 0.7-1.4 s on 8 workers. Pipeline 5
+  (every width measured on its stem), which the JS matched as closely: Python 85 s / JS 11.2 s on one worker / 1.9 s
+  on 8 (Code Monkey); 219 s / 14.9 s / 2.7 s (Nixsia). The STFTs are most of the JS time (~1.3 s a stem on one core).
 - Learned: `Math.hypot` allocates in V8 and doubled the pattern's time through GC; a direct DFT of only the kept
   bins was no faster than fft.js.
 - Bass (`bass.mjs`, `bass.dsp.mjs`): librosa 0.11's pyin transcribed (YIN in librosa's float32 steps, beta thresholds,
@@ -274,8 +275,11 @@ changed). The page draws only current packs; an older one is analysed again (clo
     into components piece by piece.
   - Icons: unplugin-icons, any Iconify set (`import X from '~icons/lucide/x'`; `@iconify-json/lucide` installed).
   - Transitions: Svelte's (`svelte/transition`), with lengths through `motion()` (0 under reduced motion).
-  - "This computer" is offered only once every stage is in `src/pipeline` (`HERE_READY` in legacy.js); `?here` turns
-    it on to try.
+  - "This computer" (`analyseHere` in legacy.js) runs `src/pipeline` in a module Worker (`analyse.worker.mjs`); it is
+    the default on a computer with a usable GPU that is not a phone or tablet. A first run downloads about 1.7 GB of
+    models (Whisper medium is most of it), kept in the Cache API. Chrome, RTX 5080: a 276 s song in 186 s warm,
+    Whisper 157 s of it. Every ONNX Runtime call in the browser takes its turn (`turn` in runtime.web.mjs): sessions
+    share one wasm instance, and two calls at once corrupted it.
 - `dsp.js` is the old in-browser analysis engine; the page now only uses its lyric helpers (`parseLyrics`,
   `alignLyrics`, `alignToAnchors`, `parseLRC`...), `mtof`/`ftom`, `DRUM_BANDS` and the demo song synthesis. Drawing
   always comes from a server pack. `tests/*.js` test that engine (`node tests/engine_test.js`).
@@ -326,10 +330,16 @@ changed). The page draws only current packs; an older one is analysed again (clo
 - Word overlap and similar visual measurements: count once per frame, not per draw call (a double count once produced
   a false "1 in 20 overlap" claim).
 
-## Open threads (as of pipeline 5)
+## Open threads (as of pipeline 7)
 
-- Ear widths are the default thickness; the user is choosing between ear (with or without faint edges) and loudness
-  after seeing comparisons across genres.
+- Ear widths are the default thickness. Notes (pipeline 6) and bass (pipeline 7) get a pure tone's width at their
+  pitch and their stem's level within one ERB (`tone_widths`, `Ear.level`); only the voice is measured on its stem.
+  Why: a polyphonic stem gave every note the chord's width (medians 12-15 semitones at 3 dB, now about 3). The bass
+  measured 17-21: the ear model itself (6.5-12.5: at 35 Hz an ERB is about an octave), the analysis window's spread
+  (3-6, a steady sine at 41 Hz measures 4.5 wider than the model) and the bass's octave, as loud as its note (5-8, up
+  to the 16-semitone cap); the kick added ~2.5 on kick frames in one song, glides nothing. Now 7-9 (12.6 at 35 Hz).
+  Pipeline 7 also reads every ISO band at least once per page frame: the 64 ms band's 705-sample hop left a quarter
+  of the frames empty below 80 Hz.
 - Discussed, not built: lead vs backing vocals via a karaoke separation model (e.g. Mel-Band RoFormer karaoke through
   `audio-separator`), backing harmonies via Basic Pitch on that stem, bracketed LRCLIB lines placed on the backing line;
   following Spotify playback by ISRC (the pack's `song`); AcoustID fingerprints for files without tags.
