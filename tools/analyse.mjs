@@ -1,4 +1,4 @@
-// Run the JavaScript pipeline (src/pipeline) on a song under Node. So far: stems, then drums.
+// Run the JavaScript pipeline (src/pipeline) on a song under Node. So far: stems, then drums and notes.
 //   node tools/analyse.mjs SONG.mp3 --stems OUT_DIR [--shifts 1] [--ep cuda|webgpu|cpu]
 //        writes OUT_DIR/<stem>.wav (32-bit float, 44.1 kHz stereo), OUT_DIR/drums.json and OUT_DIR/timing.json.
 //   node tools/analyse.mjs --stems-in DIR --out OUT_DIR [--drums22 FILE.wav]
@@ -7,11 +7,15 @@
 // drums.json: {hits: [[t, kind, activation, margin]...], events: [[t, type, strength, hz, ring, 16 bands..., margin]...]}
 // as server/pipeline.py drum_hits and drum_details make them; OUT_DIR/adtof.f32 the activations (frames x 5) and
 // OUT_DIR/drums22.wav the drum stem's mono mix at 22.05 kHz, as resampled here.
+// --stages drums,notes (the default: both) picks the stages after stems. --st22 DIR: notes reads DIR/<stem>22.wav (e.g.
+// Python's 22.05 kHz signals) instead of resampling here; --batch N: Basic Pitch windows per model call. notes.json: {notes: notes_by_stem's records, the curve as
+// [times, semitones, holds]; events: {stem: Basic Pitch's own events [t0, t1, pitch, amp, bends]}}.
 import {mkdirSync, writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {decode, nodeRuntime, wav} from '../src/pipeline/runtime.node.mjs';
 import {separate, SOURCES} from '../src/pipeline/stems.mjs';
 import {drums} from '../src/pipeline/drums.mjs';
+import {notes, NOTE_STEMS} from '../src/pipeline/notes.mjs';
 
 const args = process.argv.slice(2), opt = {};
 const pos = [];
@@ -28,6 +32,7 @@ const t0 = performance.now();
 const rt = await nodeRuntime({ep: opt.ep, log});
 mkdirSync(out, {recursive: true});
 const timing = {song: path.basename(pos[0] || opt['stems-in']), workers: rt.pool.size};
+const stages = (opt.stages || 'drums,notes').split(',');
 
 let stems;
 if (opt['stems-in']) {
@@ -47,24 +52,47 @@ if (opt['stems-in']) {
     decode_s: secs(tDecode - t0), stems_s: secs(tStems - tDecode), stems_gpu_s: secs(st.gpu_ms)});
 }
 
-// the drum stem's mono mix at 22.05 kHz, as pipeline.analyze's st22 (librosa soxr_hq), on a worker
-const tDrums = performance.now();
-let drums22;
-if (opt.drums22) drums22 = (await decode(opt.drums22, 22050, 1))[0];
-else {
-  const [l, r] = stems.drums, mono = new Float32Array(l.length);
-  for (let i = 0; i < l.length; i++) mono[i] = (l[i] + r[i]) / 2;
-  drums22 = await rt.pool.call('./resample.mjs', 'resample', [mono, 44100, 22050], [mono.buffer]);
+if (stages.includes('drums')) {
+  // the drum stem's mono mix at 22.05 kHz, as pipeline.analyze's st22 (librosa soxr_hq), on a worker
+  const tDrums = performance.now();
+  let drums22;
+  if (opt.drums22) drums22 = (await decode(opt.drums22, 22050, 1))[0];
+  else {
+    const [l, r] = stems.drums, mono = new Float32Array(l.length);
+    for (let i = 0; i < l.length; i++) mono[i] = (l[i] + r[i]) / 2;
+    drums22 = await rt.pool.call('./resample.mjs', 'resample', [mono, 44100, 22050], [mono.buffer]);
+  }
+  timing.resample_s = secs(performance.now() - tDrums);
+  const ds = {};
+  const res = await drums(stems.drums, drums22, rt, {stats: ds});
+  Object.assign(timing, {drums_s: secs(performance.now() - tDrums), adtof_s: secs(ds.adtof_ms),
+    drum_details_s: secs(ds.details_ms), drums_ep: rt.ep, hits: res.hits.length});
+  log(`drums: ${res.hits.length} hits`);
+  writeFileSync(path.join(out, 'drums.json'), JSON.stringify({hits: res.hits, events: res.events}));
+  writeFileSync(path.join(out, 'adtof.f32'), Buffer.from(res.act.buffer, res.act.byteOffset, res.act.byteLength));
+  if (!opt.drums22) writeFileSync(path.join(out, 'drums22.wav'), wav([drums22], 22050));
 }
-timing.resample_s = secs(performance.now() - tDrums);
-const ds = {};
-const res = await drums(stems.drums, drums22, rt, {stats: ds});
-Object.assign(timing, {drums_s: secs(performance.now() - tDrums), adtof_s: secs(ds.adtof_ms),
-  drum_details_s: secs(ds.details_ms), drums_ep: rt.ep, hits: res.hits.length});
-log(`drums: ${res.hits.length} hits`);
-writeFileSync(path.join(out, 'drums.json'), JSON.stringify({hits: res.hits, events: res.events}));
-writeFileSync(path.join(out, 'adtof.f32'), Buffer.from(res.act.buffer, res.act.byteOffset, res.act.byteLength));
-if (!opt.drums22) writeFileSync(path.join(out, 'drums22.wav'), wav([drums22], 22050));
+if (stages.includes('notes')) {
+  // each instrument stem's mono mix at 22.05 kHz (pipeline.analyze's st22), the three at once on the workers
+  const tNotes = performance.now(), st22 = {};
+  await Promise.all(NOTE_STEMS.map(async s => {
+    if (opt.st22) return st22[s] = (await decode(path.join(opt.st22, s + '22.wav'), 22050, 1))[0];
+    const [l, r] = stems[s], mono = new Float32Array(l.length);
+    for (let i = 0; i < l.length; i++) mono[i] = (l[i] + r[i]) / 2;
+    st22[s] = await rt.pool.call('./resample.mjs', 'resample', [mono, 44100, 22050], [mono.buffer]);
+  }));
+  const tStart = performance.now(), ns = {}, events = {};
+  const res = await notes(null, st22, rt, {stats: ns, events, ...(opt.batch ? {batch: +opt.batch} : {})});
+  const model = Math.max(...NOTE_STEMS.map(s => ns[s]?.model_end_ms || 0)) - tStart;
+  Object.assign(timing, {notes_resample_s: secs(tStart - tNotes), notes_s: secs(performance.now() - tStart),
+    notes_model_s: secs(NOTE_STEMS.reduce((a, s) => a + (ns[s]?.model_ms || 0), 0)), notes_model_done_s: secs(model),
+    notes_decode_s: secs(NOTE_STEMS.reduce((a, s) => a + (ns[s]?.decode_ms || 0), 0)),
+    notes_details_s: secs(NOTE_STEMS.reduce((a, s) => a + (ns[s]?.details_ms || 0), 0)),
+    notes_ep: rt.eps?.basic_pitch ?? rt.ep, notes: res.length});
+  log(`notes: ${res.length}`);
+  writeFileSync(path.join(out, 'notes.json'), JSON.stringify({events,
+    notes: res.map(r => [...r.slice(0, 13), r[13].map(c => Array.from(c))])}));
+}
 writeFileSync(path.join(out, 'timing.json'), JSON.stringify(timing, null, 1));
 log(JSON.stringify(timing));
 rt.close();

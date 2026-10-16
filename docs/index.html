@@ -168,8 +168,37 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 .ink[aria-pressed="false"] .nm { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
 
 @media (prefers-reduced-motion: reduce) { .hud, .cog, .ink svg { transition: none; } }
+/* icons: Lucide line icons, from the sprite tools/icons.mjs writes */
+.i { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+
+/* where songs are analysed: two cards, the chosen one inked and printed slightly off register */
+.where { display: grid; gap: 8px; }
+.where .eyebrow { margin: 4px 0 0; }
+.where-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.where-card { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; row-gap: 4px; align-items: center; min-height: 62px; padding: 11px 12px; box-sizing: border-box; text-align: left; color: var(--ink); background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; cursor: pointer; transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease; }
+.where-card .i { grid-row: 1 / span 2; width: 22px; height: 22px; color: var(--muted); }
+.wc-t { font: 650 14.5px/1.15 var(--display); }
+.wc-s { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/1.2 var(--mono); letter-spacing: 0.02em; color: var(--muted); }
+.where-card[aria-pressed="true"] { border-color: var(--ink); box-shadow: 3px 3px 0 var(--pink); transform: translate(-1.5px, -1.5px); }
+.where-card[aria-pressed="true"] .i { color: var(--blue); }
+.where-card:disabled { cursor: default; opacity: 0.55; }
+.where-card.off .wc-s { color: #B3262E; }
+.where-card:focus-visible { outline: 2px solid var(--pink); outline-offset: 3px; }
+.where-spec { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 2px 0 0; padding: 8px 0 0; border-top: 1px dashed var(--rule); font: 500 11.5px/1.3 var(--mono); }
+.where-spec div { display: flex; gap: 6px; }
+.where-spec dt { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10.5px; }
+.where-spec dd { margin: 0; color: var(--ink); }
+.where-note { display: flex; gap: 7px; align-items: flex-start; margin: 0; font: 400 13px/1.45 var(--display); color: var(--muted); text-wrap: pretty; }
+.where-note .i { flex: none; width: 16px; height: 16px; margin-top: 1.5px; color: var(--orange); stroke-width: 2; }
+.where-note.warn { color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .where-card { transition: none; } .where-card[aria-pressed="true"] { transform: none; } }
 </style>
 
+<!--ICONS--><!-- Lucide 1.58.0 (ISC licence, lucide.dev), written by tools/icons.mjs --><svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+<symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></symbol>
+<symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/> <line x1="8" x2="16" y1="21" y2="21"/> <line x1="12" x2="12" y1="17" y2="21"/></symbol>
+<symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/> <path d="M12 9v4"/> <path d="M12 17h.01"/></symbol>
+</svg><!--/ICONS-->
 </head>
 <body>
 <main class="app">
@@ -201,7 +230,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 
   <section class="panel lab" id="labPanel" aria-label="Lab" hidden>
     <div class="panel-head"><button class="btn btn-small" id="labPlay" type="button" disabled>Play</button><input type="range" id="labSeek" min="0" max="1" step="0.01" value="0" aria-label="Position in song"><button class="btn btn-small btn-primary" type="button" data-close>Done</button></div>
-    <div class="tabs" role="tablist" aria-label="Lab sections"><button type="button" role="tab" id="tab-colour" data-tab="colour" aria-controls="pane-colour" aria-selected="false">Colour</button><button type="button" role="tab" id="tab-shapes" data-tab="shapes" aria-controls="pane-shapes" aria-selected="false">Shapes</button><button type="button" role="tab" id="tab-words" data-tab="words" aria-controls="pane-words" aria-selected="false">Words</button><button type="button" role="tab" id="tab-motion" data-tab="motion" aria-controls="pane-motion" aria-selected="false">Motion</button><button type="button" role="tab" id="tab-print" data-tab="print" aria-controls="pane-print" aria-selected="false">Print</button><button type="button" role="tab" id="tab-cuts" data-tab="cuts" aria-controls="pane-cuts" aria-selected="false">Cutoffs</button><button type="button" role="tab" id="tab-layers" data-tab="layers" aria-controls="pane-layers" aria-selected="false">Layers</button></div>
+    <div class="tabs" role="tablist" aria-label="Lab sections"><button type="button" role="tab" id="tab-colour" data-tab="colour" aria-controls="pane-colour" aria-selected="false">Colour</button><button type="button" role="tab" id="tab-shapes" data-tab="shapes" aria-controls="pane-shapes" aria-selected="false">Shapes</button><button type="button" role="tab" id="tab-words" data-tab="words" aria-controls="pane-words" aria-selected="false">Words</button><button type="button" role="tab" id="tab-motion" data-tab="motion" aria-controls="pane-motion" aria-selected="false">Motion</button><button type="button" role="tab" id="tab-print" data-tab="print" aria-controls="pane-print" aria-selected="false">Print</button><button type="button" role="tab" id="tab-cuts" data-tab="cuts" aria-controls="pane-cuts" aria-selected="false">Cutoffs</button><button type="button" role="tab" id="tab-layers" data-tab="layers" aria-controls="pane-layers" aria-selected="false">Layers</button><button type="button" role="tab" id="tab-analysis" data-tab="analysis" aria-controls="pane-analysis" aria-selected="false">Analysis</button></div>
       <div class="pane" id="pane-colour" data-pane="colour" role="tabpanel" aria-labelledby="tab-colour" hidden>
         <div class="row"><button type="button" class="k" data-tip="Instrument: each has its own ink for the whole song, warmer the more it is out front: voice pink, guitar orange, piano yellow, everything else (synths, strings, brass, organ) teal, darker for held notes and paler for swells, bass blue, drums black. Height: colour follows how high a sound sits. Note: colour follows the note name." aria-expanded="false" aria-describedby="ld-colour">Colour by<i aria-hidden="true">i</i></button><div class="seg" data-key="colour" role="group" aria-label="Colour by" aria-describedby="ld-colour"><button type="button" id="lab-colour-inst" data-v="inst">Instrument</button><button type="button" id="lab-colour-height" data-v="height">Height</button><button type="button" id="lab-colour-note" data-v="note">Note</button></div><span class="vh" id="ld-colour">Instrument: each has its own ink for the whole song, warmer the more it is out front: voice pink, guitar orange, piano yellow, everything else (synths, strings, brass, organ) teal, darker for held notes and paler for swells, bass blue, drums black. Height: colour follows how high a sound sits. Note: colour follows the note name.</span></div>
       </div>
@@ -281,6 +310,17 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
             <span class="nm">Words</span></button>
         </div>
       </div>
+      <div class="pane" id="pane-analysis" data-pane="analysis" role="tabpanel" aria-labelledby="tab-analysis" hidden>
+        <div class="where">
+        <h2 class="eyebrow" id="lk-where2">Where songs are analysed</h2>
+        <div class="where-cards" role="group" aria-labelledby="lk-where2">
+          <button type="button" class="where-card" data-where="here" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-monitor"/></svg><span class="wc-t">This computer</span><span class="wc-s">Checking…</span></button>
+          <button type="button" class="where-card" data-where="server" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-cloud"/></svg><span class="wc-t">The server</span><span class="wc-s"></span></button>
+        </div>
+        <dl class="where-spec" hidden></dl>
+        <p class="where-note" aria-live="polite"><svg class="i" aria-hidden="true" hidden><use href="#i-triangle-alert"/></svg><span></span></p>
+      </div>
+      </div>
     <div class="lab-foot"><button class="btn btn-small btn-quiet" id="labReset" type="button">Reset all</button></div>
     <div class="bubble" id="bubble" role="tooltip" hidden></div>
   </section>
@@ -302,8 +342,16 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
         <button class="try" type="button" data-url="https://archive.org/download/OpenGoldbergVariations/Kimiko%20Ishizaka%20-%20J.S.%20Bach-%20-Open-%20Goldberg%20Variations%2C%20BWV%20988%20%28Piano%29%20-%2001%20Aria.mp3">Goldberg Variations: Aria <span>Kimiko Ishizaka</span></button>
         <button class="try" type="button" data-url="https://archive.org/download/jamendo-140090/01-1165390-Gigatop%20Arthur-Invincible.mp3">Invincible <span>Gigatop Arthur</span></button>
       </div>
+      <div class="where" id="whereRow">
+        <h2 class="eyebrow" id="lk-where">Where songs are analysed</h2>
+        <div class="where-cards" role="group" aria-labelledby="lk-where">
+          <button type="button" class="where-card" data-where="here" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-monitor"/></svg><span class="wc-t">This computer</span><span class="wc-s">Checking…</span></button>
+          <button type="button" class="where-card" data-where="server" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-cloud"/></svg><span class="wc-t">The server</span><span class="wc-s"></span></button>
+        </div>
+        <dl class="where-spec" hidden></dl>
+        <p class="where-note" aria-live="polite"><svg class="i" aria-hidden="true" hidden><use href="#i-triangle-alert"/></svg><span></span></p>
+      </div>
       <div class="row" id="keyRow"><span class="k-static" id="lk-key">Server key</span><div class="key-box"><span class="key-saved" id="keySaved" hidden>Saved on this device. <button type="button" class="key-change" id="keyChange">Change</button></span><input type="password" id="lab-key" autocomplete="off" spellcheck="false" placeholder="passphrase" aria-labelledby="lk-key"></div></div>
-      <p class="hint">The first time a song is played it is analysed on the server, which takes a few minutes. After that it opens at once, on any device.</p>
       <button class="btn btn-small btn-quiet splash-back" type="button" id="splashBack" hidden>Back to the song</button>
     </div>
   </section>
@@ -2311,6 +2359,19 @@ if (typeof module !== 'undefined') module.exports = DSP;
     var my = beginLoad('Fetching the song', '');
     title = title || linkName(url);
     $('trackName').textContent = title;
+    /* analysed here, the page fetches the file itself, which only works where its site allows other pages to */
+    if (whereNow() === 'here') {
+      fetch(url).then(function (r) {
+        if (!r.ok) throw new Error('That link answered ' + r.status + '.');
+        return r.blob();
+      }, function () {
+        throw new Error('This page can\u2019t read that link itself (its site doesn\u2019t allow other pages to). Switch Analyse on to the server, which can, or download the file and load it.');
+      }).then(function (blob) {
+        if (my !== loadSeq) return;
+        openSong(blob, linkName(url) + '.mp3', title, my, function () { loadLink(url, title); }, false);
+      }).catch(function (e) { if (my === loadSeq) fail(e.message); });
+      return;
+    }
     var fd = new FormData(); fd.append('url', url);
     analyse(fd, null, my, 'Fetching the song').then(function (got) {
       if (!got || my !== loadSeq) return null;
@@ -2379,11 +2440,10 @@ if (typeof module !== 'undefined') module.exports = DSP;
   function findPack(sha) {
     if (!sha) return Promise.resolve(null);
     return apiReady.then(function () {
-      if (!API) return null;
       return idb.get(packKey(sha)).then(function (p) {
         if (p && current(p)) return p;
         var key = serverKey();
-        if (!key) return null;
+        if (!API || !key) return null;
         // a server slow to answer the lookup is not waited on for long; once it answers, the download is not cut off
         var ctl = window.AbortController ? new AbortController() : null, timer = ctl && setTimeout(function () { ctl.abort(); }, 4000);
         return fetch(API + '/packs/' + sha, { headers: { 'X-Pitchscape-Key': key }, signal: ctl ? ctl.signal : undefined }).then(function (r) { clearTimeout(timer); return r.ok ? r.json() : null; }).then(function (j) {
@@ -2402,6 +2462,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
       return my === loadSeq ? findPack(sha) : null;
     }).then(function (pack) {
       if (pack || my !== loadSeq) return pack;
+      if (whereNow() === 'here') return analyseHere(blob, fileName, sha, my).then(function (got) { return got && got.pack; });
       var fd = new FormData(); fd.append('file', blob, fileName);
       return analyse(fd, sha, my, 'Uploading').then(function (got) { return got && got.pack; });
     }).then(function (pack) {
@@ -2457,6 +2518,139 @@ if (typeof module !== 'undefined') module.exports = DSP;
     }).then(function (pack) {
       /* in the minutes while a new server deploys, the old one may still answer */
       if (pack && !current(pack)) throw new Error('The server is being updated. Load the song again in a few minutes.');
+      if (pack && sha) idb.put(packKey(sha), pack);
+      return pack ? { pack: pack, sha: sha } : null;
+    });
+  }
+  /* ------------------------------------------------------------ where a song is analysed: here or on the server
+     Here: the same analysis (src/pipeline) on this computer's graphics card, in a Worker; nothing is uploaded and no
+     key is needed. The person chooses, on the splash or in Lab; what this computer has is read and said plainly. */
+  var MODELS = 'https://huggingface.co/stopamertime/pitchscape-models/resolve/main/';
+  var HERE = { done: false, ok: false, gpu: '', why: '', phone: false, tablet: false, mem: 0, cores: 0, mb: 0 };
+  var hereReady = (function () {
+    var ua = navigator.userAgent || '';
+    HERE.phone = navigator.userAgentData ? !!navigator.userAgentData.mobile : /Android|iPhone|iPod|Mobile/i.test(ua);
+    HERE.tablet = /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+    HERE.mem = navigator.deviceMemory || 0; HERE.cores = navigator.hardwareConcurrency || 0;
+    var sizes = fetch(MODELS + 'manifest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) {
+      var b = 0; for (var k in m || {}) b += m[k].bytes || 0; HERE.mb = Math.round(b / 1e6);
+    }, function () {});
+    var gpu = !navigator.gpu ? Promise.resolve(HERE.why = 'this browser has no WebGPU, which analysing here needs (Chrome and Edge on a computer have it)')
+      : navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }).then(function (ad) {
+        if (!ad) { HERE.why = 'WebGPU found no graphics card it can use'; return; }
+        var info = ad.info || {};
+        if (info.isFallbackAdapter || ad.isFallbackAdapter) { HERE.why = 'WebGPU has only a software stand-in for a graphics card, far too slow'; return; }
+        HERE.gpu = gpuName(info.vendor, info.architecture);
+        HERE.ok = true;
+      }, function (e) { HERE.why = 'WebGPU would not start (' + ((e && e.message) || e) + ')'; });
+    return Promise.all([gpu, sizes]).then(function () { HERE.done = true; });
+  })();
+  /* WebGPU names the card's maker and design in lower case ('nvidia', 'rdna-3'): written as people know them */
+  function gpuName(vendor, arch) {
+    var V = { nvidia: 'NVIDIA', amd: 'AMD', intel: 'Intel', apple: 'Apple', qualcomm: 'Qualcomm', arm: 'Arm', microsoft: 'Microsoft' };
+    var v = V[vendor] || (vendor ? vendor.charAt(0).toUpperCase() + vendor.slice(1) : '');
+    var a = (arch || '').replace(/^(rdna|gcn|cdna|xe|gen)-?(.*)$/i, function (m, f, r) { return f.toUpperCase() + (r ? ' ' + r : ''); });
+    if (a && a === (arch || '')) a = a.charAt(0).toUpperCase() + a.slice(1);
+    return (v + (a ? ' ' + a : '')).trim() || 'a graphics card';
+  }
+  /* the person's choice; until they make one, here when this computer can and is not a phone or tablet */
+  /* the analysis here is still being written (src/pipeline): offered once every stage is in; ?here tries it now */
+  var HERE_READY = /[?&]here\b/.test(location.search);
+  function whereNow() {
+    if (!HERE_READY) return 'server';
+    var w = store.get('pitchscape:where');
+    if (w === 'here' || w === 'server') return w;
+    return HERE.ok && !HERE.phone && !HERE.tablet ? 'here' : 'server';
+  }
+  /* how long this computer took last time, per second of song (for an estimate before a song starts) */
+  function hereRate() { var r = store.get('pitchscape:hereRate'); return r && r > 0 ? r : 0; }
+  function fmtSecs(s) { return s < 90 ? Math.max(5, Math.round(s / 5) * 5) + ' s' : Math.round(s / 60) + ' min'; }
+  function whereUI() {
+    var w = whereNow(), small = HERE.phone || HERE.tablet, warn = false, n = '', spec = [];
+    var hereSub = !HERE_READY ? 'Coming soon' : !HERE.done ? 'Checking…' : !HERE.ok ? 'Not available' : small ? 'Slow on a phone' : 'Nothing uploaded';
+    var serverSub = LOCAL ? 'This machine' : store.get('pitchscape:key') ? 'Key saved' : 'Needs a key';
+    document.querySelectorAll('.where-card').forEach(function (b) {
+      var here = b.dataset.where === 'here';
+      b.setAttribute('aria-pressed', String(b.dataset.where === w));
+      b.querySelector('.wc-s').textContent = here ? hereSub : serverSub;
+      b.classList.toggle('off', here && HERE_READY && HERE.done && !HERE.ok);
+      if (here) b.disabled = !HERE_READY;
+    });
+    if (w === 'here' && HERE.done && !HERE.ok) { warn = true; n = 'This computer can’t: ' + HERE.why + '. Pick the server.'; }
+    else if (w === 'here' && HERE.ok) {
+      spec.push(['GPU', HERE.gpu]);
+      if (HERE.mem) spec.push(['Memory', HERE.mem >= 8 ? '8 GB+' : HERE.mem + ' GB']);
+      if (HERE.cores) spec.push(['Cores', String(HERE.cores)]);
+      if (HERE.mb) spec.push(['Models', HERE.mb + ' MB, once']);
+      if (hereRate()) spec.push(['Last time', fmtSecs(hereRate() * 210) + ' a song']);
+      if (small) { warn = true; n = 'On a phone or tablet the server is much quicker, and spares you the model download.'; }
+      else n = 'The first song downloads the models, kept for next time. It shows how long it will take once it starts.';
+    } else if (w === 'server') {
+      n = 'Each song is uploaded and takes a few minutes the first time; after that it opens at once, on any device.';
+      if (HERE_READY && HERE.ok && !small) n += ' This computer could do it too.';
+    }
+    document.querySelectorAll('.where-spec').forEach(function (dl) {
+      dl.hidden = !spec.length;
+      dl.innerHTML = spec.map(function (r) { return '<div><dt>' + r[0] + '</dt><dd></dd></div>'; }).join('');
+      dl.querySelectorAll('dd').forEach(function (dd, i) { dd.textContent = spec[i][1]; });
+    });
+    document.querySelectorAll('.where-note').forEach(function (p) {
+      p.classList.toggle('warn', warn);
+      p.querySelector('.i').hidden = !warn;
+      p.querySelector('span').textContent = n;
+      p.hidden = !n;
+    });
+    $('keyRow').hidden = LOCAL || w === 'here';
+  }
+  document.querySelectorAll('.where-card').forEach(function (b) {
+    b.addEventListener('click', function () { store.set('pitchscape:where', b.dataset.where); whereUI(); });
+  });
+  whereUI(); hereReady.then(whereUI);
+
+  /* the song analysed here: decoded by the browser (as it is played), then src/pipeline in a Worker. {pack, sha} */
+  function analyseHere(blob, fileName, sha, my) {
+    return hereReady.then(function () {
+      if (!HERE.ok) throw new Error('This computer can’t analyse songs: ' + HERE.why + '. Switch Analyse on to the server.');
+      showStatus('Reading the audio', 0.02, '');
+      return blob.arrayBuffer();
+    }).then(function (buf) {
+      return new OfflineAudioContext(2, 1, 44100).decodeAudioData(buf.slice(0)).then(function (ab) {
+        return { buf: buf, mix: [ab.getChannelData(0).slice(), ab.getChannelData(Math.min(1, ab.numberOfChannels - 1)).slice()], dur: ab.duration };
+      }, function () { throw new Error('This browser couldn’t read that file as audio.'); });
+    }).then(function (a) {
+      return new Promise(function (resolve, reject) {
+        var w = new Worker(new URL('pipeline/analyse.worker.mjs', location.href), { type: 'module' });
+        var t0 = performance.now(), tStems = 0, got = {};
+        function stop(v, e) { w.terminate(); if (e) reject(e); else resolve(v); }
+        w.onerror = function (ev) { stop(null, new Error('The analysis here stopped: ' + (ev.message || 'its worker would not start') + '. Switch Analyse on to the server.')); };
+        w.onmessage = function (ev) {
+          var m = ev.data;
+          if (my !== loadSeq) { stop(null); return; }
+          if (m.download) {
+            got[m.download.name] = m.download;
+            var a2 = 0, b2 = 0; for (var k in got) { a2 += got[k].got; b2 += got[k].total; }
+            showStatus('Downloading the analysis models (once)', 0.02 + 0.08 * a2 / Math.max(1, b2), Math.round(a2 / 1e6) + ' of ' + Math.round(b2 / 1e6) + ' MB, kept on this device for next time.');
+          } else if (m.progress) {
+            var st = stageOf(m.progress), k2 = /^stems: (\d+)\/(\d+)/.exec(m.progress), note = '';
+            if (k2) {
+              var done = +k2[1], all = +k2[2];
+              if (!tStems) tStems = performance.now();
+              if (done >= 2) {
+                var per = (performance.now() - tStems) / 1000 / (done - 1), left = per * (all - done);
+                var total = hereRate() * a.dur, sofar = (performance.now() - t0) / 1000;
+                note = 'About ' + fmtSecs(left) + ' left for this step' + (total > sofar ? ', about ' + fmtSecs(Math.max(left, total - sofar)) + ' for the whole song.' : '.');
+                if (left > 180) note += ' This computer is slow at this; the server may be quicker.';
+              }
+              showStatus(st[1], 0.1 + 0.45 * done / all, note);
+            } else showStatus(st[1], st[2], '');
+          } else if (m.pack) {
+            store.set('pitchscape:hereRate', (performance.now() - t0) / 1000 / Math.max(1, a.dur));
+            stop(m.pack);
+          } else if (m.error) stop(null, new Error('The analysis here failed: ' + m.error + ' Switch Analyse on to the server to analyse it there.'));
+        };
+        w.postMessage({ bytes: a.buf, name: fileName, mix: a.mix, models: MODELS }, [a.buf, a.mix[0].buffer, a.mix[1].buffer]);
+      });
+    }).then(function (pack) {
       if (pack && sha) idb.put(packKey(sha), pack);
       return pack ? { pack: pack, sha: sha } : null;
     });
@@ -2534,7 +2728,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
   }
   var CUTS = { vConf: 1, vFloor: 1, vRun: 1, bFloor: 1, hold: 1, noteMin: 1, drumK: 1, rough0: 1, sharp0: 1 };
   function labUI() {
-    labPanel.querySelectorAll('.seg').forEach(function (g) {
+    labPanel.querySelectorAll('.seg[data-key]').forEach(function (g) {
       var k = g.dataset.key;
       g.querySelectorAll('button').forEach(function (b) { b.setAttribute('aria-pressed', String(String(L[k]) === b.dataset.v)); });
     });
@@ -2553,7 +2747,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
     if (k === 'font' || k === 'wordSize' || k === 'weight' || k === 'all') ensureFont(L.font).then(function () { layoutWords(); S.dirty = true; });
     labUI(); S.dirty = true;
   }
-  labPanel.querySelectorAll('.seg button').forEach(function (b) {
+  labPanel.querySelectorAll('.seg[data-key] button').forEach(function (b) {
     b.addEventListener('click', function () { var k = b.parentNode.dataset.key; L[k] = b.dataset.v; labApply(k); });
   });
   labPanel.querySelectorAll('input[type="range"][data-key]').forEach(function (r) {
@@ -2618,7 +2812,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { layoutWords(); S.dirty = true; });
   requestAnimationFrame(loop);
   /* this computer's own server needs no key */
-  apiReady.then(function () { $('keyRow').hidden = LOCAL; });
+  apiReady.then(whereUI);
 })();
 </script>
 </body>

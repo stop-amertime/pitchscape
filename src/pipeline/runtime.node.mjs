@@ -1,11 +1,14 @@
 // The pipeline's runtime under Node: ONNX Runtime for Node, models from models/ (tools/export_models.py), audio decoded
 // by ffmpeg. The browser's counterpart is runtime.web.mjs; the stage modules see only what both provide:
 //   session(name) -> {run(feeds) -> outputs}, feeds and outputs as {name: {data, dims}}; ep: the provider in use;
-//   pool: worker threads for CPU work (pool.mjs); close() when done.
+//   pool: worker threads for CPU work (pool.mjs); decode(bytes, sr, channels); sha256(bytes); where ('node' or
+//   'browser'); eps ({model: provider}); close() when done. Feeds may give a `type` ('int64'...; float32 if none).
+//   Calls to models on the GPU take turns (one at a time across sessions); CPU models run alongside them.
 import {spawn} from 'node:child_process';
 import os from 'node:os';
 import {Worker} from 'node:worker_threads';
-import {readFileSync, existsSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import ort from 'onnxruntime-node';
@@ -22,14 +25,26 @@ export async function nodeRuntime({ep = null, models = path.join(ROOT, 'models')
   const manifest = JSON.parse(readFileSync(path.join(models, 'manifest.json'), 'utf8'));
   const order = ep ? [ep] : process.platform === 'win32' ? ['webgpu', 'cpu'] : ['cuda', 'cpu'];
   const cache = {};
+  let gpu = Promise.resolve();
   const rt = {
     ep: null,
+    eps: {},
+    where: 'node',
     manifest,
     pool: createPool(workers, () => {
       const w = new Worker(WORKER);
       return {post: (m, t) => w.postMessage(m, t), onMessage: f => w.on('message', f), terminate: () => w.terminate()};
     }),
     close() { rt.pool.terminate(); },
+    sha256: async bytes => createHash('sha256').update(new Uint8Array(bytes)).digest('hex'),
+    async decode(bytes, sr, channels = 2) {
+      // ffmpeg reads a file (an MP4 may keep its index at the end, which a pipe cannot seek to)
+      const dir = mkdtempSync(path.join(os.tmpdir(), 'pitchscape-'));
+      try {
+        writeFileSync(path.join(dir, 'song'), new Uint8Array(bytes));
+        return await decode(path.join(dir, 'song'), sr, channels);
+      } finally { rmSync(dir, {recursive: true, force: true}); }
+    },
     async session(name) {
       if (cache[name]) return cache[name];
       const file = path.join(models, manifest[name].file);
@@ -48,11 +63,16 @@ export async function nodeRuntime({ep = null, models = path.join(ROOT, 'models')
       }
       if (!sess) throw err;
       log(`${name}: running on ${rt.ep}`);
+      rt.eps[name] = rt.ep;
+      const onGpu = rt.ep !== 'cpu';
       cache[name] = {
-        async run(feeds) {
+        run(feeds) {
           const t = {};
-          for (const [k, v] of Object.entries(feeds)) t[k] = new ort.Tensor('float32', v.data, v.dims);
-          return sess.run(t);
+          for (const [k, v] of Object.entries(feeds)) t[k] = new ort.Tensor(v.type || 'float32', v.data, v.dims);
+          if (!onGpu) return sess.run(t);
+          const r = gpu.then(() => sess.run(t));
+          gpu = r.catch(() => {});
+          return r;
         },
       };
       return cache[name];

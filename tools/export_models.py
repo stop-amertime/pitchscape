@@ -17,6 +17,12 @@ GRU layers step through the song a frame at a time. A 240 s song on the RTX 5080
 WebGPU provider against 3.7 s on its CPU provider; Chrome 32 s on WebGPU against 17 s on wasm (one thread: the page is
 not cross-origin isolated). The same hits either way.
 
+basic_pitch: Basic Pitch ICASSP 2022 (Bittner et al., Spotify, Apache-2.0), the ONNX file the basic-pitch 0.4.0
+package ships (nmp.onnx, the one server/pipeline.py runs: it runs Basic Pitch on ONNX, TensorFlow uninstalled), copied
+unchanged. Input serving_default_input_2:0 [windows, 43844, 1] (mono, 22.05 kHz, 2 s windows less one hop; the
+CQT is in the graph); outputs StatefulPartitionedCall:1 note [windows, 172, 88], :2 onset [windows, 172, 88],
+:0 contour [windows, 172, 264].
+
 whisper_<size> (base, small, medium) and silero_vad: the words stage's models; tools/export_whisper.py says what they
 are. One export there gives several files (encoder, decoder, their float32 copies, the tokenizer).
 """
@@ -131,6 +137,17 @@ def export_adtof():
                   'samplerate': 44100, 'ep': 'cpu'}
 
 
+def export_basic_pitch():
+    import shutil
+    import basic_pitch
+    src = basic_pitch.build_icassp_2022_model_path(basic_pitch.FilenameSuffix.onnx)
+    path = os.path.join(OUT, 'basic_pitch.onnx')
+    shutil.copyfile(src, path)
+    from importlib.metadata import version
+    return path, {'source': 'https://github.com/spotify/basic-pitch (basic-pitch %s, nmp.onnx)' % version('basic-pitch'),
+                  'licence': 'Apache-2.0', 'samplerate': 22050, 'window': 43844, 'frames': 172}
+
+
 def sha256(path):
     h = hashlib.sha256()
     with open(path, 'rb') as f:
@@ -143,7 +160,7 @@ if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
     sys.path.insert(0, ROOT)
     import export_whisper
-    EXPORTS = {'htdemucs_6s': export_demucs, 'adtof_frame_rnn': export_adtof,
+    EXPORTS = {'htdemucs_6s': export_demucs, 'adtof_frame_rnn': export_adtof, 'basic_pitch': export_basic_pitch,
                'silero_vad': lambda: export_whisper.export_silero(OUT),
                **{'whisper_' + s: (lambda s=s: export_whisper.export(s, OUT)) for s in ('base', 'small', 'medium')}}
     want = sys.argv[1:] or list(EXPORTS)

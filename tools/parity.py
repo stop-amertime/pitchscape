@@ -1,7 +1,7 @@
 """Compare the JavaScript pipeline (src/pipeline, run by tools/analyse.mjs) with the Python one (server/pipeline.py),
 stage by stage, on the test songs (tools/fetch_test_songs.sh).
 
-  python tools/parity.py stems [name-substring ...] [--device cuda]
+  python tools/parity.py stems|tone [name-substring ...] [--device cuda]
 
 Outputs go to testsongs/parity/<song>/ (git-ignored with testsongs/); a summary is printed and written there as
 <stage>.json. Needs the Python pipeline's environment, Node, and the models from tools/export_models.py.
@@ -19,6 +19,22 @@ matched within 10 ms by kind: matched, missing (Python only) and extra (JS only)
 and at the authors' thresholds (margin >= 1); for matched hits, the differences in margin, strength, ring, kick Hz
 and the 16-band profile, and how far the activations differ. The 22.05 kHz resample is measured alone: the JS
 resample against librosa's (SDR), and the details again with Python's 22.05 kHz signal given to the JS.
+
+tone: roughness (asper) and sharpness (acum) of a slice every 0.5 s of vocals, bass, other, guitar and piano from
+Python's stems (py-s0), Python (pipeline._tone_slice in its process pool) against JS (tools/parity_tone.mjs) three ways:
+js_vs_python (JS resampling and level, as the JS pipeline runs), port_alone (JS on Python's own 48 kHz stems: MOSQITO's
+port only) and resampling_alone (the two JS runs). Python's results are kept in tone/py.json; delete it to measure again.
+
+  python tools/parity.py notes [name-substring ...]
+
+notes: Python's notes_by_stem (Basic Pitch on ONNX Runtime's CPU provider, one window per call, as basic_pitch runs it)
+against the JS stage (src/pipeline/notes.mjs, the CPU provider too) on the same stems (py-s0). Twice: as the JS runs
+(its own 22.05 kHz resample, eight windows per model call), and with Python's 22.05 kHz signals and one window per
+call, which is the port alone. Notes are matched by stem, within half a semitone and 12 ms at both ends: matched,
+missing (Python only), extra (JS only), identical, and equal to 1e-12; for matched notes, the largest difference of
+every field and of the bend curves (times, semitones, holds), and how many changed family or vibrato. Basic Pitch's
+own events are compared too (frames, pitch and bends; amplitude). Python's run is kept in py-notes/ (its model
+output as float32 files, its 22.05 kHz signals, its timing).
 """
 import json, os, subprocess, sys, time
 
@@ -90,6 +106,92 @@ def stems(song, path, outdir, device):
         run = read_stems(kept)
         res['pipeline_shift_vs_python'] = {s: compare(ref[s], run[s]) for s in SOURCES}
     return res
+
+
+TONE_NAMES = ('vocals', 'bass', 'other', 'guitar', 'piano')
+
+
+def tone(song, path, outdir, device, workers=8):
+    """pipeline.tone's measurements against src/pipeline/tone.mjs, slice by slice, on Python's stems (py-s0): a slice
+    every 0.5 s of each stem the tone stage reads. Python: the pipeline's own resampling, level and process pool
+    (_tone_init, _tone_slice). JS (tools/parity_tone.mjs): from the same 44.1 kHz stems with its own resampling, and
+    from Python's 48 kHz stems (the MOSQITO port alone)."""
+    import concurrent.futures, multiprocessing
+    from server import pipeline as P
+    py = os.path.join(outdir, 'py-s0')
+    if not os.path.exists(os.path.join(py, 'timing.json')):
+        py_separate(path, py, device, 0)
+    d = os.path.join(outdir, 'tone')
+    os.makedirs(os.path.join(d, 'py48'), exist_ok=True)
+    pyres = os.path.join(d, 'py.json')
+    if not os.path.exists(pyres):
+        st = {k: v.astype(np.float32) for k, v in read_stems(py).items()}
+        t0 = time.time()
+        mix = P.to_rate(sum(v.mean(0) for v in st.values()), 44100, P.TONE_SR)
+        gain = 0.0632 / (float(np.sqrt(np.mean(mix ** 2))) + 1e-12)
+        paths = {}
+        for name in TONE_NAMES:
+            y = (P.to_rate(st[name].mean(0), 44100, P.TONE_SR) * gain).astype(np.float32)
+            y.tofile(os.path.join(d, 'py48', name + '.f32'))
+            paths[name] = os.path.join(d, 'py48', name + '.npy')
+            np.save(paths[name], y)
+        t1 = time.time()
+        dur = st['vocals'].shape[1] / 44100
+        keys = [(name, k * 0.5) for name in TONE_NAMES for k in range(int(dur / 0.5) + 1)]
+        ctx = multiprocessing.get_context('spawn')
+        with concurrent.futures.ProcessPoolExecutor(max_workers=workers, mp_context=ctx, initializer=P._tone_init,
+                                                    initargs=(paths,)) as ex:
+            res = list(ex.map(P._tone_slice, keys, chunksize=8))
+        t2 = time.time()
+        for p in paths.values():
+            os.remove(p)
+        json.dump({'names': TONE_NAMES, 'keys': keys}, open(os.path.join(d, 'keys.json'), 'w'))
+        json.dump({'gain': gain, 'workers': workers, 'resample_s': round(t1 - t0, 2), 'slices_s': round(t2 - t1, 2),
+                   'res': res}, open(pyres, 'w'))
+    subprocess.run(['node', os.path.join(ROOT, 'tools', 'parity_tone.mjs'), d, py, '--workers', str(workers)],
+                   check=True)
+    p, j = json.load(open(pyres)), json.load(open(os.path.join(d, 'js.json')))
+    keys = json.load(open(os.path.join(d, 'keys.json')))['keys']
+    P_, J, Q = (np.array(x, np.float64) for x in (p['res'], j['full'], j['pyin']))
+
+    def diff(a, b):
+        """|a - b| over slices that either side measured (not near-silent): percentiles in asper and acum, how many
+        differ by more than 0.01, how often harshness at the defaults (> 0.3) disagrees, and the largest."""
+        live = (a != 0).any(1) | (b != 0).any(1)
+        d_ = np.abs(a - b)[live]
+        ha = np.array([P.harshness(*x) > 0.3 for x in a]); hb = np.array([P.harshness(*x) > 0.3 for x in b])
+        gate = ((a == 0).all(1) != (b == 0).all(1))
+        worst = np.argsort(-np.abs(a - b).max(1))[:5]
+        q = lambda c, x: float('%.3g' % np.percentile(d_[:, c], x)) if len(d_) else 0.0
+        return {'slices': len(a), 'measured': int(live.sum()),
+                'asper': {'p50': q(0, 50), 'p95': q(0, 95), 'p99': q(0, 99), 'max': q(0, 100),
+                          'over_0.01': int((d_[:, 0] > 0.01).sum())},
+                'acum': {'p50': q(1, 50), 'p95': q(1, 95), 'p99': q(1, 99), 'max': q(1, 100),
+                         'over_0.01': int((d_[:, 1] > 0.01).sum())},
+                'harsh_disagree': int((ha != hb).sum()), 'harsh_slices': int(ha.sum()),
+                'silence_gate_disagree': int(gate.sum()),
+                'worst': [[keys[i][0], keys[i][1], [round(x, 4) for x in a[i]], [round(x, 4) for x in b[i]]]
+                          for i in worst]}
+
+    return {'js_vs_python': diff(P_, J), 'port_alone': diff(P_, Q), 'resampling_alone': diff(Q, J),
+            'gain': {'python': p['gain'], 'js': j['gain']}, 'signal_48k': j['signal'],
+            'timing': {'python': {k: p[k] for k in ('workers', 'resample_s', 'slices_s')},
+                       'js': {k: j[k] for k in ('workers', 'warm_s', 'resample_s', 'slices_s', 'slices_pyin_s')}}}
+
+
+def print_tone(song, res):
+    for k in ('js_vs_python', 'port_alone', 'resampling_alone'):
+        r = res[k]
+        print('%-40s %-17s %5d/%-5d slices  asper p50 %.1e p99 %.1e max %.1e  acum p50 %.1e p99 %.1e max %.1e  '
+              'harsh>0.3 disagree %d/%d  gate %d' % (
+                  song if k == 'js_vs_python' else '', k, r['measured'], r['slices'], r['asper']['p50'],
+                  r['asper']['p99'], r['asper']['max'], r['acum']['p50'], r['acum']['p99'], r['acum']['max'],
+                  r['harsh_disagree'], r['harsh_slices'], r['silence_gate_disagree']), flush=True)
+    t = res['timing']
+    print('%-40s python %.1f s (+%.1f s resampling), js %.1f s (+%.1f s resampling), %d workers each' % (
+        '', t['python']['slices_s'], t['python']['resample_s'], t['js']['slices_s'], t['js']['resample_s'],
+        t['js']['workers']), flush=True)
+
 
 
 def py_drums(stem, out):
@@ -235,6 +337,205 @@ def print_drums(song, res):
         r['max_abs']), flush=True)
 
 
+NOTE_STEMS = ('other', 'guitar', 'piano')
+
+
+def py_notes(stemdir, out):
+    """server/pipeline.py notes_by_stem on the stems in stemdir, as analyze() runs it (st22 by to_rate, Basic Pitch on
+    ONNX Runtime's CPU provider), keeping what each step made: Basic Pitch's model output (note, onset, contour as
+    float32 files), its note events, the 22.05 kHz signals, and the timing of each step."""
+    import soundfile as sf
+    import basic_pitch.inference as BI
+    from server import pipeline as P
+    stems = {s: sf.read(os.path.join(stemdir, s + '.wav'), dtype='float32')[0].T for s in NOTE_STEMS}
+    os.makedirs(out, exist_ok=True)
+    t = time.time()
+    st22 = {k: P.to_rate(v.mean(0), 44100, P.SR) for k, v in stems.items()}
+    timing = {'resample_s': round(time.time() - t, 2)}
+    for k, v in st22.items():
+        sf.write(os.path.join(out, k + '22.wav'), v, P.SR, subtype='FLOAT')
+    seen, steps = [], {}
+    real_predict, real_nfs, real_jb, real_nd = BI.predict, P.notes_from_stem, P.join_bends, P.note_details
+
+    def predict(*a, **k):
+        r = real_predict(*a, **k)
+        seen.append(r)
+        return r
+
+    def timed(name, f):
+        def g(*a, **k):
+            t = time.time()
+            r = f(*a, **k)
+            steps[name] = steps.get(name, 0) + time.time() - t
+            return r
+        return g
+    BI.predict = predict
+    P.notes_from_stem, P.join_bends, P.note_details = (timed('notes_from_stem', real_nfs), timed('join_bends', real_jb),
+                                                        timed('note_details', real_nd))
+    try:
+        t = time.time()
+        segs = P.notes_by_stem(stems, st22)
+        timing['notes_by_stem_s'] = round(time.time() - t, 2)
+    finally:
+        BI.predict, P.notes_from_stem, P.join_bends, P.note_details = real_predict, real_nfs, real_jb, real_nd
+    timing.update({k + '_s': round(v, 2) for k, v in steps.items()})
+    events = {}
+    for name, (o, _, ev) in zip(NOTE_STEMS, seen):
+        for k in ('note', 'onset', 'contour'):
+            o[k].astype('<f4').tofile(os.path.join(out, '%s.%s.f32' % (name, k)))
+        events[name] = [[float(a), float(b), int(p), float(v), [int(x) for x in bd] if bd is not None else None]
+                        for a, b, p, v, bd in ev]
+    recs = [r[:13] + [[np.asarray(c, float).tolist() for c in r[13]]] for r in segs]
+    json.dump({'events': events, 'notes': recs}, open(os.path.join(out, 'notes.json'), 'w'))
+    import onnxruntime as ort
+    timing['onnxruntime'] = ort.__version__
+    json.dump(timing, open(os.path.join(out, 'timing.json'), 'w'))
+
+
+NOTE_FIELDS = ('t0', 't1', 'midi', 'amp', 'brightness', 'noise', 'family', 'attack', 'fade', 'vib_depth', 'vib_rate',
+               'hollow')
+
+
+def match_notes(a, b, tol=0.012):
+    """One-to-one matches between note records a and b: the same stem, within half a semitone and tol seconds (about
+    one Basic Pitch frame) at both ends, nearest first. Returns [(i, j)...]."""
+    near = {}
+    for j, y in enumerate(b):
+        near.setdefault((y[12], round(y[2])), []).append(j)
+    pairs = []
+    for i, x in enumerate(a):
+        for p in (round(x[2]) - 1, round(x[2]), round(x[2]) + 1):
+            for j in near.get((x[12], p), []):
+                y = b[j]
+                if abs(x[2] - y[2]) <= 0.5 and abs(x[0] - y[0]) <= tol and abs(x[1] - y[1]) <= tol:
+                    pairs.append((abs(x[0] - y[0]) + abs(x[1] - y[1]) + abs(x[2] - y[2]), i, j))
+    pairs.sort()
+    ua, ub, out = set(), set(), []
+    for _, i, j in pairs:
+        if i not in ua and j not in ub:
+            ua.add(i)
+            ub.add(j)
+            out.append((i, j))
+    return out
+
+
+def near(a, b, tol=1e-12):
+    """Two note records equal to within tol (relative) in every field and every point of the curve."""
+    if len(a[13][0]) != len(b[13][0]):
+        return False
+    x = np.concatenate([np.asarray(a[:13], float)] + [np.asarray(c, float) for c in a[13]])
+    y = np.concatenate([np.asarray(b[:13], float)] + [np.asarray(c, float) for c in b[13]])
+    return bool(np.all(np.abs(x - y) <= tol * np.maximum(1, np.abs(x))))
+
+
+def note_diffs(py, js):
+    """Counts by stem (matched, missing: Python only, extra: JS only, identical: every field and the curve equal,
+    within_1e-12: equal but for the last bits);
+    for matched notes, the largest and median difference of each field and how many differ by more than 1e-6, how
+    many changed family or vibrato, and the bend curves' differences (times, semitones, holds) where their lengths
+    agree."""
+    m = match_notes(py, js)
+    res = {'stems': {}}
+    for s, name in enumerate(NOTE_STEMS):
+        mk = [(i, j) for i, j in m if py[i][12] == s]
+        same = sum(1 for i, j in mk if py[i][:13] == js[j][:13] and py[i][13] == js[j][13])
+        close = sum(1 for i, j in mk if near(py[i], js[j]))
+        r = res['stems'][name] = {'python': sum(1 for x in py if x[12] == s), 'js': sum(1 for x in js if x[12] == s),
+                                  'matched': len(mk), 'identical': same, 'within_1e-12': close}
+        r['missing'], r['extra'] = r['python'] - len(mk), r['js'] - len(mk)
+    if not m:
+        return res
+    P = np.array([py[i][:12] for i, _ in m], float)
+    J = np.array([js[j][:12] for _, j in m], float)
+    D = np.abs(P - J)
+    res['fields'] = {f: {'max': float(D[:, k].max()), 'median': float(np.median(D[:, k])),
+                         'over_1e-6': int((D[:, k] > 1e-6).sum())} for k, f in enumerate(NOTE_FIELDS)}
+    res['family_changed'] = int((P[:, 6] != J[:, 6]).sum())
+    res['vibrato_changed'] = int(((P[:, 9] > 0) != (J[:, 9] > 0)).sum())
+    lens, worst = 0, [0.0, 0.0, 0.0]
+    for i, j in m:
+        a, b = py[i][13], js[j][13]
+        if len(a[0]) != len(b[0]):
+            lens += 1
+            continue
+        for k in range(3):
+            if len(a[k]):
+                worst[k] = max(worst[k], float(np.abs(np.subtract(a[k], b[k])).max()))
+    res['curves'] = {'length_differs': lens, 'times_max': worst[0], 'semitones_max': worst[1], 'holds_max': worst[2]}
+    return res
+
+
+def event_counts(py, js):
+    """Basic Pitch's own note events (before join_bends), per stem: how many; how many have the same start, end,
+    pitch and bends (same); how many are identical, amplitude too; the largest amplitude difference of the same."""
+    out = {}
+    for name in NOTE_STEMS:
+        a, b = py.get(name, []), js.get(name, [])
+        left = {}
+        for e in b:
+            left.setdefault(json.dumps([e[0], e[1], e[2], e[4]]), []).append(e[3])
+        same = ident = 0
+        worst = 0.0
+        for e in a:
+            amps = left.get(json.dumps([e[0], e[1], e[2], e[4]]))
+            if amps:
+                v = min(amps, key=lambda x: abs(x - e[3]))
+                amps.remove(v)
+                same += 1
+                ident += v == e[3]
+                worst = max(worst, abs(v - e[3]))
+        out[name] = {'python': len(a), 'js': len(b), 'same': same, 'identical': ident, 'amp_max_diff': worst}
+    return out
+
+
+def notes(song, path, outdir, device):
+    stemdir = os.path.join(outdir, 'py-s0')
+    if not os.path.exists(os.path.join(stemdir, 'piano.wav')):
+        stems(song, path, outdir, device)
+    py, js, js22 = (os.path.join(outdir, d) for d in ('py-notes', 'js-notes', 'js-notes-py22'))
+    if not os.path.exists(os.path.join(py, 'timing.json')):
+        py_notes(stemdir, py)
+    node = ['node', os.path.join(ROOT, 'tools', 'analyse.mjs'), '--stems-in', stemdir, '--ep', 'cpu',
+            '--stages', 'notes']
+    if not os.path.exists(os.path.join(js, 'timing.json')):
+        subprocess.run(node + ['--out', js], check=True)
+    if not os.path.exists(os.path.join(js22, 'timing.json')):
+        subprocess.run(node + ['--out', js22, '--st22', py, '--batch', '1'], check=True)
+    P, J, J22 = (json.load(open(os.path.join(d, 'notes.json'))) for d in (py, js, js22))
+    return {'notes': note_diffs(P['notes'], J['notes']), 'notes_with_python_22k': note_diffs(P['notes'], J22['notes']),
+            'events': event_counts(P['events'], J['events']),
+            'events_with_python_22k': event_counts(P['events'], J22['events']),
+            'timing': {'python': json.load(open(os.path.join(py, 'timing.json'))),
+                       'js': json.load(open(os.path.join(js, 'timing.json')))}}
+
+
+def print_notes(song, res):
+    for key, ekey, label in (('notes', 'events', 'own 22k, 8 windows a call'),
+                             ('notes_with_python_22k', 'events_with_python_22k', 'py 22k, 1 window a call')):
+        r, e = res[key], res[ekey]
+        line = '  '.join('%s %d/%d -%d +%d =%d ~%d' % (s, v['matched'], v['python'], v['missing'], v['extra'],
+                                                       v['identical'], v['within_1e-12'])
+                         for s, v in r['stems'].items())
+        ev = '  '.join('%s %d/%d/%d (amp %.0e)' % (s, v['identical'], v['same'], v['python'], v['amp_max_diff'])
+                       for s, v in e.items())
+        print('%-40s notes (%s) matched/python -missing +extra =identical ~within 1e-12: %s; Basic Pitch events '
+              'identical/same but amplitude/python: %s' % (
+            song if key == 'notes' else '', label, line, ev), flush=True)
+        if 'fields' in r:
+            f, c = r['fields'], r['curves']
+            print('%-40s   max diff (count over 1e-6): %s; family changed %d, vibrato changed %d; curves: %d lengths '
+                  'differ, max %.1e s %.1e st %.1e hold' % (
+                      '', '  '.join('%s %.1e (%d)' % (k, v['max'], v['over_1e-6']) for k, v in f.items()),
+                      r['family_changed'], r['vibrato_changed'], c['length_differs'], c['times_max'],
+                      c['semitones_max'], c['holds_max']), flush=True)
+    tp, tj = res['timing']['python'], res['timing']['js']
+    print('%-40s time: Python notes_by_stem %.1f s (Basic Pitch + decoding %.1f, join %.1f, details %.1f), resample '
+          '%.1f; JS notes %.1f s (model %.1f), resample %.1f' % (
+              '', tp['notes_by_stem_s'], tp.get('notes_from_stem_s', 0), tp.get('join_bends_s', 0),
+              tp.get('note_details_s', 0), tp['resample_s'], tj['notes_s'], tj.get('notes_model_s', 0),
+              tj.get('resample_s', 0)), flush=True)
+
+
 def py_words(path, vocals_wav, out, device, size='medium'):
     """server/pipeline.py song_info and lyrics_for on a song and its vocal stem, as analyze() runs them (Whisper on
     the GPU in float16, as on Modal), keeping Whisper's own words (heard) to compare their times."""
@@ -263,7 +564,7 @@ def py_words(path, vocals_wav, out, device, size='medium'):
                'device': device}, open(os.path.join(out, 'timing.json'), 'w'))
 
 
-STAGES = {'stems': stems, 'drums': drums}
+STAGES = {'stems': stems, 'drums': drums, 'notes': notes, 'tone': tone}
 
 if __name__ == '__main__':
     args = sys.argv[1:]
@@ -286,6 +587,12 @@ if __name__ == '__main__':
         summary[song] = res
         if stage == 'drums':
             print_drums(song, res)
+            continue
+        if stage == 'notes':
+            print_notes(song, res)
+            continue
+        if stage == 'tone':
+            print_tone(song, res)
             continue
         line = '  '.join('%s %5.1f' % (s, r['sdr']) for s, r in res['js_vs_python'].items())
         print('%-40s JS vs Python SDR dB: %s' % (song, line), flush=True)

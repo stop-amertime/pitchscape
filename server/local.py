@@ -169,8 +169,18 @@ class Jobs:
 
 def handler(jobs):
     class H(SimpleHTTPRequestHandler):
+        extensions_map = {**SimpleHTTPRequestHandler.extensions_map, '.mjs': 'text/javascript'}
+
         def __init__(self, *a, **k):
             super().__init__(*a, directory=os.path.join(ROOT, 'docs'), **k)
+
+        def translate_path(self, path):
+            # the in-page analysis (src/pipeline) is served from src/, as the page is, so an edit shows on reload
+            p = urllib.parse.urlparse(path).path
+            parts = urllib.parse.unquote(p).split('/')[1:]
+            if p.startswith('/pipeline/') and not any(x in ('..', '') or '\\' in x for x in parts):
+                return os.path.join(ROOT, 'src', *parts)
+            return super().translate_path(path)
 
         def send(self, body, ctype, code=200):
             self.send_response(code)
