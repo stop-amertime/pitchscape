@@ -182,6 +182,19 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
 - Learned: ONNX Runtime's DirectML provider returns wrong numbers on htdemucs_6s (-32 dB against the CPU provider),
   so Node on Windows uses its WebGPU provider. Chrome with `--user-data-dir` on a Windows 8.3 short path
   (`ADMT9N~1`) cannot open CacheStorage. Port 8770 is refused on this laptop.
+- Width (`ear.mjs`, `ear.dsp.mjs`): `ears(st22, gain, segs, leadHz, bassHz, rt)` is Ear, pack_curves and ear_line.
+  Each ISO 532-2 band only reaches the grid bins its own coarser FFT lands on, 90 of the 2049, so a pattern is kept
+  as those 90 bins (Python: 2049 x frames float32 per stem, enough to run this laptop out of memory once). Each stem
+  is cut into runs of frames; a worker makes its run's pattern and measures every width asked for there, so no
+  pattern is held whole. Float32 where numpy is (|X| in complex64, the grid's cumsum, the per-ERB level), double
+  elsewhere. `python tools/parity.py ear` (Python's notes, voice and bass lines and 22.05 kHz stems as input, made
+  once into py-ear-in/): on all nine songs, `where`, bends and holds are identical. Widths differ by a median of
+  under 1e-7 semitones, at most 1.4e-4 (no width moves an eighth of a semitone, the walk's step). After the pack's
+  u8 quantisation 5 bytes of ~1.5 million differ, each by one step (0.06 semitones), and every earWidth3dB median is
+  the same. Speed (same input, back to back): Code Monkey Python 85 s, JS 11.2 s on one worker, 1.9 s on 8; Nixsia
+  219 s, 14.9 s, 2.7 s. The STFTs are most of it (~1.3 s a stem on one core); widths are ~0.15 ms each.
+- Learned: `Math.hypot` allocates in V8 and doubled the pattern's time through GC; a direct DFT of only the kept
+  bins was no faster than fft.js.
 
 ## Versions: bump them together
 

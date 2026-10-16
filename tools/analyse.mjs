@@ -1,9 +1,14 @@
-// Run the JavaScript pipeline (src/pipeline) on a song under Node. So far: stems, then drums and notes.
+// Run the JavaScript pipeline (src/pipeline) on a song under Node. So far: stems, then drums and notes (and the width
+// stage alone).
 //   node tools/analyse.mjs SONG.mp3 --stems OUT_DIR [--shifts 1] [--ep cuda|webgpu|cpu]
 //        writes OUT_DIR/<stem>.wav (32-bit float, 44.1 kHz stereo), OUT_DIR/drums.json and OUT_DIR/timing.json.
 //   node tools/analyse.mjs --stems-in DIR --out OUT_DIR [--drums22 FILE.wav]
 //        starts from stems already made (DIR/<stem>.wav, e.g. Python's, to compare stages on the same input);
 //        --drums22: the drum stem at 22.05 kHz to use instead of resampling it here (to measure the resampler alone).
+//   node tools/analyse.mjs --ear-in DIR --out OUT_DIR [--workers N]
+//        the width stage alone on inputs from tools/parity.py (DIR/st22_<stem>.f32, segs.json, leadHz.f32,
+//        bassHz.f32, inputs.json with the gain): writes OUT_DIR/{bends,holds,widths}.f64, {leadEar,bassEar}.f32,
+//        where.json and timing.json.
 // drums.json: {hits: [[t, kind, activation, margin]...], events: [[t, type, strength, hz, ring, 16 bands..., margin]...]}
 // as server/pipeline.py drum_hits and drum_details make them; OUT_DIR/adtof.f32 the activations (frames x 5) and
 // OUT_DIR/drums22.wav the drum stem's mono mix at 22.05 kHz, as resampled here.
@@ -16,11 +21,33 @@ import {decode, nodeRuntime, wav} from '../src/pipeline/runtime.node.mjs';
 import {separate, SOURCES} from '../src/pipeline/stems.mjs';
 import {drums} from '../src/pipeline/drums.mjs';
 import {notes, NOTE_STEMS} from '../src/pipeline/notes.mjs';
+import {ears} from '../src/pipeline/ear.mjs';
+import {existsSync, readFileSync} from 'node:fs';
 
 const args = process.argv.slice(2), opt = {};
 const pos = [];
 for (let i = 0; i < args.length; i++) args[i].startsWith('--') ? opt[args[i].slice(2)] = args[++i] : pos.push(args[i]);
 const out = opt.out || opt.stems;
+if (opt['ear-in'] && opt.out) {
+  const dir = opt['ear-in'], f32 = n => { const b = readFileSync(path.join(dir, n)); return new Float32Array(b.buffer, b.byteOffset, b.length / 4).slice(); };
+  const {gain} = JSON.parse(readFileSync(path.join(dir, 'inputs.json'), 'utf8'));
+  const st22 = {};
+  for (const s of SOURCES) if (existsSync(path.join(dir, `st22_${s}.f32`))) st22[s] = f32(`st22_${s}.f32`);
+  const segs = JSON.parse(readFileSync(path.join(dir, 'segs.json'), 'utf8'));
+  const rt = await nodeRuntime({ep: 'cpu', ...opt.workers && {workers: +opt.workers}});
+  const st = {};
+  const r = await ears(st22, gain, segs, f32('leadHz.f32'), f32('bassHz.f32'), rt, {stats: st});
+  mkdirSync(opt.out, {recursive: true});
+  const put = (n, a) => writeFileSync(path.join(opt.out, n), Buffer.from(a.buffer, a.byteOffset, a.byteLength));
+  for (const k of ['bends', 'holds', 'widths']) put(k + '.f64', r[k]);
+  for (const k of ['leadEar', 'bassEar']) put(k + '.f32', r[k]);
+  writeFileSync(path.join(opt.out, 'where.json'), JSON.stringify(r.where));
+  const timing = {ear_s: +(st.ear_ms / 1000).toFixed(2), widths: st.widths, workers: rt.pool.size};
+  writeFileSync(path.join(opt.out, 'timing.json'), JSON.stringify(timing));
+  console.error(JSON.stringify(timing));
+  rt.close();
+  process.exit(0);
+}
 if (!(pos[0] && opt.stems) && !(opt['stems-in'] && opt.out)) {
   console.error('usage: node tools/analyse.mjs SONG --stems OUT_DIR [--shifts 1] [--ep cuda|webgpu|cpu]\n' +
                 '       node tools/analyse.mjs --stems-in DIR --out OUT_DIR [--drums22 FILE.wav] [--ep ...]');

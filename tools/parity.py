@@ -35,6 +35,13 @@ missing (Python only), extra (JS only), identical, and equal to 1e-12; for match
 every field and of the bend curves (times, semitones, holds), and how many changed family or vibrato. Basic Pitch's
 own events are compared too (frames, pitch and bends; amplitude). Python's run is kept in py-notes/ (its model
 output as float32 files, its 22.05 kHz signals, its timing).
+
+  python tools/parity.py ear [name-substring ...]
+
+ear: the width stage (Ear, pack_curves, ear_line) on the same input on both sides, made once by server/pipeline.py
+from Python's stems (py-ear-in/: the 22.05 kHz stems, notes_by_stem's records, the voice and bass lines, the gain).
+Per drop (1, 3, 10 dB), the difference in semitones of note, voice and bass widths, raw and after the pack's u8
+quantisation; bends, holds and each note's (start, count); the 3 dB medians pack stats report; timing.
 """
 import json, os, subprocess, sys, time
 
@@ -337,6 +344,141 @@ def print_drums(song, res):
         r['max_abs']), flush=True)
 
 
+def py_ear_inputs(stems_dir, out, device):
+    """The width stage's inputs, made by server/pipeline.py from Python's own stems (py-s0) as analyze() makes them:
+    every stem at 22.05 kHz (librosa soxr_hq), the notes (notes_by_stem), the voice and bass lines (CREPE, pYIN) and
+    the gain that sets the mix to 70 dB SPL. Written as raw float32 / JSON for the JS to read."""
+    from server import pipeline as P
+    stems = read_stems(stems_dir)
+    dur = stems['drums'].shape[1] / 44100
+    F = max(16, int(np.ceil(dur * P.SR / P.HOP)))
+    st22 = {k: P.to_rate(v.mean(0), 44100, P.SR) for k, v in stems.items()}
+    t = time.time()
+    segs = P.notes_by_stem(stems, st22)
+    t1 = time.time()
+    _, bassHz, _ = P.bass_line(st22['bass'], F)
+    leadHz = P.voice_line(stems['vocals'], F, device)[0]
+    gain = 0.0632 / (float(np.sqrt(np.mean(sum(v.mean(0) for v in stems.values()) ** 2))) + 1e-12)
+    os.makedirs(out, exist_ok=True)
+    for k, v in st22.items():
+        np.asarray(v, '<f4').tofile(os.path.join(out, 'st22_%s.f32' % k))
+    np.asarray(leadHz, '<f4').tofile(os.path.join(out, 'leadHz.f32'))
+    np.asarray(bassHz, '<f4').tofile(os.path.join(out, 'bassHz.f32'))
+    rec = [[float(x) for x in r[:13]] + [[np.asarray(c, np.float64).tolist() for c in r[13]]] for r in segs]
+    types = sorted({type(x).__name__ for r in segs for x in r[:3]} | {np.asarray(c).dtype.name for r in segs for c in r[13]})
+    json.dump(rec, open(os.path.join(out, 'segs.json'), 'w'))
+    json.dump({'gain': gain, 'F': F, 'types': types, 'notes_s': round(t1 - t, 1)},
+              open(os.path.join(out, 'inputs.json'), 'w'))
+
+
+def py_ear(inp, out):
+    """server/pipeline.py's width stage on those inputs, as analyze() runs it, timed."""
+    from server import pipeline as P
+    meta = json.load(open(os.path.join(inp, 'inputs.json')))
+    gain = meta['gain']
+    st22 = {k: np.fromfile(os.path.join(inp, 'st22_%s.f32' % k), '<f4') for k in SOURCES}
+    segs = [r[:13] + [tuple(np.array(c) for c in r[13])] for r in json.load(open(os.path.join(inp, 'segs.json')))]
+    leadHz, bassHz = (np.fromfile(os.path.join(inp, n + '.f32'), '<f4') for n in ('leadHz', 'bassHz'))
+    t = time.time()
+    ears = {}
+    for name in P.NOTE_STEMS:
+        if name in st22 and any(P.NOTE_STEMS[int(r[12])] == name for r in segs):
+            ears[name] = P.Ear(st22[name], gain)
+    names = list(ears)
+    t1 = time.time()
+    bends, holds, widths, where = P.pack_curves(segs, ears)
+    t2 = time.time()
+    ears = None
+    vEar = P.Ear(st22['vocals'], gain)
+    t3 = time.time()
+    leadEar = P.ear_line(vEar, leadHz)
+    t4 = time.time()
+    vEar = None
+    bEar = P.Ear(st22['bass'], gain)
+    t5 = time.time()
+    bassEar = P.ear_line(bEar, bassHz)
+    t6 = time.time()
+    os.makedirs(out, exist_ok=True)
+    np.save(os.path.join(out, 'bends.npy'), np.array(bends, np.float64))
+    np.save(os.path.join(out, 'holds.npy'), np.array(holds, np.float64))
+    np.save(os.path.join(out, 'widths.npy'), np.array(widths, np.float64))
+    np.save(os.path.join(out, 'leadEar.npy'), leadEar)
+    np.save(os.path.join(out, 'bassEar.npy'), bassEar)
+    json.dump(where, open(os.path.join(out, 'where.json'), 'w'))
+    json.dump({'ear_s': round(t1 - t + t3 - t2 + t5 - t4, 2), 'widths_s': round(t2 - t1 + t4 - t3 + t6 - t5, 2),
+               'total_s': round(t6 - t, 2), 'note_ears': names},
+              open(os.path.join(out, 'timing.json'), 'w'))
+
+
+def width_diffs(py, js, drops=(1, 3, 10)):
+    """py, js: (rows, 6) widths, (down, up) at each drop. Per drop, the absolute difference in semitones (down and
+    up together): its distribution, and the same after the pack's u8 quantisation (0..EAR_SPAN in 255 steps)."""
+    from server import pipeline as P
+    q = lambda a: np.clip(np.round((a - 0) / P.EAR_SPAN * 255), 0, 255)
+    res = {}
+    for i, d in enumerate(drops):
+        a, b = py[:, 2 * i:2 * i + 2].ravel(), js[:, 2 * i:2 * i + 2].ravel()
+        x = np.abs(a - b)
+        qx = np.abs(q(a) - q(b)) * P.EAR_SPAN / 255
+        pct = lambda v: {'median': float(np.median(v)), 'p99': float(np.percentile(v, 99)), 'p999': float(np.percentile(v, 99.9)),
+                         'max': float(v.max()), 'over_0.01': int((v > 0.01).sum()), 'over_0.125': int((v > 0.125).sum()),
+                         'over_1': int((v > 1).sum())} if len(v) else {}
+        res['%ddB' % d] = {'n': int(len(x)), 'raw': pct(x), 'u8': dict(pct(qx), differ=int((qx > 0).sum()))}
+    return res
+
+
+def ear_median(e, hz=None):
+    """pack stats' earWidth3dB: the median of down + up at 3 dB (over frames that sound, for a line)."""
+    if hz is not None:
+        e = e[hz > 0]
+    return round(float(np.median(e[:, 2] + e[:, 3])), 2) if len(e) else 0
+
+
+def ear(song, path, outdir, device):
+    inp, py, js = (os.path.join(outdir, d) for d in ('py-ear-in', 'py-ear', 'js-ear'))
+    if not os.path.exists(os.path.join(outdir, 'py-s0', 'timing.json')):
+        stems(song, path, outdir, device)
+    if not os.path.exists(os.path.join(inp, 'inputs.json')):
+        py_ear_inputs(os.path.join(outdir, 'py-s0'), inp, device)
+    if not os.path.exists(os.path.join(py, 'timing.json')):
+        py_ear(inp, py)
+    if not os.path.exists(os.path.join(js, 'timing.json')):
+        subprocess.run(['node', os.path.join(ROOT, 'tools', 'analyse.mjs'), '--ear-in', inp, '--out', js], check=True)
+    leadHz, bassHz = (np.fromfile(os.path.join(inp, n + '.f32'), '<f4') for n in ('leadHz', 'bassHz'))
+    P = {k: np.load(os.path.join(py, k + '.npy')) for k in ('bends', 'holds', 'widths', 'leadEar', 'bassEar')}
+    J = {k: np.fromfile(os.path.join(js, k + '.f64'), '<f8') for k in ('bends', 'holds', 'widths')}
+    J.update({k: np.fromfile(os.path.join(js, k + '.f32'), '<f4').reshape(-1, 6) for k in ('leadEar', 'bassEar')})
+    pw, jw = P['widths'].reshape(-1, 6), J['widths'].reshape(-1, 6)
+    same_where = json.load(open(os.path.join(py, 'where.json'))) == json.load(open(os.path.join(js, 'where.json')))
+    res = {'where_identical': same_where, 'samples': len(pw),
+           'bends_max': float(np.abs(P['bends'] - J['bends']).max()) if len(pw) else 0.0,
+           'holds_max': float(np.abs(P['holds'] - J['holds']).max()) if len(pw) else 0.0,
+           'notes': width_diffs(pw, jw), 'voice': width_diffs(P['leadEar'][leadHz > 0], J['leadEar'][leadHz > 0]),
+           'bass': width_diffs(P['bassEar'][bassHz > 0], J['bassEar'][bassHz > 0]),
+           'medians_3dB': {'python': {'voice': ear_median(P['leadEar'], leadHz), 'bass': ear_median(P['bassEar'], bassHz),
+                                      'notes': ear_median(pw)},
+                           'js': {'voice': ear_median(J['leadEar'], leadHz), 'bass': ear_median(J['bassEar'], bassHz),
+                                  'notes': ear_median(jw)}},
+           'timing': {'python': json.load(open(os.path.join(py, 'timing.json'))),
+                      'js': json.load(open(os.path.join(js, 'timing.json')))}}
+    return res
+
+
+def print_ear(song, res):
+    print('%-40s %d note samples, where identical %s, bends max diff %.1e, holds %.1e' % (
+        song, res['samples'], res['where_identical'], res['bends_max'], res['holds_max']), flush=True)
+    for part in ('notes', 'voice', 'bass'):
+        line = ('\n%-46s' % '').join('%s: n %d raw med %.0e p99.9 %.0e max %.1e >1/8 st %d | u8 differ %d max %.2f' % (
+            d, r['n'], r['raw']['median'], r['raw']['p999'], r['raw']['max'], r['raw']['over_0.125'], r['u8']['differ'],
+            r['u8']['max']) for d, r in res[part].items() if r['raw'])
+        print('%-40s %-5s %s' % ('', part, line), flush=True)
+    m, t = res['medians_3dB'], res['timing']
+    print('%-40s 3 dB medians python %s js %s; python %.1f s (ears %.1f, widths %.1f), js %.1f s on %d workers' % (
+        '', m['python'], m['js'], t['python']['total_s'], t['python']['ear_s'], t['python']['widths_s'],
+        t['js']['ear_s'], t['js']['workers']), flush=True)
+
+
+
 NOTE_STEMS = ('other', 'guitar', 'piano')
 
 
@@ -536,7 +678,7 @@ def print_notes(song, res):
               tj.get('resample_s', 0)), flush=True)
 
 
-STAGES = {'stems': stems, 'drums': drums, 'notes': notes, 'tone': tone}
+STAGES = {'stems': stems, 'drums': drums, 'notes': notes, 'tone': tone, 'ear': ear}
 
 if __name__ == '__main__':
     args = sys.argv[1:]
@@ -557,8 +699,8 @@ if __name__ == '__main__':
         res = STAGES[stage](song, os.path.join(SONGS, f), outdir, device)
         json.dump(res, open(os.path.join(outdir, stage + '.json'), 'w'), indent=1)
         summary[song] = res
-        if stage == 'drums':
-            print_drums(song, res)
+        if stage in ('drums', 'ear'):
+            (print_drums if stage == 'drums' else print_ear)(song, res)
             continue
         if stage == 'notes':
             print_notes(song, res)
