@@ -1,360 +1,6 @@
-<title>Pitchscape</title>
-<meta name="claude:viewport-fit-sides" content="cover">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=DM+Mono:wght@400;500&display=swap">
-<style>
-/* It opens on a page for picking a song (the splash); then one screen that never scrolls: the print fills it.
-   Controls float over its foot while they are wanted and fade while a song plays; the Lab opens from a faint cog as a
-   panel below the print, which shrinks to sit above it.
-   A single light theme on purpose: the piece is ink on paper, and multiply blending needs a light ground. */
-:root {
-  --paper: #EEF0EA;
-  --sheet: #F6F7F3;
-  --ink: #23211F;
-  --muted: #565B52;
-  --rule: #C9CDC2;
-  --blue: #3255A4;
-  --pink: #FF48B0;
-  --purple: #765BA7;
-  --teal: #00838A;
-  --orange: #FF6C2F;
-  --sun: #FFB511;
-  --green: #00A95C;
-  --crimson: #E45D50;
-  --drum: #23211F;
-  --c-bass: #3255A4; --c-voice: #FF48B0; --c-guitar: #FF6C2F; --c-piano: #FFB511; --c-synth: #009DA5; --c-words: #914E72;
-  --on-blue: #F4F5F1;
-  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
-  --mono: "DM Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  color-scheme: light;
-}
-html, body { height: 100%; margin: 0; padding: 0; overflow: hidden; overscroll-behavior: none; background: var(--paper); color: var(--ink); }
-body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -webkit-tap-highlight-color: transparent; }
-[hidden] { display: none !important; }
-.vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
-.app { position: fixed; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr) auto; background: var(--paper); }
+import { ui, api } from './ui.svelte.js';
 
-/* the print */
-.stage { position: relative; min-height: 0; overflow: hidden; }
-#cv { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: manipulation; transform-origin: 50% 100%; }
-
-/* controls over the foot of the print */
-.hud {
-  position: absolute; left: 0; right: 0; bottom: 0; display: grid; gap: 10px;
-  padding: 46px max(16px, env(safe-area-inset-right, 0px)) max(14px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
-  background: linear-gradient(to top, rgba(238, 240, 234, 0.97) 0%, rgba(238, 240, 234, 0.93) 64%, rgba(238, 240, 234, 0) 100%);
-  transition: opacity 220ms ease, transform 220ms ease;
-}
-.hud.away { opacity: 0; transform: translateY(14px); pointer-events: none; }
-.track { margin: 0; min-width: 0; font: 500 12px/1.3 var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.transport { display: flex; align-items: center; gap: 14px; }
-.play { flex: none; width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--ink); color: var(--paper); display: grid; place-items: center; cursor: pointer; }
-.play:disabled { opacity: 0.35; cursor: default; }
-.play svg { width: 22px; height: 22px; }
-.scrub { flex: 1; min-width: 0; }
-#seek { width: 100%; margin: 0; accent-color: var(--pink); height: 28px; }
-.times { display: flex; justify-content: space-between; font: 500 11.5px/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
-.hud-top { display: flex; align-items: center; gap: 10px; }
-.hud-top .track { flex: 1; }
-.hud-top .btn { flex: none; background: rgba(246, 247, 243, 0.9); }
-/* the Lab: a faint cog in the top corner, there and gone with the controls */
-.cog { position: absolute; z-index: 1; top: max(6px, env(safe-area-inset-top, 0px)); right: max(6px, env(safe-area-inset-right, 0px)); width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: rgba(238, 240, 234, 0.6); color: var(--ink); opacity: 0.55; cursor: pointer; transition: opacity 220ms ease; }
-.cog:hover, .cog:focus-visible { opacity: 1; }
-.cog svg { width: 22px; height: 22px; }
-.cog.away { opacity: 0; pointer-events: none; }
-.cog:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
-
-/* buttons */
-.btn { position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 15px; font: 600 14px/1 var(--display); color: var(--ink); background: transparent; border: 1.5px solid var(--ink); border-radius: 6px; cursor: pointer; }
-.btn-primary { background: var(--blue); border-color: var(--blue); color: var(--on-blue); }
-.btn-quiet { border-color: transparent; color: var(--muted); padding: 0 8px; }
-.btn-small { min-height: 34px; padding: 0 12px; font-size: 13px; }
-.btn:focus-visible, .play:focus-visible, .ink:focus-visible, .tabs button:focus-visible, .k:focus-visible, .seg button:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
-.btn:has(input:focus-visible) { outline: 2px solid var(--pink); outline-offset: 2px; }
-.file-btn { overflow: hidden; }
-.file-btn input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 100px; }
-
-/* messages and progress, over the print */
-.toast { position: fixed; z-index: 5; top: max(12px, env(safe-area-inset-top, 0px)); left: 12px; right: 12px; margin: 0; padding: 10px 14px; background: rgba(246, 247, 243, 0.97); border: 1px solid var(--rule); border-radius: 8px; font: 500 14px/1.4 var(--display); color: var(--ink); box-shadow: 0 8px 22px -16px rgba(35, 45, 30, 0.7); }
-.toast.err { color: #B3262E; }
-.toast:empty { display: none; }
-.status { position: absolute; z-index: 1; left: 16px; right: 16px; top: 50%; transform: translateY(-50%); background: rgba(246, 247, 243, 0.96); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; }
-.status p { margin: 0; font: 600 15px/1.3 var(--display); }
-.status .bar { height: 4px; margin-top: 10px; background: var(--rule); border-radius: 2px; overflow: hidden; }
-.status .bar i { display: block; height: 100%; width: 0; background: var(--pink); transition: width 120ms linear; }
-.status .note { margin-top: 8px; font: 400 13px/1.4 var(--display); color: var(--muted); }
-.eyebrow { font: 500 11px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-
-/* the Lab panel, below the print */
-.panel {
-  position: relative; max-height: 58dvh; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box;
-  background: var(--sheet); border-top: 1px solid var(--rule); border-radius: 14px 14px 0 0; box-shadow: 0 -12px 28px -22px rgba(35, 45, 30, 0.6);
-  padding: 0 max(16px, env(safe-area-inset-right, 0px)) max(18px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
-}
-@supports not (height: 1dvh) { .panel { max-height: 58vh; } }
-/* on a wide screen the controls and panels keep a phone-like width, centred */
-.panel { padding-left: max(16px, env(safe-area-inset-left, 0px), calc(50% - 380px)); padding-right: max(16px, env(safe-area-inset-right, 0px), calc(50% - 380px)); }
-.hud { padding-left: max(16px, env(safe-area-inset-left, 0px), calc(50% - 380px)); padding-right: max(16px, env(safe-area-inset-right, 0px), calc(50% - 380px)); }
-.panel-head { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; padding: 12px 0 10px; background: var(--sheet); border-bottom: 1px solid var(--rule); }
-.panel-head h2 { flex: 1; min-width: 0; margin: 0; font: 700 17px/1.2 var(--display); }
-.panel-head #labSeek { flex: 1; min-width: 0; margin: 0; height: 28px; accent-color: var(--pink); }
-.panel-body { display: grid; gap: 14px; padding-top: 14px; }
-.title { position: relative; font: 800 24px/1 var(--display) !important; font-variation-settings: "opsz" 96; letter-spacing: -0.03em; color: var(--blue); }
-.title::after { content: attr(data-text); position: absolute; inset: 0; transform: translate(1.6px, 1.3px); color: var(--pink); mix-blend-mode: multiply; pointer-events: none; }
-.hint { margin: 0; font: 400 13px/1.45 var(--display); color: var(--muted); }
-.key-box { min-width: 0; display: flex; align-items: center; }
-.key-box input { flex: 1; min-width: 0; min-height: 36px; padding: 0 10px; font: 400 14px var(--mono); color: var(--ink); background: #FBFBF8; border: 1px solid var(--rule); border-radius: 4px; }
-.key-saved { font: 400 14px/1.3 var(--display); color: var(--ink); }
-.key-change { margin-left: 2px; padding: 6px 2px; font: 600 14px/1 var(--display); color: var(--blue); background: none; border: 0; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
-
-/* the splash: where a song is picked, first and whenever Change song is tapped */
-.splash { position: fixed; z-index: 4; inset: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--paper); }
-.splash-in { box-sizing: border-box; max-width: 460px; min-height: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 14px;
-  padding: max(28px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(18px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
-.splash .title { margin: 0; font-size: 44px !important; }
-.lede { margin: 0; font: 400 15px/1.45 var(--display); color: var(--ink); text-wrap: pretty; }
-.pick { display: grid; gap: 8px; }
-.pick .file-btn { justify-content: center; }
-.link-row { display: flex; gap: 8px; margin: 0; }
-.link-row input { flex: 1; min-width: 0; min-height: 42px; box-sizing: border-box; padding: 0 12px; font: 400 15px var(--display); color: var(--ink); background: #FBFBF8; border: 1.5px solid var(--rule); border-radius: 6px; }
-.link-row input:focus-visible { outline: 2px solid var(--pink); outline-offset: 1px; }
-.tries { display: grid; gap: 6px; }
-.try { display: flex; align-items: baseline; gap: 10px; min-height: 42px; padding: 8px 12px; box-sizing: border-box; text-align: left; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; color: var(--ink); cursor: pointer; font: 600 14.5px/1.25 var(--display); }
-.try span { margin-left: auto; font: 400 12.5px/1.25 var(--display); color: var(--muted); text-align: right; }
-.try:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
-.splash .row { grid-template-columns: 96px minmax(0, 1fr); }
-.splash-back { align-self: flex-start; }
-
-/* lab */
-.tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 12px 0 2px; }
-.tabs::-webkit-scrollbar { display: none; }
-.tabs button { flex: none; min-height: 34px; padding: 0 13px; border-radius: 17px; border: 1px solid var(--rule); background: transparent; font: 600 13.5px/1 var(--display); color: var(--ink); cursor: pointer; }
-.tabs button[aria-selected="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
-.pane { display: grid; gap: 10px; padding: 14px 0 6px; }
-.row { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: 10px; }
-.row.slide { grid-template-columns: 112px minmax(0, 1fr) 46px; }
-.k { justify-self: start; display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 0; background: none; border: 0; font: 500 11px/1.2 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); text-align: left; cursor: pointer; }
-.k i { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; border: 1.2px solid currentColor; border-radius: 50%; font: italic 700 10px/1 Georgia, "Times New Roman", serif; text-transform: none; }
-.k[aria-expanded="true"] { color: var(--ink); }
-.k-static { font: 500 11px/1.2 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
-.lab-h { margin: 14px 0 2px; font: 600 12px/1.2 var(--display); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
-.lab-v { font: 500 11px/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
-.seg { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
-.seg button { min-height: 34px; padding: 0 10px; font: 600 13px/1 var(--display); color: var(--ink); background: transparent; border: 1px solid var(--rule); border-radius: 4px; cursor: pointer; }
-.seg button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
-.lab input[type="range"] { width: 100%; margin: 0; height: 28px; accent-color: var(--pink); }
-.lab input:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
-.lab-foot { display: flex; justify-content: flex-end; padding-top: 6px; }
-.bubble { position: absolute; z-index: 3; max-width: min(290px, calc(100% - 32px)); box-sizing: border-box; padding: 10px 12px; background: var(--ink); color: var(--paper); border-radius: 10px; font: 400 14px/1.4 var(--display); box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.6); }
-.bubble::after { content: ""; position: absolute; left: var(--tail, 20px); width: 12px; height: 12px; background: inherit; transform: rotate(45deg); }
-.bubble.below::after { top: -5px; }
-.bubble.above::after { bottom: -5px; }
-
-/* layers: one chip per kind of sound; tap to lift it off the print. Each swells with its sound. */
-.ink-grid { display: flex; flex-wrap: wrap; gap: 6px; }
-.ink { display: inline-flex; align-items: center; gap: 7px; padding: 0 12px 0 8px; min-height: 38px; background: transparent; border: 1px solid var(--rule); border-radius: 6px; color: var(--ink); cursor: pointer; font: inherit; }
-.ink svg { flex: none; width: 20px; height: 20px; color: var(--c); transform: scale(calc(0.8 + var(--lvl, 0) * 0.45)); transform-origin: 50% 50%; transition: transform 70ms linear; }
-.ink svg.drum { color: var(--drum); }
-.ink .nm { font: 600 13.5px/1.15 var(--display); }
-.ink[aria-pressed="false"] { border-style: dashed; }
-.ink[aria-pressed="false"] svg { opacity: 0.3; }
-.ink[aria-pressed="false"] .nm { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
-
-@media (prefers-reduced-motion: reduce) { .hud, .cog, .ink svg { transition: none; } }
-/* icons: Lucide line icons, from the sprite tools/icons.mjs writes */
-.i { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
-
-/* where songs are analysed: two cards, the chosen one inked and printed slightly off register */
-.where { display: grid; gap: 8px; }
-.where .eyebrow { margin: 4px 0 0; }
-.where-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.where-card { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; row-gap: 4px; align-items: center; min-height: 62px; padding: 11px 12px; box-sizing: border-box; text-align: left; color: var(--ink); background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; cursor: pointer; transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease; }
-.where-card .i { grid-row: 1 / span 2; width: 22px; height: 22px; color: var(--muted); }
-.wc-t { font: 650 14.5px/1.15 var(--display); }
-.wc-s { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 11px/1.2 var(--mono); letter-spacing: 0.02em; color: var(--muted); }
-.where-card[aria-pressed="true"] { border-color: var(--ink); box-shadow: 3px 3px 0 var(--pink); transform: translate(-1.5px, -1.5px); }
-.where-card[aria-pressed="true"] .i { color: var(--blue); }
-.where-card:disabled { cursor: default; opacity: 0.55; }
-.where-card.off .wc-s { color: #B3262E; }
-.where-card:focus-visible { outline: 2px solid var(--pink); outline-offset: 3px; }
-.where-spec { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 2px 0 0; padding: 8px 0 0; border-top: 1px dashed var(--rule); font: 500 11.5px/1.3 var(--mono); }
-.where-spec div { display: flex; gap: 6px; }
-.where-spec dt { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 10.5px; }
-.where-spec dd { margin: 0; color: var(--ink); }
-.where-note { display: flex; gap: 7px; align-items: flex-start; margin: 0; font: 400 13px/1.45 var(--display); color: var(--muted); text-wrap: pretty; }
-.where-note .i { flex: none; width: 16px; height: 16px; margin-top: 1.5px; color: var(--orange); stroke-width: 2; }
-.where-note.warn { color: var(--ink); }
-@media (prefers-reduced-motion: reduce) { .where-card { transition: none; } .where-card[aria-pressed="true"] { transform: none; } }
-</style>
-
-<!--ICONS--><!-- Lucide 1.58.0 (ISC licence, lucide.dev), written by tools/icons.mjs --><svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
-<symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></symbol>
-<symbol id="i-monitor" viewBox="0 0 24 24"><rect width="20" height="14" x="2" y="3" rx="2"/> <line x1="8" x2="16" y1="21" y2="21"/> <line x1="12" x2="12" y1="17" y2="21"/></symbol>
-<symbol id="i-triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/> <path d="M12 9v4"/> <path d="M12 17h.01"/></symbol>
-</svg><!--/ICONS-->
-<main class="app">
-  <section class="stage" id="plate" aria-label="The print">
-    <canvas id="cv" role="img" aria-label="A scrolling print of the song. Each kind of sound is drawn in its own ink; higher pitches sit higher on the sheet."></canvas>
-    <div class="status" id="status" hidden>
-      <p id="statusText">Getting ready</p>
-      <div class="bar" role="progressbar" aria-labelledby="statusText" aria-valuemin="0" aria-valuemax="100"><i id="statusBar"></i></div>
-      <p class="note" id="statusNote" hidden></p>
-    </div>
-    <p class="toast" id="msg" role="status"></p>
-    <button class="cog" type="button" id="labBtn" aria-controls="labPanel" aria-expanded="false" aria-label="Lab: how the print is drawn">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M10.3 2.5h3.4l.5 2.6 1.9.8 2.2-1.5 2.4 2.4-1.5 2.2.8 1.9 2.6.5v3.4l-2.6.5-.8 1.9 1.5 2.2-2.4 2.4-2.2-1.5-1.9.8-.5 2.6h-3.4l-.5-2.6-1.9-.8-2.2 1.5-2.4-2.4 1.5-2.2-.8-1.9-2.6-.5v-3.4l2.6-.5.8-1.9-1.5-2.2 2.4-2.4 2.2 1.5 1.9-.8z"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
-    </button>
-    <div class="hud" id="hud">
-      <div class="hud-top"><p class="track" id="trackName"></p><button class="btn btn-small" type="button" id="changeSong">Change song</button></div>
-      <div class="transport">
-        <button class="play" id="play" type="button" aria-label="Play" disabled>
-      <svg id="icoPlay" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor"/></svg>
-      <svg id="icoPause" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M6.5 4.5h4v15h-4zM13.5 4.5h4v15h-4z" fill="currentColor"/></svg>
-    </button>
-        <div class="scrub">
-          <input type="range" id="seek" min="0" max="1" step="0.01" value="0" aria-label="Position in song">
-          <div class="times"><span id="tNow">0:00</span><span id="tDur">0:00</span></div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <section class="panel lab" id="labPanel" aria-label="Lab" hidden>
-    <div class="panel-head"><button class="btn btn-small" id="labPlay" type="button" disabled>Play</button><input type="range" id="labSeek" min="0" max="1" step="0.01" value="0" aria-label="Position in song"><button class="btn btn-small btn-primary" type="button" data-close>Done</button></div>
-    <div class="tabs" role="tablist" aria-label="Lab sections"><button type="button" role="tab" id="tab-colour" data-tab="colour" aria-controls="pane-colour" aria-selected="false">Colour</button><button type="button" role="tab" id="tab-shapes" data-tab="shapes" aria-controls="pane-shapes" aria-selected="false">Shapes</button><button type="button" role="tab" id="tab-words" data-tab="words" aria-controls="pane-words" aria-selected="false">Words</button><button type="button" role="tab" id="tab-motion" data-tab="motion" aria-controls="pane-motion" aria-selected="false">Motion</button><button type="button" role="tab" id="tab-print" data-tab="print" aria-controls="pane-print" aria-selected="false">Print</button><button type="button" role="tab" id="tab-cuts" data-tab="cuts" aria-controls="pane-cuts" aria-selected="false">Cutoffs</button><button type="button" role="tab" id="tab-layers" data-tab="layers" aria-controls="pane-layers" aria-selected="false">Layers</button><button type="button" role="tab" id="tab-analysis" data-tab="analysis" aria-controls="pane-analysis" aria-selected="false">Analysis</button></div>
-      <div class="pane" id="pane-colour" data-pane="colour" role="tabpanel" aria-labelledby="tab-colour" hidden>
-        <div class="row"><button type="button" class="k" data-tip="Instrument: each has its own ink for the whole song, warmer the more it is out front: voice pink, guitar orange, piano yellow, everything else (synths, strings, brass, organ) teal, darker for held notes and paler for swells, bass blue, drums black. Height: colour follows how high a sound sits. Note: colour follows the note name." aria-expanded="false" aria-describedby="ld-colour">Colour by<i aria-hidden="true">i</i></button><div class="seg" data-key="colour" role="group" aria-label="Colour by" aria-describedby="ld-colour"><button type="button" id="lab-colour-inst" data-v="inst">Instrument</button><button type="button" id="lab-colour-height" data-v="height">Height</button><button type="button" id="lab-colour-note" data-v="note">Note</button></div><span class="vh" id="ld-colour">Instrument: each has its own ink for the whole song, warmer the more it is out front: voice pink, guitar orange, piano yellow, everything else (synths, strings, brass, organ) teal, darker for held notes and paler for swells, bass blue, drums black. Height: colour follows how high a sound sits. Note: colour follows the note name.</span></div>
-      </div>
-      <div class="pane" id="pane-shapes" data-pane="shapes" role="tabpanel" aria-labelledby="tab-shapes" hidden>
-        <div class="row"><button type="button" class="k" data-tip="Follow the sound: brighter hits print spikier, and ringing ones trail. All alike: only how hard each is hit changes it." aria-expanded="false" aria-describedby="ld-drums">Drum marks<i aria-hidden="true">i</i></button><div class="seg" data-key="drums" role="group" aria-label="Drum marks" aria-describedby="ld-drums"><button type="button" id="lab-drums-sound" data-v="sound">Follow the sound</button><button type="button" id="lab-drums-simple" data-v="simple">All alike</button></div><span class="vh" id="ld-drums">Follow the sound: brighter hits print spikier, and ringing ones trail. All alike: only how hard each is hit changes it.</span></div>
-        <div class="row"><button type="button" class="k" data-tip="A soft smudge, or a screen of dots like a printed photo." aria-expanded="false" aria-describedby="ld-kick">Kick<i aria-hidden="true">i</i></button><div class="seg" data-key="kick" role="group" aria-label="Kick" aria-describedby="ld-kick"><button type="button" id="lab-kick-smudge" data-v="smudge">Smudge</button><button type="button" id="lab-kick-halftone" data-v="halftone">Halftone</button></div><span class="vh" id="ld-kick">A soft smudge, or a screen of dots like a printed photo.</span></div>
-        <div class="row"><button type="button" class="k" data-tip="A soft smear, or a sharp line whose edge shows the tone." aria-expanded="false" aria-describedby="ld-bass">Bass<i aria-hidden="true">i</i></button><div class="seg" data-key="bass" role="group" aria-label="Bass" aria-describedby="ld-bass"><button type="button" id="lab-bass-smudge" data-v="smudge">Smudge</button><button type="button" id="lab-bass-line" data-v="line">Line</button></div><span class="vh" id="ld-bass">A soft smear, or a sharp line whose edge shows the tone.</span></div>
-      </div>
-      <div class="pane" id="pane-words" data-pane="words" role="tabpanel" aria-labelledby="tab-words" hidden>
-        <div class="row"><button type="button" class="k" data-tip="The typeface for the sung words." aria-expanded="false" aria-describedby="ld-font">Typeface<i aria-hidden="true">i</i></button><div class="seg" data-key="font" role="group" aria-label="Typeface" aria-describedby="ld-font"><button type="button" id="lab-font-grotesque" data-v="grotesque">Grotesque</button><button type="button" id="lab-font-script" data-v="script">Script</button><button type="button" id="lab-font-serif" data-v="serif">Serif</button><button type="button" id="lab-font-mono" data-v="mono">Mono</button></div><span class="vh" id="ld-font">The typeface for the sung words.</span></div>
-        <div class="row"><button type="button" class="k" data-tip="Follows voice: louder singing prints bigger and bolder. Fixed: every word the same size." aria-expanded="false" aria-describedby="ld-wordSize">Word size<i aria-hidden="true">i</i></button><div class="seg" data-key="wordSize" role="group" aria-label="Word size" aria-describedby="ld-wordSize"><button type="button" id="lab-wordSize-voice" data-v="voice">Follows voice</button><button type="button" id="lab-wordSize-fixed" data-v="fixed">Fixed</button></div><span class="vh" id="ld-wordSize">Follows voice: louder singing prints bigger and bolder. Fixed: every word the same size.</span></div>
-      </div>
-      <div class="pane" id="pane-motion" data-pane="motion" role="tabpanel" aria-labelledby="tab-motion" hidden>
-        <div class="row slide"><button type="button" class="k" data-tip="The whole print shakes with the kick and bass." aria-expanded="false" aria-describedby="ld-shake">Shake<i aria-hidden="true">i</i></button><input type="range" id="lab-shake" data-key="shake" min="0" max="1" step="0.05" aria-label="Shake" aria-describedby="ld-shake"><span class="lab-v" id="lab-shake-v"></span><span class="vh" id="ld-shake">The whole print shakes with the kick and bass.</span></div>
-        <div class="row slide"><button type="button" class="k" data-tip="The print tips back on each kick and sways with the bass." aria-expanded="false" aria-describedby="ld-tilt">Tilt<i aria-hidden="true">i</i></button><input type="range" id="lab-tilt" data-key="tilt" min="0" max="1" step="0.05" aria-label="Tilt" aria-describedby="ld-tilt"><span class="lab-v" id="lab-tilt-v"></span><span class="vh" id="ld-tilt">The print tips back on each kick and sways with the bass.</span></div>
-        <div class="row slide"><button type="button" class="k" data-tip="The bottom of the print darkens on each kick." aria-expanded="false" aria-describedby="ld-pulse">Glow<i aria-hidden="true">i</i></button><input type="range" id="lab-pulse" data-key="pulse" min="0" max="1" step="0.05" aria-label="Glow" aria-describedby="ld-pulse"><span class="lab-v" id="lab-pulse-v"></span><span class="vh" id="ld-pulse">The bottom of the print darkens on each kick.</span></div>
-        <div class="row slide"><button type="button" class="k" data-tip="Each colour jumps out of line on kicks, like a print slipping." aria-expanded="false" aria-describedby="ld-slip">Misprint<i aria-hidden="true">i</i></button><input type="range" id="lab-slip" data-key="slip" min="0" max="1" step="0.05" aria-label="Misprint" aria-describedby="ld-slip"><span class="lab-v" id="lab-slip-v"></span><span class="vh" id="ld-slip">Each colour jumps out of line on kicks, like a print slipping.</span></div>
-        <div class="row slide"><button type="button" class="k" data-tip="How many seconds of the song fit across the screen." aria-expanded="false" aria-describedby="ld-secs">Seconds<i aria-hidden="true">i</i></button><input type="range" id="lab-secs" data-key="secs" min="2" max="10" step="0.5" aria-label="Seconds" aria-describedby="ld-secs"><span class="lab-v" id="lab-secs-v"></span><span class="vh" id="ld-secs">How many seconds of the song fit across the screen.</span></div>
-      </div>
-      <div class="pane" id="pane-print" data-pane="print" role="tabpanel" aria-labelledby="tab-print" hidden>
-        <div class="row slide"><button type="button" class="k" data-tip="How dark everything prints." aria-expanded="false" aria-describedby="ld-ink">Ink<i aria-hidden="true">i</i></button><input type="range" id="lab-ink" data-key="ink" min="0.4" max="1.6" step="0.05" aria-label="Ink" aria-describedby="ld-ink"><span class="lab-v" id="lab-ink-v"></span><span class="vh" id="ld-ink">How dark everything prints.</span></div>
-        <div class="row"><button type="button" class="k" data-tip="The ear: each sound as wide as it spreads along your ear, measured from its own sound. Low sounds are wide, high ones narrow; breathy, noisy or wavering ones wider; loud ones spread upward. Loudness: louder is thicker, the old way." aria-expanded="false" aria-describedby="ld-thick">Thickness from<i aria-hidden="true">i</i></button><div class="seg" data-key="thick" role="group" aria-label="Thickness from" aria-describedby="ld-thick"><button type="button" id="lab-thick-ear" data-v="ear">The ear</button><button type="button" id="lab-thick-loud" data-v="loud">Loudness</button></div><span class="vh" id="ld-thick">The ear: each sound as wide as it spreads along your ear, measured from its own sound. Low sounds are wide, high ones narrow; breathy, noisy or wavering ones wider; loud ones spread upward. Loudness: louder is thicker, the old way.</span></div>
-        <div class="row slide"><button type="button" class="k" data-tip="The ear hears each sound most strongly at its pitch and more faintly either side. The print shows that as ink: solid where the sound is within 1 dB of its peak, lighter out to 3 dB, a faint haze out to 10 dB. This sets how strongly the lighter bands print; at 0 only the solid core prints." aria-expanded="false" aria-describedby="ld-edges">Faint edges<i aria-hidden="true">i</i></button><input type="range" id="lab-edges" data-key="edges" min="0" max="2" step="0.1" aria-label="Faint edges" aria-describedby="ld-edges"><span class="lab-v" id="lab-edges-v"></span><span class="vh" id="ld-edges">The ear hears each sound most strongly at its pitch and more faintly either side. The print shows that as ink: solid where the sound is within 1 dB of its peak, lighter out to 3 dB, a faint haze out to 10 dB. This sets how strongly the lighter bands print; at 0 only the solid core prints.</span></div>
-        <div class="row slide"><button type="button" class="k" data-tip="How thick the lines are." aria-expanded="false" aria-describedby="ld-weight">Thickness<i aria-hidden="true">i</i></button><input type="range" id="lab-weight" data-key="weight" min="0.5" max="1.8" step="0.05" aria-label="Thickness" aria-describedby="ld-weight"><span class="lab-v" id="lab-weight-v"></span><span class="vh" id="ld-weight">How thick the lines are.</span></div>
-        <div class="row slide"><button type="button" class="k" data-tip="White flecks over the print, where the ink missed the paper." aria-expanded="false" aria-describedby="ld-grain">Speckle<i aria-hidden="true">i</i></button><input type="range" id="lab-grain" data-key="grain" min="0" max="1" step="0.05" aria-label="Speckle" aria-describedby="ld-grain"><span class="lab-v" id="lab-grain-v"></span><span class="vh" id="ld-grain">White flecks over the print, where the ink missed the paper.</span></div>
-      </div>
-      <div class="pane" id="pane-cuts" data-pane="cuts" role="tabpanel" aria-labelledby="tab-cuts" hidden>
-        <p class="hint">Where each detector stops printing. The starting values are the detectors’ own settings.</p>
-        <h3 class="lab-h">Voice</h3>
-        <div class="row slide"><button type="button" class="k" data-tip="How sure the pitch tracker must be that it hears a sung note. Lower prints more of the voice, and also breaths and bleed from other instruments. Its own setting: 45%." aria-expanded="false" aria-describedby="ld-vConf">Certainty<i aria-hidden="true">i</i></button><input type="range" id="lab-vConf" data-key="vConf" min="0.15" max="0.8" step="0.05" aria-label="Certainty" aria-describedby="ld-vConf"><span class="lab-v" id="lab-vConf-v"></span><span class="vh" id="ld-vConf">How sure the pitch tracker must be that it hears a sung note. Lower prints more of the voice, and also breaths and bleed from other instruments. Its own setting: 45%.</span></div>
-        <div class="row slide"><button type="button" class="k" data-tip="Singing quieter than this, as a share of the song’s loud singing, doesn’t print. Its own setting: 4%." aria-expanded="false" aria-describedby="ld-vFloor">Quietest<i aria-hidden="true">i</i></button><input type="range" id="lab-vFloor" data-key="vFloor" min="0.01" max="0.15" step="0.01" aria-label="Quietest" aria-describedby="ld-vFloor"><span class="lab-v" id="lab-vFloor-v"></span><span class="vh" id="ld-vFloor">Singing quieter than this, as a share of the song’s loud singing, doesn’t print. Its own setting: 4%.</span></div>
-        <div class="row slide"><button type="button" class="k" data-tip="Bits of voice shorter than this don’t print. Its own setting: 90 ms." aria-expanded="false" aria-describedby="ld-vRun">Shortest<i aria-hidden="true">i</i></button><input type="range" id="lab-vRun" data-key="vRun" min="0" max="300" step="10" aria-label="Shortest" aria-describedby="ld-vRun"><span class="lab-v" id="lab-vRun-v"></span><span class="vh" id="ld-vRun">Bits of voice shorter than this don’t print. Its own setting: 90 ms.</span></div>
-        <h3 class="lab-h">Bass</h3>
-        <div class="row slide"><button type="button" class="k" data-tip="Bass quieter than this, as a share of the song’s loud bass, doesn’t print. Its own setting: 8%." aria-expanded="false" aria-describedby="ld-bFloor">Quietest<i aria-hidden="true">i</i></button><input type="range" id="lab-bFloor" data-key="bFloor" min="0.02" max="0.3" step="0.01" aria-label="Quietest" aria-describedby="ld-bFloor"><span class="lab-v" id="lab-bFloor-v"></span><span class="vh" id="ld-bFloor">Bass quieter than this, as a share of the song’s loud bass, doesn’t print. Its own setting: 8%.</span></div>
-        <h3 class="lab-h">Notes</h3>
-        <div class="row slide"><button type="button" class="k" data-tip="A note keeps printing while the note detector is at least this sure it is still sounding. Lower lets notes ring on; higher cuts them short. Its own setting: 30%." aria-expanded="false" aria-describedby="ld-hold">Hold<i aria-hidden="true">i</i></button><input type="range" id="lab-hold" data-key="hold" min="0.15" max="0.6" step="0.05" aria-label="Hold" aria-describedby="ld-hold"><span class="lab-v" id="lab-hold-v"></span><span class="vh" id="ld-hold">A note keeps printing while the note detector is at least this sure it is still sounding. Lower lets notes ring on; higher cuts them short. Its own setting: 30%.</span></div>
-        <div class="row slide"><button type="button" class="k" data-tip="Notes shorter than this don’t print. Its own setting: 100 ms." aria-expanded="false" aria-describedby="ld-noteMin">Shortest<i aria-hidden="true">i</i></button><input type="range" id="lab-noteMin" data-key="noteMin" min="50" max="300" step="10" aria-label="Shortest" aria-describedby="ld-noteMin"><span class="lab-v" id="lab-noteMin-v"></span><span class="vh" id="ld-noteMin">Notes shorter than this don’t print. Its own setting: 100 ms.</span></div>
-        <h3 class="lab-h">Drums</h3>
-        <div class="row slide"><button type="button" class="k" data-tip="How sure the drum detector must be before a hit prints, as a multiple of its own settings. Lower prints quieter, ghostlier hits." aria-expanded="false" aria-describedby="ld-drumK">Certainty<i aria-hidden="true">i</i></button><input type="range" id="lab-drumK" data-key="drumK" min="0.6" max="1.6" step="0.05" aria-label="Certainty" aria-describedby="ld-drumK"><span class="lab-v" id="lab-drumK-v"></span><span class="vh" id="ld-drumK">How sure the drum detector must be before a hit prints, as a multiple of its own settings. Lower prints quieter, ghostlier hits.</span></div>
-        <h3 class="lab-h">Edges</h3>
-        <div class="row slide"><button type="button" class="k" data-tip="A sound rougher than this starts to get a jagged edge. Roughness is the grating buzz of beating tones, in asper. Default: 0.10." aria-expanded="false" aria-describedby="ld-rough0">Rough from<i aria-hidden="true">i</i></button><input type="range" id="lab-rough0" data-key="rough0" min="0.02" max="0.4" step="0.02" aria-label="Rough from" aria-describedby="ld-rough0"><span class="lab-v" id="lab-rough0-v"></span><span class="vh" id="ld-rough0">A sound rougher than this starts to get a jagged edge. Roughness is the grating buzz of beating tones, in asper. Default: 0.10.</span></div>
-        <div class="row slide"><button type="button" class="k" data-tip="A sound sharper than this starts to get a jagged edge. Sharpness is how much of it is high and piercing, in acum. Default: 1.75." aria-expanded="false" aria-describedby="ld-sharp0">Sharp from<i aria-hidden="true">i</i></button><input type="range" id="lab-sharp0" data-key="sharp0" min="1" max="3" step="0.05" aria-label="Sharp from" aria-describedby="ld-sharp0"><span class="lab-v" id="lab-sharp0-v"></span><span class="vh" id="ld-sharp0">A sound sharper than this starts to get a jagged edge. Sharpness is how much of it is high and piercing, in acum. Default: 1.75.</span></div>
-        <h3 class="lab-h">Lines</h3>
-        <div class="row slide"><button type="button" class="k" data-tip="A voice or bass line that jumps more than this many semitones at once starts a new stroke. Default: 4." aria-expanded="false" aria-describedby="ld-leap">Line break<i aria-hidden="true">i</i></button><input type="range" id="lab-leap" data-key="leap" min="1" max="12" step="0.5" aria-label="Line break" aria-describedby="ld-leap"><span class="lab-v" id="lab-leap-v"></span><span class="vh" id="ld-leap">A voice or bass line that jumps more than this many semitones at once starts a new stroke. Default: 4.</span></div>
-      </div>
-      <div class="pane" id="pane-layers" data-pane="layers" role="tabpanel" aria-labelledby="tab-layers" hidden>
-        <div class="ink-grid">
-          <button class="ink" type="button" data-layer="bass" aria-pressed="true" style="--c: var(--c-bass)">
-            <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 15c3-5 5-5 8 0s5 5 8 0 4-5 6-2v5c-2-3-3-3-6 2s-5 5-8 0-5-5-8 0z" fill="currentColor"/></svg>
-            <span class="nm">Bass</span></button>
-          <button class="ink" type="button" data-layer="kick" aria-pressed="true" style="--c: var(--drum)">
-            <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><defs><radialGradient id="ico-kick"><stop offset="0" stop-color="currentColor" stop-opacity=".9"/><stop offset=".5" stop-color="currentColor" stop-opacity=".45"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></radialGradient></defs><circle cx="13" cy="13" r="12.5" fill="url(#ico-kick)"/></svg>
-            <span class="nm">Kick</span></button>
-          <button class="ink" type="button" data-layer="snare" aria-pressed="true" style="--c: var(--drum)">
-            <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><path d="M13 7.5l2 3.6 3.9-1-1.6 3.7 3 2.6-4 .6-.4 4-2.9-2.8-3.2 2.4.1-4.1-3.9-1.1 3.4-2.2-1.2-3.9 3.8 1.5z" fill="currentColor"/><circle cx="4" cy="6" r="1.3" fill="currentColor"/><circle cx="22.5" cy="5" r="1" fill="currentColor"/><circle cx="21.5" cy="21.5" r="1.4" fill="currentColor"/><circle cx="5" cy="21" r="0.9" fill="currentColor"/></svg>
-            <span class="nm">Snare / clap</span></button>
-          <button class="ink" type="button" data-layer="hats" aria-pressed="true" style="--c: var(--drum)">
-            <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><circle cx="7.5" cy="8" r="1.9" fill="currentColor"/><circle cx="10.2" cy="6.4" r="0.9" fill="currentColor"/><circle cx="5.2" cy="6.1" r="0.8" fill="currentColor"/><circle cx="9.8" cy="10.4" r="0.9" fill="currentColor"/><circle cx="5" cy="10" r="0.7" fill="currentColor"/><circle cx="7.8" cy="5" r="0.6" fill="currentColor"/><circle cx="14.5" cy="17" r="0.9" fill="currentColor"/><circle cx="16.4" cy="15.2" r="0.6" fill="currentColor"/><circle cx="13.2" cy="19.6" r="0.6" fill="currentColor"/><circle cx="17.2" cy="18.6" r="0.7" fill="currentColor"/><circle cx="19" cy="16.4" r="0.6" fill="currentColor"/><circle cx="20.6" cy="18.2" r="0.55" fill="currentColor"/><circle cx="22.2" cy="16.9" r="0.5" fill="currentColor"/><circle cx="23.6" cy="18.4" r="0.45" fill="currentColor"/><circle cx="18.4" cy="20.4" r="0.5" fill="currentColor"/><circle cx="15.6" cy="21.2" r="0.45" fill="currentColor"/></svg>
-            <span class="nm">Hats &amp; cymbals</span></button>
-          <button class="ink" type="button" data-layer="toms" aria-pressed="true" style="--c: var(--drum)">
-            <svg class="drum" viewBox="0 0 26 26" aria-hidden="true"><circle cx="12" cy="13.5" r="7.2" fill="currentColor"/><circle cx="21.4" cy="8.6" r="1.6" fill="currentColor"/><circle cx="21" cy="19.2" r="1.1" fill="currentColor"/></svg>
-            <span class="nm">Toms</span></button>
-          <button class="ink" type="button" data-layer="voice" aria-pressed="true" style="--c: var(--c-voice)">
-            <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M1.5 17c4-1 5-9 9.5-9s4.5 7 8.5 7c2.6 0 3.6-2.4 5-4v4c-1.6 2-3 4-5.2 4-4.5 0-5-7-8.4-7S6 19 1.5 21z" fill="currentColor"/></svg>
-            <span class="nm">Voice</span></button>
-          <button class="ink" type="button" data-layer="guitar" aria-pressed="true" style="--c: var(--c-guitar)">
-            <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 6.5h3.5L24 11.6v2.8L5.5 19.5H2z" fill="currentColor"/></svg>
-            <span class="nm">Guitar</span></button>
-          <button class="ink" type="button" data-layer="piano" aria-pressed="true" style="--c: var(--c-piano)">
-            <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M2 5h22v16H2z" fill="currentColor" opacity=".35"/><path d="M6 5h2.6v9H6zM11.2 5h2.6v9h-2.6zM16.4 5H19v9h-2.6z" fill="currentColor"/><path d="M2 5h22v16H2zM8.6 14v7M13.8 14v7M19 14v7" fill="none" stroke="currentColor" stroke-width="1.2"/></svg>
-            <span class="nm">Piano</span></button>
-          <button class="ink" type="button" data-layer="synths" aria-pressed="true" style="--c: var(--c-synth)">
-            <svg viewBox="0 0 26 26" aria-hidden="true"><path d="M1.5 13C8 12.6 13 6 24.5 6v14C13 20 8 13.4 1.5 13z" fill="currentColor" opacity=".85"/></svg>
-            <span class="nm">Synths &amp; strings</span></button>
-          <button class="ink" type="button" data-layer="words" aria-pressed="true" style="--c: var(--c-words)">
-            <svg viewBox="0 0 26 26" aria-hidden="true"><text x="13" y="18" text-anchor="middle" font-family="Bricolage Grotesque, system-ui, sans-serif" font-weight="700" font-size="13" fill="currentColor">Aa</text></svg>
-            <span class="nm">Words</span></button>
-        </div>
-      </div>
-      <div class="pane" id="pane-analysis" data-pane="analysis" role="tabpanel" aria-labelledby="tab-analysis" hidden>
-        <div class="where">
-        <h2 class="eyebrow" id="lk-where2">Where songs are analysed</h2>
-        <div class="where-cards" role="group" aria-labelledby="lk-where2">
-          <button type="button" class="where-card" data-where="here" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-monitor"/></svg><span class="wc-t">This computer</span><span class="wc-s">Checking…</span></button>
-          <button type="button" class="where-card" data-where="server" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-cloud"/></svg><span class="wc-t">The server</span><span class="wc-s"></span></button>
-        </div>
-        <dl class="where-spec" hidden></dl>
-        <p class="where-note" aria-live="polite"><svg class="i" aria-hidden="true" hidden><use href="#i-triangle-alert"/></svg><span></span></p>
-      </div>
-      </div>
-    <div class="lab-foot"><button class="btn btn-small btn-quiet" id="labReset" type="button">Reset all</button></div>
-    <div class="bubble" id="bubble" role="tooltip" hidden></div>
-  </section>
-
-  <section class="splash" id="splash" aria-labelledby="splashTitle">
-    <div class="splash-in">
-      <h1 class="title" id="splashTitle" data-text="Pitchscape">Pitchscape</h1>
-      <p class="lede">See a song as it plays: each instrument printed in its own ink, higher notes higher up, scrolling past as you listen.</p>
-      <div class="pick">
-        <span class="btn btn-primary file-btn">Load a song from this device<input type="file" id="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.oga,.flac,.opus" aria-label="Load a song from this device"></span>
-        <form class="link-row" id="linkForm"><input type="url" id="linkIn" inputmode="url" autocomplete="off" spellcheck="false" placeholder="Or paste a link to a song" aria-label="Link to a song"><button class="btn" type="submit">Open</button></form>
-        <p class="hint">A link to the audio file itself, like one ending in .mp3, or a Google Drive or Dropbox file shared with anyone who has the link. YouTube and Spotify links won't work.</p>
-      </div>
-      <h2 class="eyebrow">Or try one</h2>
-      <div class="tries">
-        <button class="try" type="button" id="demoBtn">Demo song <span>made on this device, opens at once</span></button>
-        <button class="try" type="button" data-url="https://archive.org/download/bs-out-of-it-remastered/01%20Dropping%20Out%20of%20School.mp3">Dropping Out of School <span>Brad Sucks</span></button>
-        <button class="try" type="button" data-url="https://archive.org/download/JoshWoodwardSelection/20-JoshWoodward-HereToday-01-Incoherent.mp3">Incoherent <span>Josh Woodward</span></button>
-        <button class="try" type="button" data-url="https://archive.org/download/OpenGoldbergVariations/Kimiko%20Ishizaka%20-%20J.S.%20Bach-%20-Open-%20Goldberg%20Variations%2C%20BWV%20988%20%28Piano%29%20-%2001%20Aria.mp3">Goldberg Variations: Aria <span>Kimiko Ishizaka</span></button>
-        <button class="try" type="button" data-url="https://archive.org/download/jamendo-140090/01-1165390-Gigatop%20Arthur-Invincible.mp3">Invincible <span>Gigatop Arthur</span></button>
-      </div>
-      <div class="where" id="whereRow">
-        <h2 class="eyebrow" id="lk-where">Where songs are analysed</h2>
-        <div class="where-cards" role="group" aria-labelledby="lk-where">
-          <button type="button" class="where-card" data-where="here" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-monitor"/></svg><span class="wc-t">This computer</span><span class="wc-s">Checking…</span></button>
-          <button type="button" class="where-card" data-where="server" aria-pressed="false"><svg class="i" aria-hidden="true"><use href="#i-cloud"/></svg><span class="wc-t">The server</span><span class="wc-s"></span></button>
-        </div>
-        <dl class="where-spec" hidden></dl>
-        <p class="where-note" aria-live="polite"><svg class="i" aria-hidden="true" hidden><use href="#i-triangle-alert"/></svg><span></span></p>
-      </div>
-      <div class="row" id="keyRow"><span class="k-static" id="lk-key">Server key</span><div class="key-box"><span class="key-saved" id="keySaved" hidden>Saved on this device. <button type="button" class="key-change" id="keyChange">Change</button></span><input type="password" id="lab-key" autocomplete="off" spellcheck="false" placeholder="passphrase" aria-labelledby="lk-key"></div></div>
-      <button class="btn btn-small btn-quiet splash-back" type="button" id="splashBack" hidden>Back to the song</button>
-    </div>
-  </section>
-</main>
-<audio id="player" preload="auto" playsinline></audio>
-
-<script id="dsp">
-/*DSP_SOURCE*/
-</script>
-<script>
-(function () {
+export function start() {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var cv = $('cv'), ctx = cv.getContext('2d'), plate = $('plate'), audio = $('player');
@@ -1286,13 +932,23 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     });
   }
 
-  var statusEl = $('status'), statusText = $('statusText'), statusBar = $('statusBar'), statusNote = $('statusNote');
+  /* a song loading (Progress.svelte): what is happening, how far, a short note, and the analysis's steps so far */
   function showStatus(label, p, note) {
-    statusEl.hidden = false; statusText.textContent = label; statusBar.style.width = Math.round(clamp(p, 0, 1) * 100) + '%';
-    statusBar.parentNode.setAttribute('aria-valuenow', String(Math.round(p * 100)));
-    if (note !== undefined) { statusNote.textContent = note || ''; statusNote.hidden = !note; }
+    var was = ui.status || { note: '', steps: null };
+    ui.status = { label: label, p: clamp(p, 0, 1), note: note !== undefined ? note || '' : was.note, song: $('trackName').textContent || '', steps: was.steps };
   }
-  function hideStatus() { statusEl.hidden = true; statusNote.hidden = true; }
+  function hideStatus() { ui.status = null; }
+  /* each step inked once it has started, the latest turning; the model download is a step only when analysing here */
+  var STEPS = [['models', 'models'], ['stems', 'stems'], ['drums', 'drums'], ['notes', 'notes'], ['bass', 'bass'], ['voice', 'voice'], ['words', 'lyrics'], ['tone', 'tone'], ['width', 'width']];
+  function showStep(key, here) {
+    if (!ui.status) return;
+    var seen = {}, was = ui.status.steps || [];
+    was.forEach(function (s) { if (s.state) seen[s.k] = true; });
+    if (key) seen[key] = true;
+    ui.status.steps = STEPS.filter(function (st) { return st[0] !== 'models' || here || seen.models; }).map(function (st) {
+      return { k: st[0], label: st[1], state: st[0] === key ? 'now' : seen[st[0]] ? 'on' : '' };
+    });
+  }
 
   function wavBlob(L, R, sr) {
     var n = L.length, buf = new ArrayBuffer(44 + n * 4), v = new DataView(buf), o = 44, i;
@@ -1310,7 +966,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     S.busy = true; audio.pause(); setPlayable(false);
     S.ana = null; S.dur = 0; S.neverPlayed = true; S.previewT = 0; applyWordTimes([], []);
     seek.value = labSeek.value = '0'; tNow.textContent = '0:00'; tDur.textContent = '0:00'; S.dirty = true;
-    say(''); showStatus(label, 0.01);
+    say(''); hideStatus(); showStatus(label, 0.01);
     return ++loadSeq;
   }
   function finishLoad(res, name, key, lyrics, previewT) {
@@ -1351,7 +1007,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
         if (!r.ok) throw new Error('That link answered ' + r.status + '.');
         return r.blob();
       }, function () {
-        throw new Error('This page can\u2019t read that link itself (its site doesn\u2019t allow other pages to). Switch Analyse on to the server, which can, or download the file and load it.');
+        throw new Error('This page can\u2019t read that link itself (its site doesn\u2019t allow other pages to). Choose the server, which can, or download the file and load it.');
       }).then(function (blob) {
         if (my !== loadSeq) return;
         openSong(blob, linkName(url) + '.mp3', title, my, function () { loadLink(url, title); }, false);
@@ -1373,7 +1029,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     }).catch(function (e) {
       if (my !== loadSeq) return;
       fail((e && e.message) || "Couldn't open that link.");
-      if (e && e.needsKey) { S.retry = function () { loadLink(url, title); }; keyIn.focus(); }
+      if (e && e.needsKey) { S.retry = function () { loadLink(url, title); }; ui.askKey++; }
     });
   }
 
@@ -1460,7 +1116,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     }).catch(function (e) {
       if (my !== loadSeq) return;
       fail((e && e.message) || "Couldn't open that file.");
-      if (e && e.needsKey) { S.retry = retry; keyIn.focus(); }
+      if (e && e.needsKey) { S.retry = retry; ui.askKey++; }
     });
   }
   /* the song's name from its tags (title and artist), or the file's name when it has none */
@@ -1475,7 +1131,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       var key = serverKey();
       if (!API) throw new Error('This page has no analysis server set up.');
       if (!key) throw keyError('Add the server key below and this song will be analysed.');
-      showStatus(label, 0.05, 'The first time takes a few minutes. After that this song opens at once.');
+      showStatus(label, 0.05, 'first time only, a few minutes');
       return fetch(API + '/analyze', { method: 'POST', headers: { 'X-Pitchscape-Key': key }, body: fd }).then(function (r) {
         if (r.status === 401) throw keyError('The server key is wrong. Fix it below and this song will be analysed.');
         /* a link the server would not or could not fetch: its reason, in words */
@@ -1495,7 +1151,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
               if (my !== loadSeq) { resolve(null); return; }
               if (p.status === 'done' && p.pack) resolve(p.pack);
               else if (p.status === 'failed') reject(new Error('The analysis failed: ' + String(p.error || 'no reason given').replace(/\.?\s*$/, '.')));
-              else { if (p.stage) lastStage = p.stage; var st = stageOf(p.stage); showStatus(st[1], st[2]); setTimeout(poll, 3000); }
+              else { if (p.stage) lastStage = p.stage; var st = stageOf(p.stage); showStatus(st[1], st[2]); showStep(st[0]); setTimeout(poll, 3000); }
             }, function () { setTimeout(poll, 6000); });
           }
           showStatus('Starting the server', 0.1); setTimeout(poll, 2500);
@@ -1521,14 +1177,15 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     var sizes = fetch(MODELS + 'manifest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) {
       var b = 0; for (var k in m || {}) b += m[k].bytes || 0; HERE.mb = Math.round(b / 1e6);
     }, function () {});
-    var gpu = !navigator.gpu ? Promise.resolve(HERE.why = 'this browser has no WebGPU, which analysing here needs (Chrome and Edge on a computer have it)')
+    /* why not, short enough for the card */
+    var gpu = !navigator.gpu ? Promise.resolve(HERE.why = 'No WebGPU: use Chrome or Edge')
       : navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }).then(function (ad) {
-        if (!ad) { HERE.why = 'WebGPU found no graphics card it can use'; return; }
+        if (!ad) { HERE.why = 'No usable graphics card'; return; }
         var info = ad.info || {};
-        if (info.isFallbackAdapter || ad.isFallbackAdapter) { HERE.why = 'WebGPU has only a software stand-in for a graphics card, far too slow'; return; }
+        if (info.isFallbackAdapter || ad.isFallbackAdapter) { HERE.why = 'Software graphics only: too slow'; return; }
         HERE.gpu = gpuName(info.vendor, info.architecture);
         HERE.ok = true;
-      }, function (e) { HERE.why = 'WebGPU would not start (' + ((e && e.message) || e) + ')'; });
+      }, function () { HERE.why = 'WebGPU would not start'; });
     return Promise.all([gpu, sizes]).then(function () { HERE.done = true; });
   })();
   /* WebGPU names the card's maker and design in lower case ('nvidia', 'rdna-3'): written as people know them */
@@ -1551,53 +1208,19 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   /* how long this computer took last time, per second of song (for an estimate before a song starts) */
   function hereRate() { var r = store.get('pitchscape:hereRate'); return r && r > 0 ? r : 0; }
   function fmtSecs(s) { return s < 90 ? Math.max(5, Math.round(s / 5) * 5) + ' s' : Math.round(s / 60) + ' min'; }
+  /* what the where-cards (Where.svelte) show */
   function whereUI() {
-    var w = whereNow(), small = HERE.phone || HERE.tablet, warn = false, n = '', spec = [];
-    var hereSub = !HERE_READY ? 'Coming soon' : !HERE.done ? 'Checking…' : !HERE.ok ? 'Not available' : small ? 'Slow on a phone' : 'Nothing uploaded';
-    var serverSub = LOCAL ? 'This machine' : store.get('pitchscape:key') ? 'Key saved' : 'Needs a key';
-    document.querySelectorAll('.where-card').forEach(function (b) {
-      var here = b.dataset.where === 'here';
-      b.setAttribute('aria-pressed', String(b.dataset.where === w));
-      b.querySelector('.wc-s').textContent = here ? hereSub : serverSub;
-      b.classList.toggle('off', here && HERE_READY && HERE.done && !HERE.ok);
-      if (here) b.disabled = !HERE_READY;
-    });
-    if (w === 'here' && HERE.done && !HERE.ok) { warn = true; n = 'This computer can’t: ' + HERE.why + '. Pick the server.'; }
-    else if (w === 'here' && HERE.ok) {
-      spec.push(['GPU', HERE.gpu]);
-      if (HERE.mem) spec.push(['Memory', HERE.mem >= 8 ? '8 GB+' : HERE.mem + ' GB']);
-      if (HERE.cores) spec.push(['Cores', String(HERE.cores)]);
-      if (HERE.mb) spec.push(['Models', HERE.mb + ' MB, once']);
-      if (hereRate()) spec.push(['Last time', fmtSecs(hereRate() * 210) + ' a song']);
-      if (small) { warn = true; n = 'On a phone or tablet the server is much quicker, and spares you the model download.'; }
-      else n = 'The first song downloads the models, kept for next time. It shows how long it will take once it starts.';
-    } else if (w === 'server') {
-      n = 'Each song is uploaded and takes a few minutes the first time; after that it opens at once, on any device.';
-      if (HERE_READY && HERE.ok && !small) n += ' This computer could do it too.';
-    }
-    document.querySelectorAll('.where-spec').forEach(function (dl) {
-      dl.hidden = !spec.length;
-      dl.innerHTML = spec.map(function (r) { return '<div><dt>' + r[0] + '</dt><dd></dd></div>'; }).join('');
-      dl.querySelectorAll('dd').forEach(function (dd, i) { dd.textContent = spec[i][1]; });
-    });
-    document.querySelectorAll('.where-note').forEach(function (p) {
-      p.classList.toggle('warn', warn);
-      p.querySelector('.i').hidden = !warn;
-      p.querySelector('span').textContent = n;
-      p.hidden = !n;
-    });
-    $('keyRow').hidden = LOCAL || w === 'here';
+    ui.where = whereNow(); ui.local = LOCAL; ui.hasKey = !!store.get('pitchscape:key');
+    ui.here = { ready: HERE_READY, done: HERE.done, ok: HERE.ok, gpu: HERE.gpu, why: HERE.why, small: HERE.phone || HERE.tablet, mem: HERE.mem, cores: HERE.cores, mb: HERE.mb };
   }
-  document.querySelectorAll('.where-card').forEach(function (b) {
-    b.addEventListener('click', function () { store.set('pitchscape:where', b.dataset.where); whereUI(); });
-  });
+  api.setWhere = function (w) { store.set('pitchscape:where', w); whereUI(); };
   whereUI(); hereReady.then(whereUI);
 
   /* the song analysed here: decoded by the browser (as it is played), then src/pipeline in a Worker. {pack, sha} */
   function analyseHere(blob, fileName, sha, my) {
     return hereReady.then(function () {
-      if (!HERE.ok) throw new Error('This computer can’t analyse songs: ' + HERE.why + '. Switch Analyse on to the server.');
-      showStatus('Reading the audio', 0.02, '');
+      if (!HERE.ok) throw new Error('This computer can’t analyse songs (' + HERE.why.toLowerCase() + '). Choose the server instead.');
+      showStatus('Reading the audio', 0.02, ''); showStep('', true);
       return blob.arrayBuffer();
     }).then(function (buf) {
       return new OfflineAudioContext(2, 1, 44100).decodeAudioData(buf.slice(0)).then(function (ab) {
@@ -1608,14 +1231,14 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
         var w = new Worker(new URL('pipeline/analyse.worker.mjs', location.href), { type: 'module' });
         var t0 = performance.now(), tStems = 0, got = {};
         function stop(v, e) { w.terminate(); if (e) reject(e); else resolve(v); }
-        w.onerror = function (ev) { stop(null, new Error('The analysis here stopped: ' + (ev.message || 'its worker would not start') + '. Switch Analyse on to the server.')); };
+        w.onerror = function (ev) { stop(null, new Error('The analysis here stopped: ' + (ev.message || 'its worker would not start') + '. Choose the server instead.')); };
         w.onmessage = function (ev) {
           var m = ev.data;
           if (my !== loadSeq) { stop(null); return; }
           if (m.download) {
             got[m.download.name] = m.download;
             var a2 = 0, b2 = 0; for (var k in got) { a2 += got[k].got; b2 += got[k].total; }
-            showStatus('Downloading the analysis models (once)', 0.02 + 0.08 * a2 / Math.max(1, b2), Math.round(a2 / 1e6) + ' of ' + Math.round(b2 / 1e6) + ' MB, kept on this device for next time.');
+            showStatus('Fetching the models', 0.02 + 0.08 * a2 / Math.max(1, b2), Math.round(a2 / 1e6) + ' / ' + Math.round(b2 / 1e6) + ' MB · once'); showStep('models', true);
           } else if (m.progress) {
             var st = stageOf(m.progress), k2 = /^stems: (\d+)\/(\d+)/.exec(m.progress), note = '';
             if (k2) {
@@ -1624,15 +1247,16 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
               if (done >= 2) {
                 var per = (performance.now() - tStems) / 1000 / (done - 1), left = per * (all - done);
                 var total = hereRate() * a.dur, sofar = (performance.now() - t0) / 1000;
-                note = 'About ' + fmtSecs(left) + ' left for this step' + (total > sofar ? ', about ' + fmtSecs(Math.max(left, total - sofar)) + ' for the whole song.' : '.');
-                if (left > 180) note += ' This computer is slow at this; the server may be quicker.';
+                note = (total > sofar ? 'about ' + fmtSecs(Math.max(left, total - sofar)) : 'about ' + fmtSecs(left) + ' for this step') + ' left';
+                if (left > 180) note += ' · the server may be quicker';
               }
               showStatus(st[1], 0.1 + 0.45 * done / all, note);
-            } else showStatus(st[1], st[2], '');
+            } else showStatus(st[1], st[2]);
+            showStep(st[0], true);
           } else if (m.pack) {
             store.set('pitchscape:hereRate', (performance.now() - t0) / 1000 / Math.max(1, a.dur));
             stop(m.pack);
-          } else if (m.error) stop(null, new Error('The analysis here failed: ' + m.error + ' Switch Analyse on to the server to analyse it there.'));
+          } else if (m.error) stop(null, new Error('The analysis here failed: ' + m.error + ' Choose the server to analyse it there.'));
         };
         w.postMessage({ bytes: a.buf, name: fileName, mix: a.mix, models: MODELS }, [a.buf, a.mix[0].buffer, a.mix[1].buffer]);
       });
@@ -1670,33 +1294,15 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   }
   function b64f32(b64) { var bin = atob(b64), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Float32Array(u.buffer); }
   /* the splash: pick a song. It opens first, and again from Change song; Back returns to the song that was open */
-  var splash = $('splash');
-  function showSplash() {
-    audio.pause(); closePanels(); splash.hidden = false;
-    $('splashBack').hidden = !S.ana;
-  }
-  function hideSplash() { splash.hidden = true; say(''); wakeHud(); }
+  /* (Splash.svelte) */
+  function showSplash() { audio.pause(); closePanels(); ui.hasSong = !!S.ana; ui.splash = true; }
+  function hideSplash() { ui.splash = false; say(''); wakeHud(); }
   $('changeSong').addEventListener('click', showSplash);
-  $('splashBack').addEventListener('click', function () { hideSplash(); playBtn.focus({ preventScroll: true }); });
-  $('demoBtn').addEventListener('click', function () { hideSplash(); loadDemo(); });
-  splash.querySelectorAll('[data-url]').forEach(function (b) {
-    b.addEventListener('click', function () { hideSplash(); loadLink(b.dataset.url, b.firstChild.textContent.trim()); });
-  });
-  $('linkForm').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var v = $('linkIn').value.trim();
-    if (!/^https?:\/\/\S+$/i.test(v)) { say('Paste a link that starts with https://', true); return; }
-    hideSplash(); loadLink(v);
-  });
-  /* if tapping Load opens nothing (some in-app viewers block file pickers), say so instead of failing silently */
-  var fileInput = $('file'), pickTimer = null, pickLeft = false;
-  fileInput.addEventListener('click', function () {
-    pickLeft = false; clearTimeout(pickTimer);
-    pickTimer = setTimeout(function () { if (!pickLeft) say("No file picker? Open this page in your browser to load songs.", true); }, 2500);
-  });
-  window.addEventListener('blur', function () { pickLeft = true; });
-  document.addEventListener('visibilitychange', function () { if (document.hidden) pickLeft = true; });
-  fileInput.addEventListener('change', function () { clearTimeout(pickTimer); var f = this.files && this.files[0]; this.value = ''; if (f) { hideSplash(); loadFile(f); } });
+  api.back = function () { hideSplash(); playBtn.focus({ preventScroll: true }); };
+  api.demo = function () { hideSplash(); loadDemo(); };
+  api.link = function (url, title) { hideSplash(); loadLink(url, title); };
+  api.file = function (f) { hideSplash(); loadFile(f); };
+  api.say = say;
 
   /* ink toggles */
   document.querySelectorAll('.ink').forEach(function (b) {
@@ -1779,18 +1385,13 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   tabBtns.forEach(function (t) { t.addEventListener('click', function () { showTab(t.dataset.tab); }); });
   showTab(labPanel.querySelector('[data-tab="' + store.get('pitchscape:tab') + '"]') ? store.get('pitchscape:tab') : 'colour');
   labUI();
-  /* the key is typed once: after that it shows as a line, and the field (and the keyboard) only comes back on Change */
-  var keyIn = $('lab-key'), keySaved = $('keySaved');
-  function keyUI() { var has = !!store.get('pitchscape:key'); keySaved.hidden = !has; keyIn.hidden = has; }
-  keyIn.value = store.get('pitchscape:key') || ''; keyUI();
-  $('keyChange').addEventListener('click', function () { keySaved.hidden = true; keyIn.hidden = false; keyIn.focus(); keyIn.select(); });
-  keyIn.addEventListener('blur', function () { setTimeout(keyUI, 0); });
-  keyIn.addEventListener('change', function () {
-    var v = keyIn.value.trim(); if (v) store.set('pitchscape:key', v); else store.del('pitchscape:key');
-    keyUI();
+  /* the server key, typed on the splash (Where.svelte); a song waiting for it is loaded as soon as it is in */
+  api.setKey = function (v) {
+    if (v) store.set('pitchscape:key', v); else store.del('pitchscape:key');
+    whereUI();
     if (v && S.retry) { var again = S.retry; S.retry = null; hideSplash(); again(); return; }
     say(v ? 'Server key saved.' : 'Server key removed.');
-  });
+  };
   if (L.font !== 'grotesque') ensureFont(L.font).then(function () { layoutWords(); S.dirty = true; });
 
   if (window.ResizeObserver) new ResizeObserver(resize).observe(cv); else window.addEventListener('resize', resize);
@@ -1799,5 +1400,4 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   requestAnimationFrame(loop);
   /* this computer's own server needs no key */
   apiReady.then(whereUI);
-})();
-</script>
+}

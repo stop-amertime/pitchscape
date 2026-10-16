@@ -9,7 +9,7 @@ A phone-friendly music visualiser in a risograph print style. A song is analysed
 notes, bass, voice, tone, width, lyrics) into a **pack** (JSON); the page plays the song and draws the pack as a
 scrolling print: time runs right to left past a "now" line, pitch runs up the screen, each instrument in its own ink.
 
-- Page: `src/app.html` (+ `src/dsp.js`), built to `docs/index.html`, served by GitHub Pages
+- Page: `src/page/` (Vite + Svelte, + `src/dsp.js`), built to `docs/`, served by GitHub Pages
   (https://stop-amertime.github.io/pitchscape/ redirects to `docs/`).
 - Cloud server: Modal (`server/modal_app.py`), GPU (L4), running `server/pipeline.py`.
 - Local server: `server/local.py` (`Pitchscape.bat` on Windows) runs the same pipeline and serves the page.
@@ -61,7 +61,7 @@ Corollaries the user has stated or endorsed:
 
 ## The flow, end to end
 
-1. **Load** (`openSong` in app.html): the page hashes the file (SHA-256) and looks for its analysis: IndexedDB
+1. **Load** (`openSong` in src/page/legacy.js): the page hashes the file (SHA-256) and looks for its analysis: IndexedDB
    (`pack:<pipeline>:<sha>`), then `GET /packs/<sha>`. A link (`loadLink`) goes straight to `POST /analyze` with `url`:
    the server downloads it (`server/fetch.py`: public addresses only, checked at every redirect, 80 MB, 60 s; Drive and
    Dropbox share links become download links), keeps it in the library and answers with its `sha256`; the page then
@@ -182,19 +182,73 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
 - Learned: ONNX Runtime's DirectML provider returns wrong numbers on htdemucs_6s (-32 dB against the CPU provider),
   so Node on Windows uses its WebGPU provider. Chrome with `--user-data-dir` on a Windows 8.3 short path
   (`ADMT9N~1`) cannot open CacheStorage. Port 8770 is refused on this laptop.
+- Width (`ear.mjs`, `ear.dsp.mjs`): `ears(st22, gain, segs, leadHz, bassHz, rt)` is Ear, pack_curves and ear_line.
+  Each ISO 532-2 band only reaches the grid bins its own coarser FFT lands on, 90 of the 2049, so a pattern is kept
+  as those 90 bins (Python: 2049 x frames float32 per stem, enough to run this laptop out of memory once). Each stem
+  is cut into runs of frames; a worker makes its run's pattern and measures every width asked for there, so no
+  pattern is held whole. Float32 where numpy is (|X| in complex64, the grid's cumsum, the per-ERB level), double
+  elsewhere. `python tools/parity.py ear` (Python's notes, voice and bass lines and 22.05 kHz stems as input, made
+  once into py-ear-in/): on all nine songs, `where`, bends and holds are identical. Widths differ by a median of
+  under 1e-7 semitones, at most 1.4e-4 (no width moves an eighth of a semitone, the walk's step). After the pack's
+  u8 quantisation 5 bytes of ~1.5 million differ, each by one step (0.06 semitones), and every earWidth3dB median is
+  the same. Speed (same input, back to back): Code Monkey Python 85 s, JS 11.2 s on one worker, 1.9 s on 8; Nixsia
+  219 s, 14.9 s, 2.7 s. The STFTs are most of it (~1.3 s a stem on one core); widths are ~0.15 ms each.
+- Learned: `Math.hypot` allocates in V8 and doubled the pattern's time through GC; a direct DFT of only the kept
+  bins was no faster than fft.js.
+- Bass (`bass.mjs`, `bass.dsp.mjs`): librosa 0.11's pyin transcribed (YIN in librosa's float32 steps, beta thresholds,
+  Boltzmann prior, the voicing HMM), rms, env_follow, Spec / brightness. bass.dsp.mjs also holds helpers the voice
+  stage shares: numpy's pairwise sum (bit-identical to np.sum and librosa's rms), np.percentile in float32,
+  `stftFrame`, and `viterbiBanded`: librosa.sequence.viterbi's exact decision (first argmax; out-of-band transitions
+  log(tiny)) for banded matrices, skipping 16-state chunks whose bound cannot reach the best (rounding is monotonic),
+  which takes the decode from 7 s to 3.3 s CPU. `python tools/parity.py bass`, all nine songs, 84631 frames: bassHz
+  agrees on 84630 (63515 sounding), 0 cents everywhere except 15 frames of the guitar solo one 10-cent bin apart and
+  one frame JS-only; pYIN's raw voicing agrees on 84583 (48 JS-only frames, all under the loudness floor), 32 frames a
+  bin apart. bassN is bit-identical given Python's 22.05 kHz signal (3.6e-7 with our resampler). The differences are
+  numpy's float32 FFT in the YIN autocorrelation (not reproducible bit for bit): on near-silent or high (near 400 Hz)
+  frames a trough lands in the neighbouring bin, e.g. the guitar solo's frame 290 (bin 426 against 427). Speed:
+  Python bass_line 29-87 s a song; JS 4.0-8.9 s on Node (machine loaded by other jobs), Chrome 4.2-7.0 s.
+- Voice (`voice.mjs`, `voice.dsp.mjs`): CREPE 'full' (`crepe_full.onnx`, torchcrepe 0.0.24's weights; ONNX vs
+  PyTorch 1.2e-7), torchcrepe.predict as called (16 kHz soxr, 1024-sample frames every 160, normalised; batches of
+  1024 frames each decoded alone by torchcrepe's default decoder, which is Viterbi, not weighted argmax), filter
+  median/mean, voice_gate, brightness, librosa onset_strength (mel, power_to_db, flux) and onset_detect. The network
+  runs in chunks of 128 frames (256 and 512 were slower on Node WebGPU); frames, decoding, mel and rms on the workers.
+  `python tools/parity.py voice`, nine songs, both sides without dither: against PyTorch in float32 (vs_fp32), heard
+  frames agree on all 84631, leadHz within 0.001 cents, leadP/leadNz within 6e-6, leadN 2.4e-7, all 4091 librosa
+  onsets and all 2754 onsets identical; of 196505 CREPE 10 ms frames 9 differ by a bin (one song, unheard frames).
+  Against Python as the pipeline runs it (vs_tf32) heard frames agree on 84627 and 74 CREPE frames differ: PyTorch's
+  default TF32 convolutions on the GPU; TF32 against float32 within PyTorch moves the same frames (hey-ruth: 14), and
+  JS = PyTorch float32 GPU = PyTorch CPU there. Speed: CREPE network Node WebGPU 6.8-22 s a song vs PyTorch CUDA
+  (TF32) 6.2-20 s; Chrome 155 on the RTX 5080 16.8 s (222 s song) and 16.9 s (240 s), stage 18 s; the Claude
+  app's browser pane gets the AMD iGPU only: 109 s. `tools/browser_voice.html?song=NAME` runs both stages in a
+  browser (served by browser_check.py). voice_line's own choice of 'tiny' on the CPU is not ported.
+- Learned: torchcrepe 0.0.24 adds random triangular dither (+-20 cents) to every pitch, so Python's voice pitch is not
+  repeatable; the JS dithers the same way by default (`stats.dither = false` to compare). numpy 2 keeps float32 when
+  an array meets a Python float (env_follow, thresholds, percentile + 1e-9), so those run in float32 here too. On
+  Windows, two servers can listen on the same port (another session's took half the requests): pick a free one.
 
 ## Versions: bump them together
 
 When the analysis output changes: bump `PIPELINE_VERSION` in `server/modal_app.py` (the deploy writes it into
 `docs/config.json`; bump that file too so the page and server agree before the deploy runs), bump the pack `version`
-in `pipeline.analyze`, and make `current()` in app.html accept only the new pack version (and `segStride` if it
+in `pipeline.analyze`, and make `current()` in src/page/legacy.js accept only the new pack version (and `segStride` if it
 changed). The page draws only current packs; an older one is analysed again (cloud: re-uploaded; local:
 `--update-library` re-analyses kept songs). Adding a field the page does not require (as `song` was) needs no bump.
 
 ## Editing the page
 
-- Edit `src/app.html` / `src/dsp.js`, then `node src/build.js` (writes `docs/index.html`; commit both). The local
-  server builds from `src/` on each load, so no build step there.
+- The page is `src/page/`, built by Vite (`vite.config.mjs`) into `docs/` (`index.html`, `app/*`, and `pipeline/`
+  copied from `src/pipeline`). `npm install` once; `node src/build.js` (= `npm run build`) builds, commit `docs/` with
+  the source; `npm run dev` serves it with live reload. The local server builds once when it starts.
+  - `index.html`: the static markup (print, controls, Lab). `app.scss`: global styles.
+  - Svelte components (Svelte 5, `<style lang="scss">`): `Splash.svelte`, `Progress.svelte` (a song loading, with its
+    analysis steps), `Where.svelte` (this computer or the server, and the key). They read `ui` and call `api` in
+    `ui.svelte.js`.
+  - `legacy.js`: the old page script as one module (drawing, player, Lab), which sets `ui` and fills `api`. It moves
+    into components piece by piece.
+  - Icons: unplugin-icons, any Iconify set (`import X from '~icons/lucide/x'`; `@iconify-json/lucide` installed).
+  - Transitions: Svelte's (`svelte/transition`), with lengths through `motion()` (0 under reduced motion).
+  - "This computer" is offered only once every stage is in `src/pipeline` (`HERE_READY` in legacy.js); `?here` turns
+    it on to try.
 - `dsp.js` is the old in-browser analysis engine; the page now only uses its lyric helpers (`parseLyrics`,
   `alignLyrics`, `alignToAnchors`, `parseLRC`...), `mtof`/`ftom`, `DRUM_BANDS` and the demo song synthesis. Drawing
   always comes from a server pack. `tests/*.js` test that engine (`node tests/engine_test.js`).
@@ -220,7 +274,7 @@ changed). The page draws only current packs; an older one is analysed again (clo
 - After a push to `server/**`, the deploy workflow's smoke test sends a generated clip through the live server; it
   waits until the server reports the new version (the old container answers for minutes after a deploy).
 - Before committing: `node src/build.js`, `node tests/engine_test.js`, `python tests/route_test.py`,
-  `python -m py_compile server/*.py tools/*.py`, a syntax check of the built script, and `node --check` on each
+  `python -m py_compile server/*.py tools/*.py`, and `node --check` on each
   `src/pipeline/*.mjs` (`npm install` once for the Node tools).
 
 ## Things learned the hard way

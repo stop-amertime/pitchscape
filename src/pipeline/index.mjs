@@ -8,7 +8,7 @@
 //                                               └─► words (LRCLIB, Whisper) ───────┘
 //
 // progress(message) gets the same stage messages as the Python pipeline ('stems: ...', 'drums: ...'), which the page
-// maps to text (STAGES in app.html).
+// maps to text (STAGES in src/page/legacy.js).
 import {separate, SOURCES} from './stems.mjs';
 import {drums} from './drums.mjs';
 import {notes} from './notes.mjs';

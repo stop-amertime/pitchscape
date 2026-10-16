@@ -1,0 +1,93 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Bass and voice in the browser</title>
+<style>body{font:14px system-ui;margin:16px;background:#fff;color:#111}pre{white-space:pre-wrap}</style>
+<p>Runs the bass and voice stages (src/pipeline/bass.mjs, voice.mjs) in this browser on Python's stems of a test song
+(testsongs/parity/SONG/py-s0, from <code>python tools/parity.py stems</code>) and compares them with Python's
+(py-bass, py-voice, from <code>python tools/parity.py bass|voice</code>). Served by
+<code>python tools/browser_check.py</code>; query: <code>?song=NAME&amp;stages=bass,voice&amp;ep=webgpu&amp;models=URL</code>.</p>
+<pre id="log"></pre>
+<script type="module">
+import {webRuntime} from '../src/pipeline/runtime.web.mjs';
+import {bass} from '../src/pipeline/bass.mjs';
+import {voice} from '../src/pipeline/voice.mjs';
+
+const q = new URLSearchParams(location.search);
+const song = q.get('song') || 'josh-woodward-hey-ruth', ep = q.get('ep') || 'webgpu';
+const stages = (q.get('stages') || 'bass,voice').split(',');
+const R = {kind: 'bass-voice', song, ep, ua: navigator.userAgent, isolated: self.crossOriginIsolated};
+const el = document.getElementById('log');
+const log = (...a) => { el.textContent += a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' ') + '\n'; };
+const s = ms => +(ms / 1000).toFixed(2);
+
+function readWav(buf) {          // 32-bit float WAV -> [channels]
+  const v = new DataView(buf);
+  let o = 12, fmt, data;
+  while (o < v.byteLength) {
+    const id = String.fromCharCode(...new Uint8Array(buf, o, 4)), size = v.getUint32(o + 4, true);
+    if (id === 'fmt ') fmt = {ch: v.getUint16(o + 10, true), bits: v.getUint16(o + 22, true)};
+    if (id === 'data') data = [o + 8, size];
+    o += 8 + size + (size & 1);
+  }
+  const all = new Float32Array(buf.slice(data[0], data[0] + data[1])), n = all.length / fmt.ch;
+  return Array.from({length: fmt.ch}, (_, c) => { const y = new Float32Array(n); for (let i = 0; i < n; i++) y[i] = all[i * fmt.ch + c]; return y; });
+}
+const stem = async name => readWav(await (await fetch(`../testsongs/parity/${song}/py-s0/${name}.wav`)).arrayBuffer());
+const json = async p => { const r = await fetch(`../testsongs/parity/${song}/${p}`); return r.ok ? r.json() : null; };
+// frames where each has a pitch: how many agree, and the largest difference in cents where both have one
+function pitches(a, b) {
+  let agree = 0, over1 = 0, max = 0;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    const x = a[i] > 0, y = b[i] > 0;
+    if (x === y) agree++;
+    if (x && y) { const c = Math.abs(1200 * Math.log2(b[i] / a[i])); max = Math.max(max, c); if (c > 1) over1++; }
+  }
+  return {agree, frames: a.length, cents_max: +max.toFixed(3), over_1_cent: over1};
+}
+
+try {
+  if (ep === 'webgpu') {
+    const ad = await navigator.gpu?.requestAdapter({powerPreference: 'high-performance'});
+    if (!ad) throw new Error('no WebGPU adapter');
+    R.adapter = {vendor: ad.info.vendor, arch: ad.info.architecture};
+  }
+  const rt = await webRuntime({models: q.get('models') || '../models/', ep, log});
+  R.workers = rt.pool.size;
+  if (stages.includes('bass')) {
+    const [l, r] = await stem('bass'), m = new Float32Array(l.length);
+    for (let i = 0; i < l.length; i++) m[i] = (l[i] + r[i]) / 2;
+    const F = Math.max(16, Math.ceil(l.length / 44100 * 22050 / 512));
+    let t = performance.now();
+    const y = await rt.pool.call('./resample.mjs', 'resample', [m, 44100, 22050], [m.buffer]);
+    const st = {};
+    const b = await bass(y, F, rt, {stats: st});
+    R.bass = {total_s: s(performance.now() - t), yin_s: s(st.yin_ms), viterbi_s: s(st.viterbi_ms), brightness_s: s(st.brightness_ms)};
+    const P = await json('py-bass/bass.json');
+    if (P) R.bass.bassHz = pitches(P.bassHz, b.bassHz);
+    log('bass', R.bass);
+  }
+  if (stages.includes('voice')) {
+    const v = await stem('vocals');
+    const F = Math.max(16, Math.ceil(v[0].length / 44100 * 22050 / 512));
+    let t = performance.now();
+    await rt.session('crepe_full');
+    R.crepe_session_s = s(performance.now() - t);
+    t = performance.now();
+    const st = {dither: false};
+    const o = await voice(v, F, rt, {stats: st});
+    R.voice = {total_s: s(performance.now() - t), crepe_network_s: s(st.crepe_ms), crepe_s: s(st.crepe_total_ms),
+               onsets_s: s(st.onsets_ms), brightness_s: s(st.brightness_ms), ep: rt.eps.crepe_full};
+    const P = await json('py-voice/voice.json');
+    if (P) {
+      R.voice.leadHz = pitches(P.leadHz, o.leadHz);
+      const key = x => x.map(v => v.toFixed(6)).join(',');
+      const ps = new Set(P.onsets.map(key));
+      R.voice.onsets = {python: P.onsets.length, js: o.onsets.length, matched: o.onsets.filter(x => ps.has(key(x))).length};
+    }
+    log('voice', R.voice);
+  }
+  rt.close();
+  R.done = true;
+} catch (e) { R.error = String(e && e.stack || e); log('ERROR', R.error); }
+fetch('/result', {method: 'POST', body: JSON.stringify(R)});
+</script>
