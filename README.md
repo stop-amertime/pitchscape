@@ -83,6 +83,17 @@ struck again at the same pitch stay separate notes. On a synthetic plucked note 
 then wobbled, Basic Pitch gave 11 fragments; joined, they are one stroke within 0.35 semitone of the true bend
 throughout. On Made in the Dark, whose guitar barely bends, 3 of 766 guitar notes were joined.
 
+**Thickness is how wide the ear hears each sound**, not a choice of ours. For every voice frame, bass frame and note
+sample the pipeline works out the sound's excitation pattern on its own stem: the stem's spectrum, set to its level in
+a 70 dB SPL mix and read at ISO 532-2's resolutions (windows from 64 ms below 80 Hz to 2 ms above 4 kHz), passed
+through Glasberg & Moore's roex auditory filters, whose lower skirts flatten as the level rises. It sends how far below
+and above the sound's pitch the excitation stays within 1, 3 and 10 dB of its peak (stopping where it rises again
+towards a neighbour). The page prints that as ink: solid within 1 dB, lighter to 3 dB, a faint haze to 10 dB, each band
+eased over about 160 ms. So low sounds are wide and high ones narrow (a pure tone's 3 dB band is about one ERB); breath,
+noise, wavering pitch and very short sounds are wider, because their own spectrum is; loud sounds spread upward. On
+real songs the voice's 3 dB band is about 4 semitones, the bass's about 8, and dense distorted guitar chords fill 9 or
+more. The Lab's Print tab can switch back to thickness from loudness, and set how strongly the faint bands print.
+
 **No cutoff is baked in.** Every threshold that decides whether something prints is applied by the page, from the
 Lab's Cutoffs tab, so it can be tried on a song without analysing it again. The server finds things down to a floor
 (the far end of each lever) and sends how sure each detector was or how loud each sound was; each lever starts at the
@@ -117,7 +128,31 @@ full mix 99% of its snares, 93% of its hats and 84% of its kicks matched the hit
 On Made in the Dark, LRCLIB's synced lyrics were found from the file's tags and 82% of their words were matched to
 words Whisper heard (base model, CPU; the server uses medium); the rest were spread between them.
 
-Run it locally (Python 3.11, ffmpeg): `python -m server.pipeline SONG.mp3 OUT.json` (`--stems DIR` reuses Demucs stems).
+### Run it on your own computer
+
+The whole thing, page and analysis, runs on a PC with no Modal and no passphrase. A CUDA GPU (NVIDIA) analyses a song in
+a couple of minutes; on a CPU it takes several.
+
+1. Install Python 3.11 and ffmpeg (on the PATH: `ffmpeg -version` should work in a new terminal).
+2. In the repository folder, make a virtual environment and install the pipeline:
+   ```
+   python -m venv .venv
+   .venv\Scripts\activate            (Windows; on macOS or Linux: source .venv/bin/activate)
+   pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+   pip install -r server/requirements.txt
+   pip uninstall -y tensorflow tensorflow-cpu tensorflow-intel
+   ```
+   (Leave out `--index-url ...` for a CPU-only PyTorch. The last line removes TensorFlow, which Basic Pitch pulls in but
+   Pitchscape does not use.)
+3. `python -m server.local`, then open http://localhost:8000.
+
+The first song downloads the models (Demucs, ADTOF, Whisper: about 2 GB, once). Results are kept in
+`~/.pitchscape/cache`, so a song opens at once the second time; a new pipeline version analyses afresh. The page is built
+from `src/` on every load, so an edit to `src/app.html` or `src/dsp.js` shows on the next refresh, with no build step.
+Options: `--device cpu|cuda`, `--whisper small` (a smaller model to time the lyrics), `--port`, `--cache DIR`, and
+`--host 0.0.0.0` to open it from a phone on the same network (at the PC's address, port 8000).
+
+The pipeline alone: `python -m server.pipeline SONG.mp3 OUT.json` (`--stems DIR` reuses Demucs stems).
 Deploying needs three repository secrets: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` (a token from
 modal.com/settings/tokens) and `PITCHSCAPE_PASSPHRASE` (any phrase; the page asks for it once, so strangers cannot spend
 the GPU credit). The workflow writes the server's address to `docs/config.json`, which the page reads.
@@ -221,6 +256,11 @@ one that would steps up, or down, until it is clear.
 
 ## Data formats
 
+- **Testing on real music:** `tools/fetch_test_songs.sh` fetches nine freely licensed recordings (rock, pop, acoustic,
+  solo piano, a guitar solo, electronic, rap; listed with licences and what each tests in `tools/test_songs.json`) into
+  `testsongs/`, which git ignores. `python tools/analyse_test_songs.py` analyses them on the CPU (stems kept, so reruns
+  skip Demucs); `python tools/preview_server.py` serves the built page with those analyses standing in for the server;
+  `node tools/render_frames.cjs SONG OUT 30,60 ['{"hold":0.2}']` saves phone-sized frames, with Lab settings if given.
 - **Pack** (`*.pack.json`): `{format: "song-overprint-pack", version, segStride, title, artist, audio, dur, dt, frames,
   stereo, noiseRef, arrays, timing}`. `arrays` holds base64 little-endian Float32Arrays: per-frame `bassN, bassHz, bassBr,
   leadHz, leadN, leadBr, leadNz`; `events` as `[time, type (0 kick, 1 snare, 2 hat), strength, Hz]` x n;
@@ -228,9 +268,11 @@ one that would steps up, or down, until it is clear.
   spectrum (what each of 16 log-spaced bands from 30 Hz to 11 kHz gained over the frames before it, each drum type
   limited to its own region), how long it rings (until its band falls 14 dB), and for kicks the pitch of the boom;
   `segs` as `[t0, t1, midi, amp, brightness, noise, family, attack, fadeDbPerS, vibratoDepth, vibratoHz, hollowness,
-  stem (0 other, 1 guitar, 2 piano), roughness, sharpness, curveStart, curveCount]` x n (version 7, `segStride` 17, the
+  stem (0 other, 1 guitar, 2 piano), roughness, sharpness, curveStart, curveCount]` x n (version 8, `segStride` 17, the
   only version the page draws); each note every `dt` from t0 to t1, `curveCount` values from `curveStart` in `bends`
-  (its pitch in semitones from `midi`) and `holds` (Basic Pitch's certainty it still sounds); `events` from version 7
+  (its pitch in semitones from `midi`), `holds` (Basic Pitch's certainty it still sounds) and `noteEar` (six per
+  sample: down and up, in semitones, at each of `earDb`); `leadEar`, `bassEar` the same per frame. These go in `bytes`
+  as `{data, lo, hi}`, value = lo + byte x (hi - lo) / 255; `events` from version 7
   end with the hit's margin (`eventStride` 22); per frame `leadP` (CREPE periodicity) and `leadL` (vocal loudness
   share), `leadRough`, `leadSharp`, `bassRough`, `bassSharp`; voice and bass carry every frame down to the server's
   floors, uncut; `onsets` as `[time, gapBefore, runEnd, strength]` x n. `lyrics`: `{language, source, lines: [{text, words: [[word, seconds]]}]}`

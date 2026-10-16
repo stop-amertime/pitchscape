@@ -1,0 +1,24 @@
+# Pitchscape's analysis pipeline, for running it on your own computer (python -m server.local).
+# The same versions as the Modal server's image (server/modal_app.py). Python 3.11, and ffmpeg on the PATH.
+#
+# Install PyTorch first, from https://pytorch.org/get-started/locally/ (pick the CUDA build for an NVIDIA GPU), e.g.
+#   pip install torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+# then:
+#   pip install -r server/requirements.txt
+#   pip uninstall -y tensorflow tensorflow-cpu tensorflow-intel
+# (Basic Pitch pulls in TensorFlow; Pitchscape runs it on ONNX, and TensorFlow clashes with NumPy 2.)
+torch==2.5.1
+torchaudio==2.5.1
+demucs==4.1.0
+basic-pitch[onnx]==0.4.0
+onnxruntime==1.31.0
+faster-whisper==1.2.1
+ctranslate2==4.8.3
+torchcrepe==0.0.24
+librosa==0.11.0
+soundfile==0.14.0
+scipy==1.17.1
+huggingface_hub==2.2.0
+setuptools==79.0.1
+mosqito==1.2.1
+matplotlib==3.11.2

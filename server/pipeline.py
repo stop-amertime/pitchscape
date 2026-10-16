@@ -12,6 +12,8 @@ properties of what they found (how loud, how bright, how long a hit rings, how a
   voice   CREPE (torchcrepe, MIT)                       pitch contour and periodicity of the vocal stem
   tone    MOSQITO (Eomys, Apache-2.0)                   roughness (Daniel & Weber) and sharpness (DIN 45692) of
                                                         every note, and of the voice and bass, on their own stems
+  width   Glasberg & Moore's auditory filters          how wide each sound spreads along the ear (its excitation
+                                                        pattern), from its own stem's spectrum at 70 dB SPL
   words   LRCLIB (lrclib.net)                           the song's published lyrics, found by its tags or file name
           Whisper (faster-whisper, MIT)                 when each of those words is sung, read from the vocal stem;
                                                         what Whisper hears is never shown, only used for timing
@@ -62,6 +64,12 @@ def to_rate(x, src, dst):
 
 def b64f32(a):
     return base64.b64encode(np.asarray(a, dtype='<f4').tobytes()).decode('ascii')
+
+
+def u8(a, lo, hi):
+    """An array as bytes: 0..255 spread evenly over lo..hi (the page reads value = lo + byte * (hi - lo) / 255)."""
+    q = np.clip(np.round((np.asarray(a, np.float64) - lo) / (hi - lo) * 255), 0, 255).astype(np.uint8)
+    return {'data': base64.b64encode(q.tobytes()).decode('ascii'), 'lo': lo, 'hi': hi}
 
 
 # ------------------------------------------------------------------ stems
@@ -211,6 +219,118 @@ def env_follow(x, up=0.6, down=0.25):
     for i, v in enumerate(x):
         e += (up if v > e else down) * (v - e)
         out[i] = e
+    return out
+
+
+# ------------------------------------------------------------------ the ear
+P_REF = 2e-5                 # 0 dB SPL, in pascals
+EAR_DB = (1, 3, 10)          # widths are sent at these drops below the peak; the page's "ear width" lever reads between
+EAR_SPAN = 16                # semitones either side of a sound that its spread is followed to
+
+
+def erb(f):
+    """The ear's filter bandwidth at f Hz (Glasberg & Moore 1990)."""
+    return 24.7 * (4.37 * f / 1000 + 1)
+
+
+class Ear:
+    """Excitation patterns from one stem (Glasberg & Moore's roex auditory filters, with the lower skirt flattening as
+    the level rises, Moore & Glasberg 1987; the spectrum read at the resolutions of ISO 532-2): how strongly each place
+    along the ear is driven at a moment. A pure tone
+    excites a band about one ERB wide; noise, wavering pitch or a very short sound spread its spectrum and so its
+    excitation; a loud sound spreads upward. The stem is first set to the level it has in a 70 dB SPL mix."""
+
+    # ISO 532-2 (Moore, Glasberg & Schlittenlacher): the spectrum is read with a window that shortens as frequency
+    # rises, as the ear's own filters respond faster there: (from Hz, to Hz, window ms)
+    BANDS = ((0, 80, 64), (80, 500, 32), (500, 1250, 16), (1250, 2540, 8), (2540, 4050, 4), (4050, SR / 2, 2))
+    N = 4096
+
+    def __init__(self, y22, gain):
+        import librosa
+        y = (y22 * gain).astype(np.float32)
+        F = 1 + len(y) // HOP
+        self.f = librosa.fft_frequencies(sr=SR, n_fft=self.N)
+        self.P = np.zeros((len(self.f), F), np.float32)
+        for lo, hi, ms in self.BANDS:
+            L = int(round(ms / 1000 * SR)) // 2 * 2
+            n = 1 << max(5, (L - 1).bit_length())
+            hop = max(1, L // 2)
+            w = np.hanning(L)
+            X = np.abs(librosa.stft(y, n_fft=n, hop_length=hop, win_length=L, window=w, center=True))
+            fb = librosa.fft_frequencies(sr=SR, n_fft=n)
+            keep = (fb >= lo) & (fb < hi)
+            # mean-square pressure per bin, scaled so a sine's main lobe sums to its power (Hann: 1.5 bins wide at
+            # the window's own resolution, which a longer FFT samples n / L times as finely)
+            Pw = (X[keep] * 2 / w.sum()) ** 2 / 2 / (1.5 * n / L)
+            # averaged over each page frame (HOP samples centred on it)
+            t = np.arange(Pw.shape[1]) * hop
+            m = np.clip(np.round(t / HOP).astype(int), 0, F - 1)
+            acc = np.zeros((Pw.shape[0], F))
+            np.add.at(acc.T, m, Pw.T)
+            cnt = np.maximum(1, np.bincount(m, minlength=F))
+            # each of these bins lands on the nearest bin of the common grid (its power kept whole)
+            idx = np.clip(np.round(fb[keep] / (SR / self.N)).astype(int), 0, len(self.f) - 1)
+            np.add.at(self.P, idx, (acc / cnt).astype(np.float32))
+        self.cum = np.cumsum(self.P, axis=0)
+
+    def widths(self, frame, hz):
+        """(down, up) in semitones from hz for each drop in EAR_DB: how far either side of the sound its excitation
+        stays within that many dB of its peak, stopping where it rises again towards a neighbouring sound."""
+        if frame >= self.P.shape[1] or not hz > 0:
+            return [0.0] * (2 * len(EAR_DB))
+        k = np.arange(-EAR_SPAN * 8, EAR_SPAN * 8 + 1)
+        fc = hz * 2 ** (k / 96)
+        lo, hi = np.searchsorted(self.f, [fc[0] / 1.6, min(fc[-1] * 1.6, SR / 2 - 1)])
+        fi, Pi = self.f[lo:hi], self.P[lo:hi, frame].astype(np.float64)
+        if len(fi) < 2 or Pi.sum() <= 0:
+            return [0.0] * (2 * len(EAR_DB))
+        # each component's level in dB SPL per ERB around it, which sets how far its excitation reaches upward
+        c = self.cum[:, frame]
+        e = erb(fi)
+        a = np.clip(np.searchsorted(self.f, fi - e / 2) - 1, 0, len(c) - 1)
+        b = np.clip(np.searchsorted(self.f, fi + e / 2), 0, len(c) - 1)
+        X = 10 * np.log10((c[b] - c[a]) / P_REF ** 2 + 1e-12)
+        p51 = (4 * fc / erb(fc))[:, None]
+        p51k = 4 * 1000 / erb(1000)
+        below = fi[None, :] < fc[:, None]
+        pl = np.maximum(0.1 * p51, p51 - 0.38 * (p51 / p51k) * (X[None, :] - 51))
+        p = np.where(below, pl, p51)
+        g = np.abs(fi[None, :] - fc[:, None]) / fc[:, None]
+        W = (1 + p * g) * np.exp(-p * g)
+        E = 10 * np.log10(W @ Pi / P_REF ** 2 + 1e-12)
+        mid = EAR_SPAN * 8
+        kp = mid - 8 + int(np.argmax(E[mid - 8:mid + 9]))          # the sound's own peak, within a semitone of it
+        out = []
+        for d in EAR_DB:
+            floor = E[kp] - d
+            j = kp
+            while j > 0 and E[j - 1] >= floor and E[j - 1] <= E[j] + 0.5:
+                j -= 1
+            dn = (mid - j) / 8
+            if j > 0 and E[j - 1] < floor and E[j] > E[j - 1]:
+                dn += (E[j] - floor) / (E[j] - E[j - 1]) / 8
+            j = kp
+            while j < len(E) - 1 and E[j + 1] >= floor and E[j + 1] <= E[j] + 0.5:
+                j += 1
+            up = (j - mid) / 8
+            if j < len(E) - 1 and E[j + 1] < floor and E[j] > E[j + 1]:
+                up += (E[j] - floor) / (E[j] - E[j + 1]) / 8
+            out += [max(0.0, dn), max(0.0, up)]
+        return out
+
+
+def ear_line(ear, hz, every=2):
+    """Widths for a pitch line (voice or bass), frame by frame: measured every `every` frames while it sounds and
+    read between. (F, 2 * len(EAR_DB))."""
+    F = len(hz)
+    out = np.zeros((F, 2 * len(EAR_DB)), np.float32)
+    on = np.nonzero(hz > 0)[0]
+    done = on[::every]
+    for f in done:
+        out[f] = ear.widths(int(f), float(hz[f]))
+    for f in np.setdiff1d(on, done):
+        a, b = f - 1, f + 1
+        out[f] = (out[a] + out[b]) / 2 if b < F and hz[a] > 0 and hz[b] > 0 else out[a] if hz[a] > 0 else out[min(b, F - 1)]
     return out
 
 
@@ -461,19 +581,28 @@ def notes_by_stem(stems, st22):
     return [r[:3] + [min(1.2, r[3] / aref)] + r[4:12] + [r[14], r[13]] for r in kept]
 
 
-def pack_curves(segs):
+def pack_curves(segs, ears):
     """Each note through time on the page's frame grid (every DT s from t0 to t1): its bend, in semitones from its
-    pitch, and how sure Basic Pitch is that it still sounds (which the page's "note hold" lever cuts at). Two flat
-    lists, and each note's (start, count) in both."""
-    bends, holds, where = [], [], []
+    pitch; how sure Basic Pitch is that it still sounds (which the page's "note hold" lever cuts at); and how wide it
+    spreads along the ear (measured every other sample on its own stem and read between). Flat lists, and each
+    note's (start, count) in all of them."""
+    bends, holds, widths, where = [], [], [], []
     for r in segs:
         tb, off, ab = r[13]
         n = max(2, int(round((r[1] - r[0]) / DT)) + 1)
         tt = r[0] + (r[1] - r[0]) * np.arange(n) / (n - 1)
         where.append((len(bends), n))
-        bends += [round(float(v), 3) for v in np.interp(tt, tb, off)]
-        holds += [round(float(v), 3) for v in np.interp(tt, tb, ab)]
-    return bends, holds, where
+        bv = np.interp(tt, tb, off)
+        bends += bv.tolist()
+        holds += np.interp(tt, tb, ab).tolist()
+        ear, w = ears.get(NOTE_STEMS[int(r[12])]), np.zeros((n, 2 * len(EAR_DB)))
+        if ear is not None:
+            for j in range(0, n, 2):
+                w[j] = ear.widths(int(round(tt[j] / DT)), 440 * 2 ** ((r[2] + bv[j] - 69) / 12))
+            for j in range(1, n, 2):
+                w[j] = (w[j - 1] + w[j + 1]) / 2 if j + 1 < n else w[j - 1]
+        widths += w.reshape(-1).tolist()
+    return bends, holds, widths, where
 
 
 def notes_from_stem(other44):
@@ -590,34 +719,32 @@ UA = 'Pitchscape (https://github.com/stop-amertime/pitchscape)'
 
 
 def song_tags(path, name):
-    """(artist, title, album) from the file's tags, else from a file name of the form "Artist - Title"."""
+    """(artist, title, album) from the file's tags, the gaps filled from a file name of the form "Artist - Title"."""
+    tags = {}
     try:
         out = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format_tags:stream_tags', '-of', 'json', path],
                              capture_output=True, check=True, timeout=30).stdout
         j = json.loads(out or b'{}')
-        tags = {}
         for d in [j.get('format', {}).get('tags', {})] + [st.get('tags', {}) for st in j.get('streams', [])]:
             for k, v in (d or {}).items():
                 tags.setdefault(k.lower(), str(v).strip())
-        artist = tags.get('artist') or tags.get('album_artist') or ''
-        if artist and tags.get('title'):
-            return artist, tags['title'], tags.get('album', '')
     except Exception as e:
         log('tags: none read', e)
+    artist, title = tags.get('artist') or tags.get('album_artist') or '', tags.get('title', '')
     stem = re.sub(r'^\s*\d{1,3}\s*[-._)]?\s+', '', os.path.splitext(os.path.basename(name or ''))[0].replace('_', ' '))
     if ' - ' in stem:
-        artist, title = stem.split(' - ', 1)
-        return artist.strip(), title.strip(), ''
-    return '', '', ''
+        a, t = stem.split(' - ', 1)
+        artist, title = artist or a.strip(), title or t.strip()
+    return artist, title, tags.get('album', '')
 
 
 class Unreachable(Exception):
     pass
 
 
-def lrclib(path_q, tries=6):
-    """One LRCLIB API call: the JSON, or None for "not found". LRCLIB often answers "busy" (503) for a moment, so a
-    call is retried for about 20 s before giving up (Unreachable)."""
+def lrclib(path_q, tries=10):
+    """One LRCLIB API call: the JSON, or None for "not found". LRCLIB often answers "busy" (503), sometimes for many
+    seconds, so a call is retried for about a minute before giving up (Unreachable)."""
     for k in range(tries):
         try:
             req = urllib.request.Request(LRCLIB + path_q, headers={'User-Agent': UA})
@@ -634,24 +761,37 @@ def lrclib(path_q, tries=6):
 
 
 def find_lyrics(artist, title, album, dur):
-    """The song's record on LRCLIB: an exact match on artist, title and length first, then a search, taking only a
-    record within 3 s of the song's length (another length is another version, timed differently)."""
-    if not (artist and title):
+    """The song's record on LRCLIB, within 3 s of the song's length (another length is another version, timed
+    differently), preferring one with timed lines: an exact match on artist, title and length, then a search by artist
+    and title. If the tagged artist finds nothing (tags are often wrong), a search by title alone, taking a record only
+    if it has exactly this title, is within 2 s of this length, and every such record is by the same artist."""
+    if not title:
         return None
-    q = {'artist_name': artist, 'track_name': title, 'duration': str(int(round(dur)))}
-    if album:
-        q['album_name'] = album
-    hit = lrclib('get?' + urllib.parse.urlencode(q))
-    if not hit and album:
-        del q['album_name']
-        hit = lrclib('get?' + urllib.parse.urlencode(q))
-    if hit and abs(float(hit.get('duration') or 0) - dur) <= 3:
-        return hit
-    found = lrclib('search?' + urllib.parse.urlencode({'artist_name': artist, 'track_name': title})) or []
-    ok = [h for h in found if isinstance(h, dict) and abs(float(h.get('duration') or 0) - dur) <= 3
-          and (h.get('instrumental') or h.get('syncedLyrics') or h.get('plainLyrics'))]
-    ok.sort(key=lambda h: (not h.get('syncedLyrics'), abs(float(h.get('duration') or 0) - dur)))
-    return ok[0] if ok else None
+    def fits(h, tol=3):
+        return isinstance(h, dict) and abs(float(h.get('duration') or 0) - dur) <= tol and \
+            bool(h.get('instrumental') or h.get('syncedLyrics') or h.get('plainLyrics'))
+    def best(cands):
+        cands = [h for h in cands if fits(h)]
+        cands.sort(key=lambda h: (not h.get('instrumental') and not h.get('syncedLyrics'), abs(float(h.get('duration') or 0) - dur)))
+        return cands[0] if cands else None
+    found = []
+    if artist:
+        q = {'artist_name': artist, 'track_name': title, 'duration': str(int(round(dur)))}
+        if album:
+            found.append(lrclib('get?' + urllib.parse.urlencode(dict(q, album_name=album))))
+        found.append(lrclib('get?' + urllib.parse.urlencode(q)))
+        hit = best(found)
+        if hit and (hit.get('syncedLyrics') or hit.get('instrumental')):
+            return hit
+        found += lrclib('search?' + urllib.parse.urlencode({'artist_name': artist, 'track_name': title})) or []
+        hit = best(found)
+        if hit:
+            return hit
+    same = [h for h in (lrclib('search?' + urllib.parse.urlencode({'track_name': title})) or [])
+            if fits(h, 2) and norm(h.get('trackName') or '') == norm(title)]
+    if same and len({norm(h.get('artistName') or '') for h in same}) == 1:
+        return dict(best(same), byTitleOnly=True)
+    return None
 
 
 def parse_lrc(text):
@@ -748,7 +888,7 @@ def lyrics_for(path, name, dur, vocals44, device, size):
     Whisper only times the words; what it hears is never shown."""
     artist, title, album = song_tags(path, name)
     info = {'artist': artist, 'title': title}
-    if not (artist and title):
+    if not title:
         return None, dict(info, found=False, why='no artist and title in the tags or the file name')
     try:
         hit = find_lyrics(artist, title, album, dur)
@@ -756,7 +896,8 @@ def lyrics_for(path, name, dur, vocals44, device, size):
         return None, dict(info, found=False, why='LRCLIB could not be reached')
     if not hit:
         return None, dict(info, found=False, why='not on LRCLIB at this length')
-    info.update(found=True, lrclib=hit.get('id'), track=hit.get('trackName'), by=hit.get('artistName'))
+    info.update(found=True, lrclib=hit.get('id'), track=hit.get('trackName'), by=hit.get('artistName'),
+                byTitleOnly=bool(hit.get('byTitleOnly')))
     if hit.get('instrumental'):
         return None, dict(info, why='instrumental')
     lines = parse_lrc(hit.get('syncedLyrics'))
@@ -804,7 +945,17 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
 
     progress('tone: roughness and sharpness')
     note_rs, (leadRough, leadSharp), (bassRough, bassSharp), slices = tone(stems, segs, leadHz, bassHz, F)
-    bends, holds, where = pack_curves(segs)
+
+    progress('width: excitation patterns')
+    gain = 0.0632 / (float(np.sqrt(np.mean(sum(v.mean(0) for v in stems.values()) ** 2))) + 1e-12)
+    ears = {}
+    for name in NOTE_STEMS:
+        if name in st22 and any(NOTE_STEMS[int(r[12])] == name for r in segs):
+            ears[name] = Ear(st22[name], gain)
+    bends, holds, widths, where = pack_curves(segs, ears)
+    ears = None
+    leadEar = ear_line(Ear(st22['vocals'], gain), leadHz)
+    bassEar = ear_line(Ear(st22['bass'], gain), bassHz)
     segs = [r[:13] + [rs[0], rs[1], w[0], w[1]] for r, rs, w in zip(segs, note_rs, where)]
 
     lyrics, found = None, None
@@ -818,9 +969,9 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
     sg = np.array(segs, np.float32).reshape(-1) if segs else np.zeros(0, np.float32)
     on = np.array(onsets, np.float32).reshape(-1) if onsets else np.zeros(0, np.float32)
     pack = {
-        'format': 'song-overprint-pack', 'version': 7, 'source': 'pitchscape-server',
+        'format': 'song-overprint-pack', 'version': 8, 'source': 'pitchscape-server',
         'models': {'stems': 'htdemucs_6s', 'drums': 'ADTOF Frame_RNN', 'notes': 'Basic Pitch ICASSP 2022',
-                   'bass': 'pYIN', 'voice': 'CREPE', 'tone': 'MOSQITO roughness_dw, sharpness_din',
+                   'bass': 'pYIN', 'voice': 'CREPE', 'tone': 'MOSQITO roughness_dw, sharpness_din', 'width': 'Glasberg & Moore roex excitation patterns',
                    'words': 'LRCLIB, timed by Whisper' if words else None},
         'noteStems': list(NOTE_STEMS),
         'title': title or os.path.splitext(os.path.basename(path))[0], 'artist': '', 'audio': None,
@@ -832,7 +983,12 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
                    'events': b64f32(ev), 'segs': b64f32(sg), 'onsets': b64f32(on),
                    'leadRough': b64f32(leadRough), 'leadSharp': b64f32(leadSharp),
                    'bassRough': b64f32(bassRough), 'bassSharp': b64f32(bassSharp),
-                   'bends': b64f32(bends), 'holds': b64f32(holds)},
+                   },
+        # per-sample curves as bytes (see u8): each note's bend and hold every dt, and ear widths, (down, up) in
+        # semitones at each drop in earDb, for every note sample, voice frame and bass frame
+        'earDb': list(EAR_DB),
+        'bytes': {'bends': u8(bends, -8, 8), 'holds': u8(holds, 0, 1), 'noteEar': u8(widths, 0, EAR_SPAN),
+                  'leadEar': u8(leadEar.reshape(-1), 0, EAR_SPAN), 'bassEar': u8(bassEar.reshape(-1), 0, EAR_SPAN)},
         'timing': None, 'lyrics': lyrics,
         'floors': {'drums': DRUM_FLOOR, 'hold': HOLD_FLOOR, 'noteMs': NOTE_MIN_MS, 'voiceP': VOICE_P_FLOOR,
                    'voiceL': VOICE_L_FLOOR, 'bassL': BASS_L_FLOOR},
@@ -841,7 +997,10 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
                   'notes': len(segs), 'voiced': float(voice_gate(leadP, leadL, np.where(leadHz > 0, leadHz, np.nan), 0.45, 0.04, 4).mean()),
                   'notesByStem': {n: sum(1 for r in segs if int(r[12]) == i) for i, n in enumerate(NOTE_STEMS)},
                   'harshNotes': round(float(np.mean([harshness(r[13], r[14]) > 0.3 for r in segs])) if segs else 0.0, 3),
-                  'toneSlices': slices, 'lyrics': found},
+                  'toneSlices': slices, 'lyrics': found,
+                  'earWidth3dB': {'voice': round(float(np.median(leadEar[leadHz > 0, 2] + leadEar[leadHz > 0, 3])), 2) if (leadHz > 0).any() else 0,
+                                  'bass': round(float(np.median(bassEar[bassHz > 0, 2] + bassEar[bassHz > 0, 3])), 2) if (bassHz > 0).any() else 0,
+                                  'notes': round(float(np.median(np.array(widths).reshape(-1, 6)[:, 2] + np.array(widths).reshape(-1, 6)[:, 3])), 2) if widths else 0}},
     }
     progress('done in %.0f s' % (time.time() - t_start))
     return pack

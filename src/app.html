@@ -233,6 +233,8 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       </div>
       <div class="pane" id="pane-print" data-pane="print" role="tabpanel" aria-labelledby="tab-print" hidden>
         <div class="row slide"><button type="button" class="k" data-tip="How dark everything prints." aria-expanded="false" aria-describedby="ld-ink">Ink<i aria-hidden="true">i</i></button><input type="range" id="lab-ink" data-key="ink" min="0.4" max="1.6" step="0.05" aria-label="Ink" aria-describedby="ld-ink"><span class="lab-v" id="lab-ink-v"></span><span class="vh" id="ld-ink">How dark everything prints.</span></div>
+        <div class="row"><button type="button" class="k" data-tip="The ear: each sound as wide as it spreads along your ear, measured from its own sound. Low sounds are wide, high ones narrow; breathy, noisy or wavering ones wider; loud ones spread upward. Loudness: louder is thicker, the old way." aria-expanded="false" aria-describedby="ld-thick">Thickness from<i aria-hidden="true">i</i></button><div class="seg" data-key="thick" role="group" aria-label="Thickness from" aria-describedby="ld-thick"><button type="button" id="lab-thick-ear" data-v="ear">The ear</button><button type="button" id="lab-thick-loud" data-v="loud">Loudness</button></div><span class="vh" id="ld-thick">The ear: each sound as wide as it spreads along your ear, measured from its own sound. Low sounds are wide, high ones narrow; breathy, noisy or wavering ones wider; loud ones spread upward. Loudness: louder is thicker, the old way.</span></div>
+        <div class="row slide"><button type="button" class="k" data-tip="The ear hears each sound most strongly at its pitch and more faintly either side. The print shows that as ink: solid where the sound is within 1 dB of its peak, lighter out to 3 dB, a faint haze out to 10 dB. This sets how strongly the lighter bands print; at 0 only the solid core prints." aria-expanded="false" aria-describedby="ld-edges">Faint edges<i aria-hidden="true">i</i></button><input type="range" id="lab-edges" data-key="edges" min="0" max="2" step="0.1" aria-label="Faint edges" aria-describedby="ld-edges"><span class="lab-v" id="lab-edges-v"></span><span class="vh" id="ld-edges">The ear hears each sound most strongly at its pitch and more faintly either side. The print shows that as ink: solid where the sound is within 1 dB of its peak, lighter out to 3 dB, a faint haze out to 10 dB. This sets how strongly the lighter bands print; at 0 only the solid core prints.</span></div>
         <div class="row slide"><button type="button" class="k" data-tip="How thick the lines are." aria-expanded="false" aria-describedby="ld-weight">Thickness<i aria-hidden="true">i</i></button><input type="range" id="lab-weight" data-key="weight" min="0.5" max="1.8" step="0.05" aria-label="Thickness" aria-describedby="ld-weight"><span class="lab-v" id="lab-weight-v"></span><span class="vh" id="ld-weight">How thick the lines are.</span></div>
         <div class="row slide"><button type="button" class="k" data-tip="White flecks over the print, where the ink missed the paper." aria-expanded="false" aria-describedby="ld-grain">Speckle<i aria-hidden="true">i</i></button><input type="range" id="lab-grain" data-key="grain" min="0" max="1" step="0.05" aria-label="Speckle" aria-describedby="ld-grain"><span class="lab-v" id="lab-grain-v"></span><span class="vh" id="ld-grain">White flecks over the print, where the ink missed the paper.</span></div>
       </div>
@@ -329,7 +331,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   var LAB_DEF = {
     colour: 'inst', drums: 'sound', kick: 'smudge', bass: 'smudge', font: 'grotesque', wordSize: 'voice',
     shake: reduceMotion ? 0 : 0.25, tilt: reduceMotion ? 0 : 0.5, pulse: reduceMotion ? 0 : 0.6, slip: reduceMotion ? 0 : 0.35,
-    secs: 0, ink: 1, weight: 1, grain: 0.5,
+    secs: 0, ink: 1, weight: 1, grain: 0.5, thick: 'ear', edges: 1,
     /* cutoffs: the defaults are each model's own settings */
     vConf: 0.45, vFloor: 0.04, vRun: 90, bFloor: 0.08, hold: 0.3, noteMin: 100, drumK: 1, rough0: 0.1, sharp0: 1.75, leap: 4
   };
@@ -401,6 +403,8 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     }
     /* the voice and bass as they came (every frame the models heard anything), before the cutoffs */
     ana.leadHz0 = ana.leadHz; ana.bassHz0 = ana.bassHz;
+    ana.leadEar = easeEar(ana.leadEar, lineRuns(ana.leadHz0)); ana.bassEar = easeEar(ana.bassEar, lineRuns(ana.bassHz0));
+    S.noteEar = easeEar(ana.noteEar, S.segs.map(function (sg) { return [sg.bs, sg.bs + sg.bn]; }));
     applyCuts();
   }
   /* how harsh a sound is, 0 (smooth) to 1: roughness above the "rough from" lever (clearly grating 0.3 asper past it)
@@ -553,10 +557,11 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       if (ends === 'square') return 1;
       var r = ends === 'blunt' ? 1 : (x - xFirst) / TAPER; if (!openEnd) r = Math.min(r, (xLast - x) / TAPER); return clamp(r, 0, 1);
     }
-    function push(x, y, w, br, ph, ink, q, c) {
-      w *= L.weight;
-      var amp = w * (0.03 + 0.8 * Math.max(br, 0.3 * (q || 0)));
-      top.push(x, y - w - amp * wave(ph, br, q)); bot.push(x, y + w + amp * wave(ph + 0.41, br, q));
+    /* wu, wd: the stroke's reach above and below its line */
+    function push(x, y, wu, wd, br, ph, ink, q, c) {
+      wu *= L.weight; wd *= L.weight;
+      var amp = (wu + wd) / 2 * (0.03 + 0.8 * Math.max(br, 0.3 * (q || 0)));
+      top.push(x, y - wu - amp * wave(ph, br, q)); bot.push(x, y + wd + amp * wave(ph + 0.41, br, q));
       xs.push(x); al.push(ink); cs.push(c || color);
     }
     for (i = 0; i < n - 1; i++) {
@@ -565,8 +570,10 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       for (s = 0; s < steps; s++) {
         var u = s / steps, t = a.t + (b.t - a.t) * u, x = xa + (xb - xa) * u, y = a.y + (b.y - a.y) * u;
         var lf = lift(x), ink = (a.a + (b.a - a.a) * u) * lf;
-        var w = (a.w + (b.w - a.w) * u) * wScale * (0.3 + 0.7 * Math.sqrt(lf)), br = a.b + (b.b - a.b) * u, z = a.z + (b.z - a.z) * u;
-        push(x, y, w, br, t * a.r, ink, a.q, a.c);
+        var sc = wScale * (0.3 + 0.7 * Math.sqrt(lf)), br = a.b + (b.b - a.b) * u, z = a.z + (b.z - a.z) * u, w, wu, wd;
+        if (a.wu != null) { wu = (a.wu + (b.wu - a.wu) * u) * sc; wd = (a.wd + (b.wd - a.wd) * u) * sc; w = (wu + wd) / 2; }
+        else wu = wd = w = (a.w + (b.w - a.w) * u) * sc;
+        push(x, y, wu, wd, br, t * a.r, ink, a.q, a.c);
         if (z > 0.02 && wScale === 1 && ink > 0.05) {
           var k = Math.round(t * 300) + seed;
           if (hash(k) < z * 0.55) dots.push(x + (hash(k + 7) - 0.5) * 2, y + (hash(k + 13) * 2 - 1) * w * 1.6, 0.45 + hash(k + 29) * 1.05);
@@ -574,7 +581,8 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       }
     }
     var Lp = pts[n - 1], lfL = openEnd || ends === 'square' ? 1 : 0;
-    push(xLast, Lp.y, Lp.w * wScale * (0.3 + 0.7 * lfL), Lp.b, Lp.t * Lp.r, Lp.a * lfL, Lp.q, Lp.c);
+    var scL = wScale * (0.3 + 0.7 * lfL);
+    push(xLast, Lp.y, (Lp.wu != null ? Lp.wu : Lp.w) * scL, (Lp.wd != null ? Lp.wd : Lp.w) * scL, Lp.b, Lp.t * Lp.r, Lp.a * lfL, Lp.q, Lp.c);
     /* ink strength runs along the stroke as a horizontal gradient, so one fill fades smoothly with no seams */
     var x0 = xs[0], span = xs[xs.length - 1] - x0, fill, last = al.length - 1;
     if (span < 1) fill = inkPrefix(cs[0]) + (alpha * al[0]).toFixed(3) + ')';
@@ -622,7 +630,15 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       var a = pts[i], b = pts[i + 1], xa = xOf(a.t, now), xb = xOf(b.t, now), steps = Math.max(1, Math.ceil(Math.abs(xb - xa) / 2));
       for (k = 0; k < steps; k++) {
         var u = k / steps, ink = a.a + (b.a - a.a) * u; if (ink < 0.02) continue;
-        var x = xa + (xb - xa) * u, y = a.y + (b.y - a.y) * u, loud = clamp((a.w + (b.w - a.w) * u - 0.8) / 8, 0, 1), r = (SEMI_PX * 1.3 + 1.5) * (0.85 + 0.3 * loud) * L.weight;
+        var x = xa + (xb - xa) * u, y = a.y + (b.y - a.y) * u, r;
+        if (a.e) {
+          /* as wide as the ear spreads it (within 3 dB of its peak), centred on the middle of that spread; the dab's
+             soft edge stands for the fainter spread beyond */
+          var wu = a.e[3] + (b.e[3] - a.e[3]) * u, wd = a.e[2] + (b.e[2] - a.e[2]) * u;
+          y += (wd - wu) / 2; r = Math.max(1.5, (wu + wd) / 2) * L.weight;
+        } else {
+          var loud = clamp((a.w + (b.w - a.w) * u - 0.8) / 8, 0, 1); r = (SEMI_PX * 1.3 + 1.5) * (0.85 + 0.3 * loud) * L.weight;
+        }
         g.globalAlpha = Math.min(1, alpha * ink * 3.2 / r); g.drawImage(dabSprite(a.c), x - r, y - r, 2 * r, 2 * r);
       }
     } });
@@ -635,6 +651,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     function flush(open) {
       if (pts.length > 1) {
         if (soft) { smear.push(pts); }
+        else if (L.thick === 'ear') { var run = pts; earBands(run, function (k) { ribbon(run, now, run[0].c, alpha * k, seed, 1, open); }); }
         else { if (halo > 0) ribbon(pts, now, pts[0].c, halo, seed, 1.9, open); ribbon(pts, now, pts[0].c, alpha, seed, 1, open); }
       }
       pts = [];
@@ -643,6 +660,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       var hz = getHz(f);
       if (!(hz > 0)) { flush(false); continue; }
       var y = yOf(hz), p = { t: f * dt, y: y, w: getW(f), a: getA(f), b: getB(f), z: getZ(f), r: rate(hz), c: tint(group, hz, y) };
+      if (L.thick === 'ear') { p.e = earAt(group === 'bass' ? a.bassEar : a.leadEar, f); p.wd = p.e[2]; p.wu = p.e[3]; }
       /* glides stay joined; a leap of more than the "line break" lever (a major third) starts a new stroke */
       if (pts.length && Math.abs(12 * Math.log2(hz / lastHz)) > L.leap) flush(false);
       pts.push(p); lastHz = hz;
@@ -650,9 +668,42 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     }
     flush(!!head);
     if (smear.length) smudge(smear, now, alpha);
-    if (head) pen(head.y, soft ? SEMI_PX * 0.55 + 0.6 : head.w, head.c, head.a);
+    if (head) {
+      /* the pen marks where the line is now: as wide as its solid core, but never a blot */
+      if (head.e) pen(head.y + (head.e[0] - head.e[1]) / 2, soft ? SEMI_PX * 0.55 + 0.6 : Math.min(SEMI_PX * 0.8, (head.e[0] + head.e[1]) / 2), head.c, head.a);
+      else pen(head.y, soft ? SEMI_PX * 0.55 + 0.6 : head.w, head.c, head.a);
+    }
   }
 
+  /* how far a sound spreads along the ear below and above its pitch, in px, at sample j of an array of ear widths:
+     (down, up) where its excitation is within 1, 3 and 10 dB of its peak (the server's earDb) */
+  function earAt(arr, j) {
+    var b = j * 6, out = new Array(6);
+    for (var i = 0; i < 6; i++) out[i] = arr[b + i] * SEMI_PX;
+    return out;
+  }
+  /* the ear takes a moment to hear a sound's spread: widths are eased over about 160 ms (7 samples), within each run
+     of a line (voice, bass) or each note, so a reading that flickers for a frame does not flicker the print */
+  function easeEar(arr, runs) {
+    var out = new Float32Array(arr.length), R = 3;
+    runs.forEach(function (r) {
+      for (var j = r[0]; j < r[1]; j++) {
+        var lo = Math.max(r[0], j - R), hi = Math.min(r[1] - 1, j + R), n = hi - lo + 1;
+        for (var c = 0; c < 6; c++) { var sum = 0; for (var k = lo; k <= hi; k++) sum += arr[k * 6 + c]; out[j * 6 + c] = sum / n; }
+      }
+    });
+    return out;
+  }
+  function lineRuns(hz) { var r = [], i = 0, n = hz.length, k; while (i < n) { if (!(hz[i] > 0)) { i++; continue; } k = i; while (k < n && hz[k] > 0) k++; r.push([i, k]); i = k; } return r; }
+  /* the ink of each band, as a share of the line's own: where the sound is within 1 dB of its peak prints solid */
+  var EAR_INK = [1, 0.32, 0.1];
+  function earBands(pts, draw) {
+    for (var band = 2; band >= 0; band--) {
+      if (band > 0 && !(L.edges > 0)) continue;
+      pts.forEach(function (p) { p.wd = p.e[2 * band]; p.wu = p.e[2 * band + 1]; });
+      draw(band === 0 ? 1 : EAR_INK[band] * L.edges);
+    }
+  }
   /* a note's pitch at time t: its MIDI pitch plus its bend there (read between the bend's samples) */
   function bendAt(s, t) {
     if (s.bn < 2) return 0;
@@ -686,14 +737,20 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
           /* held */
           w = (1 + 4.2 * s.a) * 1.15 * Math.min(1, (tt - pc.t0) / 0.02 + 0.5); ink = 0.5 + 0.5 * a1;
         }
-        pts.push({ t: tt, y: y, w: w, a: ink, b: s.hs, z: s.f === 1 ? z * 0.5 : z, r: r, q: q });
+        var pt = { t: tt, y: y, w: w, a: ink, b: s.hs, z: s.f === 1 ? z * 0.5 : z, r: r, q: q };
+        if (L.thick === 'ear') {
+          /* as wide as the ear spreads it; how it was struck, swelled or held shows in the ink alone */
+          pt.e = earAt(S.noteEar, s.bs + Math.round((tt - s.t0) / Math.max(1e-6, s.t1 - s.t0) * (s.bn - 1)));
+        }
+        pts.push(pt);
         if (tt >= end) break;
       }
       var col = tint(src === 1 ? 'guitar' : src === 2 ? 'piano' : s.f === 1 ? 'pad' : s.f === 2 ? 'lead' : 'pluck', hz, y0);
-      if (s.f === 1) { ribbon(pts, now, col, 0.12, seed, 1.45, open); ribbon(pts, now, col, 0.78, seed, 1, open); }
+      if (L.thick === 'ear') earBands(pts, function (k) { ribbon(pts, now, col, 0.82 * k, seed, 1, open, s.f === 0 ? 'blunt' : s.f === 2 ? 'square' : undefined); });
+      else if (s.f === 1) { ribbon(pts, now, col, 0.12, seed, 1.45, open); ribbon(pts, now, col, 0.78, seed, 1, open); }
       else if (s.f === 0) ribbon(pts, now, col, 0.85, seed, 1, open, 'blunt');
       else ribbon(pts, now, col, 0.82, seed, 1, open, 'square');
-      if (open) { var hd = pts[pts.length - 1]; pen(hd.y, hd.w, col, hd.a); }
+      if (open) { var hd = pts[pts.length - 1]; if (hd.e) pen(hd.y + (hd.e[0] - hd.e[1]) / 2, Math.min(SEMI_PX * 0.8, (hd.e[0] + hd.e[1]) / 2), col, hd.a); else pen(hd.y, hd.w, col, hd.a); }
     }
   }
 
@@ -1293,17 +1350,19 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
      Every song is drawn from the server's analysis (stems, drum transcription, notes, words) named in config.json,
      and nothing plays until it is in. A song is known by the SHA-256 of its file: analysed before, on this device
      or on the server from any device, it opens at once. Otherwise it is uploaded and analysed, once. */
-  var API = null, PIPELINE = '', apiReady = Promise.resolve(null);
+  /* LOCAL: the page is served by server/local.py on this computer, which needs no key */
+  var API = null, PIPELINE = '', LOCAL = false, apiReady = Promise.resolve(null);
+  function serverKey() { return store.get('pitchscape:key') || (LOCAL ? 'local' : null); }
   try {
     apiReady = fetch('config.json', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (c) {
-      API = c && c.api ? String(c.api).replace(/\/$/, '') : null; PIPELINE = c && c.pipeline ? String(c.pipeline) : ''; return API;
+      API = c && c.api ? String(c.api).replace(/\/$/, '') : null; PIPELINE = c && c.pipeline ? String(c.pipeline) : ''; LOCAL = !!(c && c.local); return API;
     }, function () { return null; });
   } catch (e) { /* no config */ }
   /* where a song's analysis is kept on the device: a new version of the server's analysis starts afresh */
   function packKey(sha) { return 'pack:' + PIPELINE + ':' + sha; }
-  /* only an analysis from the current pipeline (4, which writes pack version 7) is drawn: an older one lacks what the
+  /* only an analysis from the current pipeline (5, which writes pack version 8) is drawn: an older one lacks what the
      drawing needs, so the song is analysed again rather than drawn with stand-ins */
-  function current(pack) { return !!(pack && pack.version >= 7 && pack.segStride === 17); }
+  function current(pack) { return !!(pack && pack.version >= 8 && pack.segStride === 17 && pack.bytes); }
   var idb = (function () {
     var dbp = null;
     function open() {
@@ -1323,7 +1382,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       put: function (k, v) { return run('readwrite', function (st) { return st.put(v, k); }).catch(function () {}); }
     };
   })();
-  var STAGES = [['stems', 'Splitting the song into stems', 0.2], ['drums', 'Reading the drums', 0.45], ['notes', 'Reading the notes', 0.55], ['tone', 'Listening for harsh sounds', 0.8],
+  var STAGES = [['stems', 'Splitting the song into stems', 0.2], ['drums', 'Reading the drums', 0.45], ['notes', 'Reading the notes', 0.55], ['tone', 'Listening for harsh sounds', 0.8], ['width', 'Measuring how wide each sound is', 0.82],
     ['bass', 'Following the bass', 0.65], ['voice', 'Following the voice', 0.75], ['words', 'Finding the lyrics', 0.85], ['done', 'Finishing', 0.95]];
   function stageOf(st) { for (var i = 0; st && i < STAGES.length; i++) if (st.indexOf(STAGES[i][0]) === 0) return STAGES[i]; return ['', 'Starting the server', 0.12]; }
   function sha256hex(buf) {
@@ -1339,7 +1398,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       if (!API) return null;
       return idb.get(packKey(sha)).then(function (p) {
         if (p && current(p)) return p;
-        var key = store.get('pitchscape:key');
+        var key = serverKey();
         if (!key) return null;
         // a server slow to answer the lookup is not waited on for long; once it answers, the download is not cut off
         var ctl = window.AbortController ? new AbortController() : null, timer = ctl && setTimeout(function () { ctl.abort(); }, 4000);
@@ -1374,7 +1433,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   function keyError(text) { var e = new Error(text); e.needsKey = true; return e; }
   function analyse(blob, fileName, sha, my) {
     return apiReady.then(function () {
-      var key = store.get('pitchscape:key');
+      var key = serverKey();
       if (!API) throw new Error('This page has no analysis server set up.');
       if (!key) throw keyError('Add the server key under Song and this song will be analysed.');
       showStatus('Uploading', 0.05, 'The first time takes a few minutes. After that this song opens at once.');
@@ -1412,7 +1471,8 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   function packToRes(pack) {
     var res = { dur: pack.dur, dt: pack.dt, frames: pack.frames, stereo: pack.stereo, noiseRef: pack.noiseRef };
     for (var k in pack.arrays) res[k] = b64f32(pack.arrays[k]);
-    res.segW = pack.segStride; res.evW = pack.eventStride;
+    for (k in pack.bytes) res[k] = b64u8(pack.bytes[k]);
+    res.segW = pack.segStride; res.evW = pack.eventStride; res.earDb = pack.earDb;
     return res;
   }
   /* the song's published lyrics (from LRCLIB, each word timed to the voice by the server), unless lyrics were already
@@ -1432,6 +1492,12 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   }
   /* songs analysed ahead of time and published with the page: stems + word timing, no lyrics */
   var SONGS = {};
+  /* an array sent as bytes: lo + byte * (hi - lo) / 255 */
+  function b64u8(o) {
+    var bin = atob(o.data), out = new Float32Array(bin.length), k = (o.hi - o.lo) / 255;
+    for (var i = 0; i < bin.length; i++) out[i] = o.lo + bin.charCodeAt(i) * k;
+    return out;
+  }
   function b64f32(b64) { var bin = atob(b64), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Float32Array(u.buffer); }
   function loadPack(id) {
     var song = SONGS[id], title = song.title || id;

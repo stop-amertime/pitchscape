@@ -1,0 +1,77 @@
+{
+  "about": "Real recordings to test the analysis and the drawing against. All freely licensed and fetched from the Internet Archive by tools/fetch_test_songs.sh into testsongs/ (git-ignored: audio never goes in the repo). 'tests' says what each one exercises.",
+  "songs": [
+    {
+      "file": "brad-sucks-dropping-out-of-school.mp3",
+      "artist": "Brad Sucks",
+      "title": "Dropping Out of School",
+      "url": "https://archive.org/download/bs-out-of-it-remastered/01%20Dropping%20Out%20of%20School.mp3",
+      "licence": "CC BY-NC 4.0",
+      "tests": "indie rock: distorted and clean guitars, bass, drums, voice; lyrics on LRCLIB"
+    },
+    {
+      "file": "brad-sucks-fluoride.mp3",
+      "artist": "Brad Sucks",
+      "title": "Fluoride",
+      "url": "https://archive.org/download/jamendo-117853/09-1001527-Brad%20Sucks-Fluoride.mp3",
+      "licence": "CC BY-NC-SA 3.0",
+      "tests": "rock with heavy distorted guitars and cymbals; lyrics on LRCLIB (one record of the same length among others)"
+    },
+    {
+      "file": "jonathan-coulton-code-monkey.mp3",
+      "artist": "Jonathan Coulton",
+      "title": "Code Monkey",
+      "url": "https://archive.org/download/code-monkey/Code%20Monkey.mp3",
+      "licence": "CC BY-NC 3.0 (the artist's)",
+      "tests": "pop rock with a clear lead voice; its tags name the wrong artist ('spiffworld'), and covers of the same length exist, so no lyrics are found"
+    },
+    {
+      "file": "josh-woodward-incoherent.mp3",
+      "artist": "Josh Woodward",
+      "title": "Incoherent",
+      "url": "https://archive.org/download/JoshWoodwardSelection/20-JoshWoodward-HereToday-01-Incoherent.mp3",
+      "licence": "CC BY 3.0",
+      "tests": "acoustic guitar and voice; lyrics on LRCLIB"
+    },
+    {
+      "file": "josh-woodward-hey-ruth.mp3",
+      "artist": "Josh Woodward",
+      "title": "Hey Ruth",
+      "url": "https://archive.org/download/JoshWoodwardSelection/19-JoshWoodward-CrawfordStreet-10-HeyRuth.mp3",
+      "licence": "CC BY 3.0",
+      "tests": "folk rock; lyrics on LRCLIB at 204 s, 3.6 s longer than this copy, so refused as another version"
+    },
+    {
+      "file": "kimiko-ishizaka-goldberg-aria.mp3",
+      "artist": "Kimiko Ishizaka",
+      "title": "Goldberg Variations: Aria",
+      "url": "https://archive.org/download/OpenGoldbergVariations/Kimiko%20Ishizaka%20-%20J.S.%20Bach-%20-Open-%20Goldberg%20Variations%2C%20BWV%20988%20%28Piano%29%20-%2001%20Aria.mp3",
+      "licence": "CC0",
+      "tests": "solo piano, ornamented, no drums or voice"
+    },
+    {
+      "file": "optional-death-guitar-solo-1989.mp3",
+      "artist": "Optional Death",
+      "title": "Guitar Solo 1989",
+      "url": "https://archive.org/download/Optional_Death_Guitar_Solo_1989/NoiseCollectorOptionalDeath13.mp3",
+      "licence": "CC BY-SA 3.0",
+      "tests": "electric guitar solo: bends, vibrato, distortion"
+    },
+    {
+      "file": "gigatop-arthur-invincible.mp3",
+      "artist": "Gigatop Arthur",
+      "title": "Invincible",
+      "url": "https://archive.org/download/jamendo-140090/01-1165390-Gigatop%20Arthur-Invincible.mp3",
+      "licence": "CC BY-SA 3.0",
+      "tests": "electronic: synths, programmed drums"
+    },
+    {
+      "file": "nixsia-hiroshima.mp3",
+      "artist": "Nixsia Aka Niki",
+      "title": "Nix-Boss x EFFRAKATA HIROSHIMA 5.0",
+      "url": "https://archive.org/download/jamendo-459288/01-1226648-Nixsia%20Aka%20Niki-Nix-Boss%20x%20EFFRAKATA%20HIROSHIMA%205.0.mp3",
+      "licence": "CC BY 3.0",
+      "tests": "rap: rhythmic, barely pitched voice over a beat"
+    }
+  ]
+}
