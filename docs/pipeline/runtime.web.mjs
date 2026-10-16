@@ -18,7 +18,10 @@ export async function webRuntime({models = MODELS, ep = 'webgpu', log = () => {}
   const base = new URL(models.endsWith('/') ? models : models + '/', location.href);
   const manifest = await (await fetch(new URL('manifest.json', base), {cache: 'no-cache'})).json();
   const cache = {};
-  let gpu = Promise.resolve();
+  // every call into ONNX Runtime takes its turn: sessions share one wasm instance (the WebGPU provider lives in it too),
+  // and two calls in flight at once corrupt its memory ("memory access out of bounds" while making a session)
+  let ortq = Promise.resolve();
+  const turn = f => { const r = ortq.then(f); ortq = r.catch(() => {}); return r; };
   const rt = {
     ep,
     eps: {},
@@ -48,7 +51,7 @@ export async function webRuntime({models = MODELS, ep = 'webgpu', log = () => {}
       const use = want ? (want === 'cpu' ? 'wasm' : want) : manifest[name].ep === 'cpu' ? 'wasm' : ep;
       const opts = {executionProviders: [use], graphOptimizationLevel: 'all'};
       if (keep.length && use === 'webgpu') opts.preferredOutputLocation = Object.fromEntries(keep.map(k => [k, 'gpu-buffer']));
-      const sess = await ort.InferenceSession.create(bytes, opts);
+      const sess = await turn(() => ort.InferenceSession.create(bytes, opts));
       log(`${name}: running on ${use}`);
       rt.eps[name] = use;
       const call = async t => {
@@ -60,10 +63,7 @@ export async function webRuntime({models = MODELS, ep = 'webgpu', log = () => {}
         run(feeds) {
           const t = {};
           for (const [k, v] of Object.entries(feeds)) t[k] = v instanceof ort.Tensor ? v : new ort.Tensor(v.type || 'float32', v.data, v.dims);
-          if (use === 'wasm') return call(t);
-          const r = gpu.then(() => call(t));         // GPU models take turns
-          gpu = r.catch(() => {});
-          return r;
+          return turn(() => call(t));
         },
       };
       return cache[key];

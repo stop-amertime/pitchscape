@@ -1229,32 +1229,51 @@ export function start() {
     }).then(function (a) {
       return new Promise(function (resolve, reject) {
         var w = new Worker(new URL('pipeline/analyse.worker.mjs', location.href), { type: 'module' });
-        var t0 = performance.now(), tStems = 0, got = {};
-        function stop(v, e) { w.terminate(); if (e) reject(e); else resolve(v); }
+        // the stages after the stems start together, so the bar never goes back; after the stems it moves by the time
+        // a song took here before (hereRate), when there is one. A model downloading mid-way only changes the note.
+        var t0 = performance.now(), tStems = 0, tAfter = 0, got = {}, fetched = false, started = false, label = '', p = 0, tick = 0;
+        var secs = function () { return (performance.now() - t0) / 1000; };
+        function show(l, q, note) { label = l; p = Math.max(p, q); showStatus(label, p, note); }
+        function after() {
+          var total = hereRate() * a.dur;
+          if (!total || fetched) return;
+          var left = total - secs();
+          show(label, 0.55 + 0.4 * Math.min(0.98, (secs() - tAfter) / Math.max(1, total - tAfter)), left > 5 ? 'about ' + fmtSecs(left) + ' left' : 'nearly done');
+        }
+        function stop(v, e) { clearInterval(tick); w.terminate(); if (e) reject(e); else resolve(v); }
         w.onerror = function (ev) { stop(null, new Error('The analysis here stopped: ' + (ev.message || 'its worker would not start') + '. Choose the server instead.')); };
         w.onmessage = function (ev) {
           var m = ev.data;
           if (my !== loadSeq) { stop(null); return; }
           if (m.download) {
+            fetched = true;
             got[m.download.name] = m.download;
             var a2 = 0, b2 = 0; for (var k in got) { a2 += got[k].got; b2 += got[k].total; }
-            showStatus('Fetching the models', 0.02 + 0.08 * a2 / Math.max(1, b2), Math.round(a2 / 1e6) + ' / ' + Math.round(b2 / 1e6) + ' MB · once'); showStep('models', true);
+            var mb = 'fetching models: ' + Math.round(a2 / 1e6) + ' / ' + Math.round(b2 / 1e6) + ' MB · once';
+            if (started) showStatus(label, p, mb);
+            else { show('Fetching the models', 0.02 + 0.08 * a2 / Math.max(1, b2), mb.replace('fetching models: ', '')); showStep('models', true); }
           } else if (m.progress) {
+            started = true;
             var st = stageOf(m.progress), k2 = /^stems: (\d+)\/(\d+)/.exec(m.progress), note = '';
             if (k2) {
               var done = +k2[1], all = +k2[2];
               if (!tStems) tStems = performance.now();
               if (done >= 2) {
                 var per = (performance.now() - tStems) / 1000 / (done - 1), left = per * (all - done);
-                var total = hereRate() * a.dur, sofar = (performance.now() - t0) / 1000;
-                note = (total > sofar ? 'about ' + fmtSecs(Math.max(left, total - sofar)) : 'about ' + fmtSecs(left) + ' for this step') + ' left';
+                var total = hereRate() * a.dur;
+                note = (total > secs() && !fetched ? 'about ' + fmtSecs(Math.max(left, total - secs())) : 'about ' + fmtSecs(left) + ' for this step') + ' left';
                 if (left > 180) note += ' · the server may be quicker';
               }
-              showStatus(st[1], 0.1 + 0.45 * done / all, note);
-            } else showStatus(st[1], st[2]);
+              show(st[1], 0.1 + 0.45 * done / all, note);
+            } else {
+              if (!tAfter && st[0] && st[0] !== 'stems') { tAfter = secs(); tick = setInterval(after, 1000); }
+              show(st[1], Math.min(st[2], 0.6));
+              after();
+            }
             showStep(st[0], true);
           } else if (m.pack) {
-            store.set('pitchscape:hereRate', (performance.now() - t0) / 1000 / Math.max(1, a.dur));
+            // a run that downloaded models is not a measure of how long a song takes here
+            if (!fetched) store.set('pitchscape:hereRate', secs() / Math.max(1, a.dur));
             stop(m.pack);
           } else if (m.error) stop(null, new Error('The analysis here failed: ' + m.error + ' Choose the server to analyse it there.'));
         };
