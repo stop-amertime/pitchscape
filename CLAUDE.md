@@ -120,6 +120,10 @@ changed). The page draws only current packs; an older one is analysed again (clo
   `tools/test_songs.json`); `python tools/analyse_test_songs.py [name...]` (CPU; stems kept in `testsongs/stems/`, so
   reruns take ~4-5 min a song instead of ~6); `python tools/preview_server.py` (serves `docs/` with those packs as the
   "server"); `node tools/render_frames.cjs testsongs/X.mp3 OUT 30,60 ['{"thick":"loud"}']` saves phone frames.
+- Speed: `node tools/bench_frames.cjs --gpu --mode=raf testsongs/X.mp3` times each layer and the frame (CPU slowed
+  4x, about a phone). Use `--gpu`: plain headless Chromium paints the canvas in software, so painting swamps
+  everything and points at the wrong layer. Finished strokes are built once and kept (`strokeCache`, `pc.st`); any
+  input that shapes them must be in `strokeCacheCheck`'s signature or the print goes stale.
 - Look at frames before claiming a visual change works. Measure what you can from the pack (widths, counts, overlaps),
   but check the measurement itself (decode `bytes` as float before arithmetic: uint8 overflows silently in numpy).
 - `python tests/route_test.py` exercises the Modal routes with Modal stubbed (needs modal, fastapi, httpx).

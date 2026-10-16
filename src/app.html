@@ -411,8 +411,10 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
      and sharpness above "sharp from" (1.25 acum past it), taken together */
   function harsh(ro, sh) { return Math.min(1, Math.hypot(clamp((ro - L.rough0) / 0.3, 0, 1), clamp((sh - L.sharp0) / 1.25, 0, 1))); }
   /* every cutoff, from the Lab's levers: what prints of the voice, bass, notes and drums, and how harsh each is */
+  var cutsGen = 0;
   function applyCuts() {
     var ana = S.ana; if (!ana) return;
+    cutsGen++;
     var F = ana.frames, i, k;
     /* voice: sung where the pitch tracker is sure enough and the voice loud enough, in long enough runs */
     var v = new Uint8Array(F), run = Math.max(1, Math.round(L.vRun / 1000 / ana.dt));
@@ -547,61 +549,99 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   /* A filled stroke whose edges follow the sound: sine ripple when pure, sawtooth when bright, speckle when noisy.
      Every point carries its own ink strength (a), so quiet passages print paler and thinner, and ends taper
      like a brush lifting off rather than stopping in a flat cut. openEnd: the stroke is still printing at the head. */
-  /* ends: 'taper' (default), 'blunt' (hard start, tapered end) or 'square' (hard both ends) */
-  function ribbon(pts, now, color, alpha, seed, wScale, openEnd, ends) {
-    var n = pts.length; if (n < 2) return;
-    var top = [], bot = [], xs = [], al = [], cs = [], dots = [], i, s, TAPER = 12;
-    alpha = inkA(alpha);
-    var xFirst = xOf(pts[0].t, now), xLast = xOf(pts[n - 1].t, now);
+  /* ends: 'taper' (default), 'blunt' (hard start, tapered end) or 'square' (hard both ends). passes: the prints laid
+     one over another, each {a: ink, s: width scale, band: which ear band's widths (or -1 for the points' own)}.
+     A stroke is built once, in its own coordinates (x = 0 at its first point), and printed by paintStroke wherever
+     it has scrolled to: a finished stroke never changes shape, so it is kept and only moved (strokeCache). */
+  function buildStroke(pts, color, seed, openEnd, ends, passes) {
+    var n = pts.length; if (n < 2) return null;
+    var xs = [], ys = [], ts = [], al = [], cs = [], br = [], zs = [], ph = [], qs = [], lfs = [], i, s, P, TAPER = 12;
+    var tFirst = pts[0].t, xLast = (pts[n - 1].t - tFirst) * pps;
     function lift(x) {
       if (ends === 'square') return 1;
-      var r = ends === 'blunt' ? 1 : (x - xFirst) / TAPER; if (!openEnd) r = Math.min(r, (xLast - x) / TAPER); return clamp(r, 0, 1);
+      var r = ends === 'blunt' ? 1 : x / TAPER; if (!openEnd) r = Math.min(r, (xLast - x) / TAPER); return clamp(r, 0, 1);
     }
-    /* wu, wd: the stroke's reach above and below its line */
-    function push(x, y, wu, wd, br, ph, ink, q, c) {
-      wu *= L.weight; wd *= L.weight;
-      var amp = (wu + wd) / 2 * (0.03 + 0.8 * Math.max(br, 0.3 * (q || 0)));
-      top.push(x, y - wu - amp * wave(ph, br, q)); bot.push(x, y + wd + amp * wave(ph + 0.41, br, q));
-      xs.push(x); al.push(ink); cs.push(c || color);
-    }
+    /* each sample along the stroke: where it is, its ink, and where it reads its widths from (point j, u of the way
+       to point j + 1) */
+    var ja = [], ua = [];
     for (i = 0; i < n - 1; i++) {
-      var a = pts[i], b = pts[i + 1], xa = xOf(a.t, now), xb = xOf(b.t, now);
+      var a = pts[i], b = pts[i + 1], xa = (a.t - tFirst) * pps, xb = (b.t - tFirst) * pps;
       var steps = Math.max(1, Math.ceil(Math.abs(xb - xa) / 1.6));
       for (s = 0; s < steps; s++) {
-        var u = s / steps, t = a.t + (b.t - a.t) * u, x = xa + (xb - xa) * u, y = a.y + (b.y - a.y) * u;
-        var lf = lift(x), ink = (a.a + (b.a - a.a) * u) * lf;
-        var sc = wScale * (0.3 + 0.7 * Math.sqrt(lf)), br = a.b + (b.b - a.b) * u, z = a.z + (b.z - a.z) * u, w, wu, wd;
-        if (a.wu != null) { wu = (a.wu + (b.wu - a.wu) * u) * sc; wd = (a.wd + (b.wd - a.wd) * u) * sc; w = (wu + wd) / 2; }
-        else wu = wd = w = (a.w + (b.w - a.w) * u) * sc;
-        push(x, y, wu, wd, br, t * a.r, ink, a.q, a.c);
-        if (z > 0.02 && wScale === 1 && ink > 0.05) {
-          var k = Math.round(t * 300) + seed;
-          if (hash(k) < z * 0.55) dots.push(x + (hash(k + 7) - 0.5) * 2, y + (hash(k + 13) * 2 - 1) * w * 1.6, 0.45 + hash(k + 29) * 1.05);
-        }
+        var u = s / steps, t = a.t + (b.t - a.t) * u, x = xa + (xb - xa) * u, lf = lift(x);
+        xs.push(x); ys.push(a.y + (b.y - a.y) * u); ts.push(t); lfs.push(lf); ja.push(i); ua.push(u);
+        al.push((a.a + (b.a - a.a) * u) * lf); cs.push(a.c || color); br.push(a.b + (b.b - a.b) * u);
+        zs.push(a.z + (b.z - a.z) * u); ph.push(t * a.r); qs.push(a.q);
       }
     }
     var Lp = pts[n - 1], lfL = openEnd || ends === 'square' ? 1 : 0;
-    var scL = wScale * (0.3 + 0.7 * lfL);
-    push(xLast, Lp.y, (Lp.wu != null ? Lp.wu : Lp.w) * scL, (Lp.wd != null ? Lp.wd : Lp.w) * scL, Lp.b, Lp.t * Lp.r, Lp.a * lfL, Lp.q, Lp.c);
-    /* ink strength runs along the stroke as a horizontal gradient, so one fill fades smoothly with no seams */
-    var x0 = xs[0], span = xs[xs.length - 1] - x0, fill, last = al.length - 1;
-    if (span < 1) fill = inkPrefix(cs[0]) + (alpha * al[0]).toFixed(3) + ')';
+    xs.push(xLast); ys.push(Lp.y); ts.push(Lp.t); lfs.push(-1); ja.push(n - 1); ua.push(0);
+    al.push(Lp.a * lfL); cs.push(Lp.c || color); br.push(Lp.b); zs.push(0); ph.push(Lp.t * Lp.r); qs.push(Lp.q);
+    var m = xs.length, last = m - 1;
+    /* ink strength runs along the stroke as a horizontal gradient, so one fill fades smoothly with no seams; each
+       pass prints it at its own strength (globalAlpha) */
+    var fill, span = xs[last];
+    if (span < 1) fill = inkPrefix(cs[0]) + al[0].toFixed(3) + ')';
     else {
-      fill = ctx.createLinearGradient(x0, 0, x0 + span, 0);
-      var stride = Math.max(1, Math.floor(xs.length / 56));
-      for (i = 0; i < xs.length; i += stride) fill.addColorStop(clamp((xs[i] - x0) / span, 0, 1), inkPrefix(cs[i]) + (alpha * al[i]).toFixed(3) + ')');
-      fill.addColorStop(1, inkPrefix(cs[last]) + (alpha * al[last]).toFixed(3) + ')');
+      fill = ctx.createLinearGradient(0, 0, span, 0);
+      var stride = Math.max(1, Math.floor(m / Math.max(56, Math.ceil(span / 7))));
+      for (i = 0; i < m; i += stride) fill.addColorStop(clamp(xs[i] / span, 0, 1), inkPrefix(cs[i]) + al[i].toFixed(3) + ')');
+      fill.addColorStop(1, inkPrefix(cs[last]) + al[last].toFixed(3) + ')');
     }
-    ctx.globalAlpha = 1; ctx.fillStyle = fill; ctx.beginPath();
-    ctx.moveTo(top[0], top[1]);
-    for (i = 2; i < top.length; i += 2) ctx.lineTo(top[i], top[i + 1]);
-    for (i = bot.length - 2; i >= 0; i -= 2) ctx.lineTo(bot[i], bot[i + 1]);
-    ctx.closePath(); ctx.fill();
-    if (dots.length) {
-      ctx.beginPath();
-      for (i = 0; i < dots.length; i += 3) { ctx.moveTo(dots[i] + dots[i + 2], dots[i + 1]); ctx.arc(dots[i], dots[i + 1], dots[i + 2], 0, 6.2832); }
-      ctx.fill();
+    function width(p, band, k) { return band >= 0 ? p.e[2 * band + k] : k ? (p.wu != null ? p.wu : p.w) : (p.wd != null ? p.wd : p.w); }
+    var out = { t0: tFirst, fill: fill, prints: [] };
+    passes.forEach(function (P) {
+      var path = new Path2D(), dots = null, botX = [], botY = [], wS = P.s;
+      for (i = 0; i < m; i++) {
+        var p = pts[ja[i]], q = pts[Math.min(n - 1, ja[i] + 1)], u = ua[i], lf = lfs[i];
+        var sc = lf < 0 ? wS * (0.3 + 0.7 * lfL) : wS * (0.3 + 0.7 * Math.sqrt(lf));
+        var wu = (width(p, P.band, 1) + (width(q, P.band, 1) - width(p, P.band, 1)) * u) * sc * L.weight;
+        var wd = (width(p, P.band, 0) + (width(q, P.band, 0) - width(p, P.band, 0)) * u) * sc * L.weight;
+        var amp = (wu + wd) / 2 * (0.03 + 0.8 * Math.max(br[i], 0.3 * (qs[i] || 0)));
+        var x = xs[i], y = ys[i];
+        if (i) path.lineTo(x, y - wu - amp * wave(ph[i], br[i], qs[i])); else path.moveTo(x, y - wu - amp * wave(ph[i], br[i], qs[i]));
+        botX.push(x); botY.push(y + wd + amp * wave(ph[i] + 0.41, br[i], qs[i]));
+        if (lf >= 0 && zs[i] > 0.02 && wS === 1 && al[i] > 0.05) {
+          var k = Math.round(ts[i] * 300) + seed;
+          if (hash(k) < zs[i] * 0.55) {
+            var r = 0.45 + hash(k + 29) * 1.05, dx = x + (hash(k + 7) - 0.5) * 2, dy = y + (hash(k + 13) * 2 - 1) * (wu + wd) / 2 / L.weight * 1.6;
+            dots = dots || new Path2D(); dots.moveTo(dx + r, dy); dots.arc(dx, dy, r, 0, 6.2832);
+          }
+        }
+      }
+      for (i = m - 1; i >= 0; i--) path.lineTo(botX[i], botY[i]);
+      path.closePath();
+      out.prints.push({ a: P.a, path: path, dots: dots });
+    });
+    return out;
+  }
+  function paintStroke(st, now) {
+    if (!st) return;
+    var dx = xOf(st.t0, now);
+    ctx.translate(dx, 0); ctx.fillStyle = st.fill;
+    for (var i = 0; i < st.prints.length; i++) {
+      var p = st.prints[i]; ctx.globalAlpha = inkA(p.a); ctx.fill(p.path); if (p.dots) ctx.fill(p.dots);
     }
+    ctx.translate(-dx, 0); ctx.globalAlpha = 1;
+  }
+  /* finished strokes, kept while on screen; dropped whenever anything that shapes them changes (a Lab lever, the
+     screen's size, the analysis) */
+  var strokeCache = new Map(), strokeSig = '', strokeGen = 0, drawCount = 0;
+  function strokeCacheCheck() {
+    var sig = W + '|' + H + '|' + dpr + '|' + F_LO + '|' + F_HI + '|' + BEAT_H + '|' + cutsGen + '|' + JSON.stringify(L);
+    if (sig !== strokeSig) { strokeSig = sig; strokeCache.clear(); strokeGen++; }
+    if (++drawCount % 120 === 0) strokeCache.forEach(function (v, k) { if (v.used < drawCount - 2) strokeCache.delete(k); });
+  }
+  function cachedStroke(key, make) {
+    var e = strokeCache.get(key);
+    if (!e) { e = { st: make() }; strokeCache.set(key, e); }
+    e.used = drawCount; return e.st;
+  }
+  /* the prints a line or note gets: the ear's three bands (haze, lighter, solid) or, by loudness, a halo and a core */
+  function earPasses(alpha) {
+    var out = [];
+    for (var band = 2; band >= 0; band--) { if (band > 0 && !(L.edges > 0)) continue; out.push({ a: alpha * (band === 0 ? 1 : EAR_INK[band] * L.edges), s: 1, band: band }); }
+    return out;
   }
 
   /* the pen: a round tip where a line is being printed right now, sized by how loud it is there */
@@ -647,26 +687,30 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 
   function frameTrack(now, getHz, getW, getA, getB, getZ, group, alpha, halo, seed) {
     var a = S.ana, dt = a.dt, f0 = Math.max(0, Math.floor((now - WIN - 0.3) / dt)), f1 = Math.min(a.frames - 1, Math.floor(now / dt));
-    var pts = [], head = null, lastHz = 0, soft = group === 'bass' && L.bass === 'smudge', smear = [];
-    function flush(open) {
-      if (pts.length > 1) {
-        if (soft) { smear.push(pts); }
-        else if (L.thick === 'ear') { var run = pts; earBands(run, function (k) { ribbon(run, now, run[0].c, alpha * k, seed, 1, open); }); }
-        else { if (halo > 0) ribbon(pts, now, pts[0].c, halo, seed, 1.9, open); ribbon(pts, now, pts[0].c, alpha, seed, 1, open); }
+    var head = null, soft = group === 'bass' && L.bass === 'smudge', smear = [], ear = L.thick === 'ear';
+    var passes = ear ? earPasses(alpha) : (halo > 0 ? [{ a: halo, s: 1.9, band: -1 }] : []).concat([{ a: alpha, s: 1, band: -1 }]);
+    function point(f) {
+      var hz = getHz(f), y = yOf(hz), p = { t: f * dt, y: y, w: getW(f), a: getA(f), b: getB(f), z: getZ(f), r: rate(hz), c: tint(group, hz, y) };
+      if (ear) { p.e = earAt(group === 'bass' ? a.bassEar : a.leadEar, f); p.wd = p.e[2]; p.wu = p.e[3]; }
+      return p;
+    }
+    function pointsOf(s, e) { var pts = []; for (var f = s; f <= e; f++) pts.push(point(f)); return pts; }
+    /* glides stay joined; a leap of more than the "line break" lever (a major third) starts a new stroke */
+    function joined(f) { var hz = getHz(f), pv = getHz(f - 1); return hz > 0 && pv > 0 && !(Math.abs(12 * Math.log2(hz / pv)) > L.leap); }
+    for (var f = f0; f <= f1;) {
+      if (!(getHz(f) > 0)) { f++; continue; }
+      var s = f; for (f++; f <= f1 && joined(f); f++);
+      var e = f - 1, open = e === f1, pts;
+      if (soft) { pts = pointsOf(s, e); if (pts.length > 1) smear.push(pts); if (open) head = pts[pts.length - 1]; }
+      else if (open) { pts = pointsOf(s, e); head = pts[pts.length - 1]; if (pts.length > 1) paintStroke(buildStroke(pts, null, seed, true, undefined, passes), now); }
+      else if (e > s || (s === f0 && s > 0 && joined(s))) {
+        /* a finished stroke, built once from its true start (even if that has scrolled off) and kept */
+        paintStroke(cachedStroke(group + ':' + e, function () {
+          var s0 = s; while (s0 > 0 && joined(s0)) s0--;
+          return buildStroke(pointsOf(s0, e), null, seed, false, undefined, passes);
+        }), now);
       }
-      pts = [];
     }
-    for (var f = f0; f <= f1; f++) {
-      var hz = getHz(f);
-      if (!(hz > 0)) { flush(false); continue; }
-      var y = yOf(hz), p = { t: f * dt, y: y, w: getW(f), a: getA(f), b: getB(f), z: getZ(f), r: rate(hz), c: tint(group, hz, y) };
-      if (L.thick === 'ear') { p.e = earAt(group === 'bass' ? a.bassEar : a.leadEar, f); p.wd = p.e[2]; p.wu = p.e[3]; }
-      /* glides stay joined; a leap of more than the "line break" lever (a major third) starts a new stroke */
-      if (pts.length && Math.abs(12 * Math.log2(hz / lastHz)) > L.leap) flush(false);
-      pts.push(p); lastHz = hz;
-      if (f === f1) head = p;
-    }
-    flush(!!head);
     if (smear.length) smudge(smear, now, alpha);
     if (head) {
       /* the pen marks where the line is now: as wide as its solid core, but never a blot */
@@ -697,13 +741,6 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   function lineRuns(hz) { var r = [], i = 0, n = hz.length, k; while (i < n) { if (!(hz[i] > 0)) { i++; continue; } k = i; while (k < n && hz[k] > 0) k++; r.push([i, k]); i = k; } return r; }
   /* the ink of each band, as a share of the line's own: where the sound is within 1 dB of its peak prints solid */
   var EAR_INK = [1, 0.32, 0.1];
-  function earBands(pts, draw) {
-    for (var band = 2; band >= 0; band--) {
-      if (band > 0 && !(L.edges > 0)) continue;
-      pts.forEach(function (p) { p.wd = p.e[2 * band]; p.wu = p.e[2 * band + 1]; });
-      draw(band === 0 ? 1 : EAR_INK[band] * L.edges);
-    }
-  }
   /* a note's pitch at time t: its MIDI pitch plus its bend there (read between the bend's samples) */
   function bendAt(s, t) {
     if (s.bn < 2) return 0;
@@ -718,40 +755,52 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       var pc = S.pieces[i], s = pc.s; if (pc.t0 > now) break; if (pc.t1 < t0w || s.src !== src) continue;
       var end = Math.min(pc.t1, now); if (end - pc.t0 < 0.02) continue;
       if (pc.t1 >= now) lv[key] += s.a * 0.5;
-      var hz = DSP.mtof(s.m), y0 = yOf(hz), br = brMap(s.b), z = zSeg(s.z), r = rate(hz), a1 = Math.min(1, s.a), pts = [], seed = 101 + s.id * 7, open = pc.t1 > now;
-      var q = s.h > 0.5 ? clamp((s.h - 0.5) * 2.5, 0, 1) : 0;
-      /* u: time since the note was struck (a later stretch of the same note carries on its fade) */
-      for (var t = pc.t0; ; t += S.ana.dt) {
-        var tt = Math.min(t, end), u = tt - s.t0, y = yOf(DSP.mtof(s.m + bendAt(s, tt))), w, ink;
-        if (s.f === 0) {
-          /* struck: full weight at the strike, thinning and paling at the fade rate measured for this note */
-          var g = Math.pow(10, Math.max(-80, Math.min(0, s.dec)) * u / 20);
-          w = (1.2 + 4.6 * s.a) * 1.3 * (0.22 + 0.78 * Math.pow(g, 0.7)) * Math.min(1, u / 0.012 + 0.6);
-          ink = (0.5 + 0.5 * a1) * (0.35 + 0.65 * g);
-        } else if (s.f === 1) {
-          /* swell: grows in from a point over the attack it was heard to take */
-          var A = Math.max(0.08, s.att);
-          w = (1 + 4.2 * s.a) * 1.6 * (0.04 + 0.96 * smooth(0, A, u)) * Math.min(1, (pc.t1 - tt) / 0.25 + 0.25);
-          ink = (0.45 + 0.55 * a1) * (0.3 + 0.7 * smooth(0, A, u));
-        } else {
-          /* held */
-          w = (1 + 4.2 * s.a) * 1.15 * Math.min(1, (tt - pc.t0) / 0.02 + 0.5); ink = 0.5 + 0.5 * a1;
-        }
-        var pt = { t: tt, y: y, w: w, a: ink, b: s.hs, z: s.f === 1 ? z * 0.5 : z, r: r, q: q };
-        if (L.thick === 'ear') {
-          /* as wide as the ear spreads it; how it was struck, swelled or held shows in the ink alone */
-          pt.e = earAt(S.noteEar, s.bs + Math.round((tt - s.t0) / Math.max(1e-6, s.t1 - s.t0) * (s.bn - 1)));
-        }
-        pts.push(pt);
-        if (tt >= end) break;
-      }
+      var hz = DSP.mtof(s.m), y0 = yOf(hz), open = pc.t1 > now;
       var col = tint(src === 1 ? 'guitar' : src === 2 ? 'piano' : s.f === 1 ? 'pad' : s.f === 2 ? 'lead' : 'pluck', hz, y0);
-      if (L.thick === 'ear') earBands(pts, function (k) { ribbon(pts, now, col, 0.82 * k, seed, 1, open, s.f === 0 ? 'blunt' : s.f === 2 ? 'square' : undefined); });
-      else if (s.f === 1) { ribbon(pts, now, col, 0.12, seed, 1.45, open); ribbon(pts, now, col, 0.78, seed, 1, open); }
-      else if (s.f === 0) ribbon(pts, now, col, 0.85, seed, 1, open, 'blunt');
-      else ribbon(pts, now, col, 0.82, seed, 1, open, 'square');
-      if (open) { var hd = pts[pts.length - 1]; if (hd.e) pen(hd.y + (hd.e[0] - hd.e[1]) / 2, Math.min(SEMI_PX * 0.8, (hd.e[0] + hd.e[1]) / 2), col, hd.a); else pen(hd.y, hd.w, col, hd.a); }
+      /* a finished note never changes shape: built once and kept on its piece */
+      if (!open) {
+        if (pc.stG !== strokeGen) { pc.stG = strokeGen; pc.st = noteStroke(pc, end, col, false); }
+        paintStroke(pc.st, now); continue;
+      }
+      var pts = notePoints(pc, end);
+      paintStroke(noteStroke(pc, end, col, true, pts), now);
+      var hd = pts[pts.length - 1]; if (hd.e) pen(hd.y + (hd.e[0] - hd.e[1]) / 2, Math.min(SEMI_PX * 0.8, (hd.e[0] + hd.e[1]) / 2), col, hd.a); else pen(hd.y, hd.w, col, hd.a);
     }
+  }
+  function noteStroke(pc, end, col, open, pts) {
+    var s = pc.s, passes = L.thick === 'ear' ? earPasses(0.82) : s.f === 1 ? [{ a: 0.12, s: 1.45, band: -1 }, { a: 0.78, s: 1, band: -1 }] : [{ a: s.f === 0 ? 0.85 : 0.82, s: 1, band: -1 }];
+    return buildStroke(pts || notePoints(pc, end), col, 101 + s.id * 7, open, s.f === 0 ? 'blunt' : s.f === 2 ? 'square' : undefined, passes);
+  }
+  /* the note's points from the start of this piece to end */
+  function notePoints(pc, end) {
+    var s = pc.s, hz = DSP.mtof(s.m), z = zSeg(s.z), r = rate(hz), a1 = Math.min(1, s.a), pts = [];
+    var q = s.h > 0.5 ? clamp((s.h - 0.5) * 2.5, 0, 1) : 0;
+    /* u: time since the note was struck (a later stretch of the same note carries on its fade) */
+    for (var t = pc.t0; ; t += S.ana.dt) {
+      var tt = Math.min(t, end), u = tt - s.t0, y = yOf(DSP.mtof(s.m + bendAt(s, tt))), w, ink;
+      if (s.f === 0) {
+        /* struck: full weight at the strike, thinning and paling at the fade rate measured for this note */
+        var g = Math.pow(10, Math.max(-80, Math.min(0, s.dec)) * u / 20);
+        w = (1.2 + 4.6 * s.a) * 1.3 * (0.22 + 0.78 * Math.pow(g, 0.7)) * Math.min(1, u / 0.012 + 0.6);
+        ink = (0.5 + 0.5 * a1) * (0.35 + 0.65 * g);
+      } else if (s.f === 1) {
+        /* swell: grows in from a point over the attack it was heard to take */
+        var A = Math.max(0.08, s.att);
+        w = (1 + 4.2 * s.a) * 1.6 * (0.04 + 0.96 * smooth(0, A, u)) * Math.min(1, (pc.t1 - tt) / 0.25 + 0.25);
+        ink = (0.45 + 0.55 * a1) * (0.3 + 0.7 * smooth(0, A, u));
+      } else {
+        /* held */
+        w = (1 + 4.2 * s.a) * 1.15 * Math.min(1, (tt - pc.t0) / 0.02 + 0.5); ink = 0.5 + 0.5 * a1;
+      }
+      var pt = { t: tt, y: y, w: w, a: ink, b: s.hs, z: s.f === 1 ? z * 0.5 : z, r: r, q: q };
+      if (L.thick === 'ear') {
+        /* as wide as the ear spreads it; how it was struck, swelled or held shows in the ink alone */
+        pt.e = earAt(S.noteEar, s.bs + Math.round((tt - s.t0) / Math.max(1e-6, s.t1 - s.t0) * (s.bn - 1)));
+      }
+      pts.push(pt);
+      if (tt >= end) break;
+    }
+    return pts;
   }
 
   /* ---- drums: one compact mark per hit, printed where the hit is loudest (a tom at its note, a snare at its crack,
@@ -899,6 +948,41 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   document.querySelectorAll('.ink').forEach(function (b) { meters[b.dataset.layer || b.dataset.toggle] = { el: b, v: -1 }; });
   function setMeter(name, v) { var m = meters[name]; if (!m) return; v = Math.round(clamp(v, 0, 1) * 20) / 20; if (v !== m.v) { m.v = v; m.el.style.setProperty('--lvl', v); } }
 
+  /* ?bench: window.pitchscapeBench(times, mode) draws the print at each time and resolves to the ms each layer took
+     (median and 95th percentile); tools/bench_frames.cjs drives it. mode 'paint': a pixel is read back after each
+     layer, so the canvas finishes painting it and its time includes the painting. 'js': each layer's JavaScript
+     alone. 'raf': one time per animation frame, as when playing; "frame" is then the time between frames, painting
+     and all (at least the screen's refresh interval). */
+  var BENCH = /[?&]bench\b/.test(location.search) ? {} : null, benchMode = 'paint';
+  function benchFlush() { if (benchMode === 'paint') ctx.getImageData(0, 0, 1, 1); }
+  function benchLayer(name, fn) { benchFlush(); var t = performance.now(); fn(); benchFlush(); (BENCH[name] = BENCH[name] || []).push(performance.now() - t); }
+  if (BENCH) window.pitchscapeBench = function (times, mode) {
+    benchMode = mode || 'paint';
+    for (var k in BENCH) delete BENCH[k];
+    var total = [];
+    function stats() {
+      BENCH.frame = total; var out = {};
+      for (var k in BENCH) {
+        var v = BENCH[k].slice().sort(function (a, b) { return a - b; });
+        out[k] = { med: v[v.length >> 1], p95: v[Math.min(v.length - 1, Math.floor(v.length * 0.95))], n: v.length };
+      }
+      return out;
+    }
+    if (benchMode !== 'raf') {
+      times.forEach(function (t) { benchFlush(); var t0 = performance.now(); draw(t); benchFlush(); total.push(performance.now() - t0); });
+      return Promise.resolve(stats());
+    }
+    return new Promise(function (done) {
+      var i = 0, last = 0;
+      (function step(ts) {
+        if (i > 0) total.push(ts - last);
+        last = ts;
+        if (i >= times.length) { total.shift(); return done(stats()); }
+        draw(times[i++]); requestAnimationFrame(step);
+      })(performance.now());
+    });
+  };
+
   var lastTf = '';
   function draw(now) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -906,6 +990,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     ctx.fillStyle = C.paper; ctx.fillRect(0, 0, W, H);
     var a = S.ana;
     if (!a) { drawGuides(); return; }
+    strokeCacheCheck();
     var fi = clamp(Math.floor(now / a.dt), 0, a.frames - 1);
     var bassNow = a.bassN[fi] || 0, kickImp = impulse(S.kicks, now, 14), snImp = impulse(S.snares, now, 18), hatImp = impulse(S.hats, now, 22);
     var lv = { guitar: 0, piano: 0, synths: 0 };
@@ -929,7 +1014,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       g2.addColorStop(0, rgba(kc, Math.min(0.3, 0.22 * L.pulse * kickImp))); g2.addColorStop(1, rgba(kc, 0));
       ctx.globalAlpha = 1; ctx.fillStyle = g2; ctx.fillRect(-30, H * 0.45, W + 60, H * 0.55 + 30);
     }
-    function layer(name, fn) { if (!S.vis[name]) return; ctx.save(); ctx.translate(mis[name][0], mis[name][1]); fn(); ctx.restore(); }
+    function layer(name, fn) { if (!S.vis[name]) return; ctx.save(); ctx.translate(mis[name][0], mis[name][1]); if (BENCH) benchLayer(name, fn); else fn(); ctx.restore(); }
     layer('synths', function () { drawSegs(now, lv, 0, 'synths'); });
     layer('piano', function () { drawSegs(now, lv, 2, 'piano'); });
     layer('guitar', function () { drawSegs(now, lv, 1, 'guitar'); });
