@@ -1,0 +1,58 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Words stage in the browser: check</title>
+<style>body{font:14px system-ui;margin:16px;background:#fff;color:#111}pre{white-space:pre-wrap}</style>
+<p>Runs the words stage (src/pipeline/words.mjs: tags, LRCLIB, Whisper) in this browser on a test song's vocal stem
+(Python's, testsongs/parity/NAME/py-s0/vocals.wav) and posts what it found and heard, with the times, to
+testsongs/parity/browser.jsonl. Served by <code>python tools/browser_check.py</code>; query:
+<code>?song=NAME&amp;size=medium&amp;models=URL</code> (models: default ../models/).</p>
+<pre id="log"></pre>
+<script type="module">
+import {webRuntime} from '../src/pipeline/runtime.web.mjs';
+import {songInfo, lyricsFor} from '../src/pipeline/words.mjs';
+
+const q = new URLSearchParams(location.search);
+const song = q.get('song') || 'brad-sucks-fluoride', size = q.get('size') || 'medium';
+const R = {check: 'words', song, size, ua: navigator.userAgent};
+const el = document.getElementById('log');
+const log = (...a) => { const s = a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' '); el.textContent += s + '\n'; };
+
+function readWav(buf) {          // 32-bit float WAV (soundfile's FLOAT) -> [channels]
+  const v = new DataView(buf);
+  let o = 12, fmt, data;
+  while (o < v.byteLength) {
+    const id = String.fromCharCode(...new Uint8Array(buf, o, 4)), sz = v.getUint32(o + 4, true);
+    if (id === 'fmt ') fmt = {ch: v.getUint16(o + 10, true), bits: v.getUint16(o + 22, true)};
+    if (id === 'data') data = [o + 8, sz];
+    o += 8 + sz + (sz & 1);
+  }
+  if (fmt.bits !== 32) throw new Error('expected 32-bit float WAV');
+  const all = new Float32Array(buf.slice(data[0], data[0] + data[1])), n = all.length / fmt.ch;
+  return Array.from({length: fmt.ch}, (_, c) => { const y = new Float32Array(n); for (let i = 0; i < n; i++) y[i] = all[i * fmt.ch + c]; return y; });
+}
+
+try {
+  const ad = await navigator.gpu?.requestAdapter({powerPreference: 'high-performance'});
+  if (!ad) throw new Error('no WebGPU adapter');
+  R.adapter = {vendor: ad.info.vendor, arch: ad.info.architecture};
+  const dl = {};
+  const rt = await webRuntime({models: q.get('models') || '../models/', log,
+    progress: (n, a, b) => { if (a === b && !dl[n]) { dl[n] = b; log(`${n}: ${(b / 1e6).toFixed(1)} MB`); } }});
+  const bytes = await (await fetch(`../testsongs/${song}.mp3`)).arrayBuffer();
+  const info = await songInfo(bytes, song + '.mp3', await rt.sha256(bytes));
+  R.info = info;
+  const vocals = readWav(await (await fetch(`../testsongs/parity/${song}/py-s0/vocals.wav`)).arrayBuffer());
+  const dur = vocals[0].length / 44100, stats = {}, t = performance.now();
+  let heard = null, language = null;
+  const [lyrics, found] = await lyricsFor(info, dur, vocals, rt, {stats, log, size, onHeard: (h, l) => { heard = h; language = l; }});
+  Object.assign(R, {lyrics, found, heard, language, words_s: +((performance.now() - t) / 1000).toFixed(2),
+    downloaded_mb: Object.fromEntries(Object.entries(dl).map(([k, b]) => [k, +(b / 1e6).toFixed(1)])), eps: rt.eps,
+    whisper: Object.fromEntries(Object.entries(stats.whisper || {}).map(([k, v]) => [k, k.endsWith('_ms') ? +(v / 1000).toFixed(2) : v])),
+    lrclib_s: stats.lrclib_ms != null ? +(stats.lrclib_ms / 1000).toFixed(2) : null});
+  log('found', found);
+  log('whisper', R.whisper, 'words', R.words_s, 's');
+  rt.close();
+  R.done = true;
+} catch (e) { R.error = String(e && e.stack || e); log('ERROR', R.error); }
+fetch('/result', {method: 'POST', body: JSON.stringify(R)});
+</script>

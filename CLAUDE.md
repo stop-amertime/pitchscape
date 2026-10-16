@@ -197,6 +197,63 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
   most of the JS time (~1.3 s a stem on one core).
 - Learned: `Math.hypot` allocates in V8 and doubled the pattern's time through GC; a direct DFT of only the kept
   bins was no faster than fft.js.
+- Bass (`bass.mjs`, `bass.dsp.mjs`): librosa 0.11's pyin transcribed (YIN in librosa's float32 steps, beta thresholds,
+  Boltzmann prior, the voicing HMM), rms, env_follow, Spec / brightness. bass.dsp.mjs also holds helpers the voice
+  stage shares: numpy's pairwise sum (bit-identical to np.sum and librosa's rms), np.percentile in float32,
+  `stftFrame`, and `viterbiBanded`: librosa.sequence.viterbi's exact decision (first argmax; out-of-band transitions
+  log(tiny)) for banded matrices, skipping 16-state chunks whose bound cannot reach the best (rounding is monotonic),
+  which takes the decode from 7 s to 3.3 s CPU. `python tools/parity.py bass`, all nine songs, 84631 frames: bassHz
+  agrees on 84630 (63515 sounding), 0 cents everywhere except 15 frames of the guitar solo one 10-cent bin apart and
+  one frame JS-only; pYIN's raw voicing agrees on 84583 (48 JS-only frames, all under the loudness floor), 32 frames a
+  bin apart. bassN is bit-identical given Python's 22.05 kHz signal (3.6e-7 with our resampler). The differences are
+  numpy's float32 FFT in the YIN autocorrelation (not reproducible bit for bit): on near-silent or high (near 400 Hz)
+  frames a trough lands in the neighbouring bin, e.g. the guitar solo's frame 290 (bin 426 against 427). Speed:
+  Python bass_line 29-87 s a song; JS 4.0-8.9 s on Node (machine loaded by other jobs), Chrome 4.2-7.0 s.
+- Voice (`voice.mjs`, `voice.dsp.mjs`): CREPE 'full' (`crepe_full.onnx`, torchcrepe 0.0.24's weights; ONNX vs
+  PyTorch 1.2e-7), torchcrepe.predict as called (16 kHz soxr, 1024-sample frames every 160, normalised; batches of
+  1024 frames each decoded alone by torchcrepe's default decoder, which is Viterbi, not weighted argmax), filter
+  median/mean, voice_gate, brightness, librosa onset_strength (mel, power_to_db, flux) and onset_detect. The network
+  runs in chunks of 128 frames (256 and 512 were slower on Node WebGPU); frames, decoding, mel and rms on the workers.
+  `python tools/parity.py voice`, nine songs, both sides without dither: against PyTorch in float32 (vs_fp32), heard
+  frames agree on all 84631, leadHz within 0.001 cents, leadP/leadNz within 6e-6, leadN 2.4e-7, all 4091 librosa
+  onsets and all 2754 onsets identical; of 196505 CREPE 10 ms frames 9 differ by a bin (one song, unheard frames).
+  Against Python as the pipeline runs it (vs_tf32) heard frames agree on 84627 and 74 CREPE frames differ: PyTorch's
+  default TF32 convolutions on the GPU; TF32 against float32 within PyTorch moves the same frames (hey-ruth: 14), and
+  JS = PyTorch float32 GPU = PyTorch CPU there. Speed: CREPE network Node WebGPU 6.8-22 s a song vs PyTorch CUDA
+  (TF32) 6.2-20 s; Chrome 155 on the RTX 5080 16.8 s (222 s song) and 16.9 s (240 s), stage 18 s; the Claude
+  app's browser pane gets the AMD iGPU only: 109 s. `tools/browser_voice.html?song=NAME` runs both stages in a
+  browser (served by browser_check.py). voice_line's own choice of 'tiny' on the CPU is not ported.
+- Learned: torchcrepe 0.0.24 adds random triangular dither (+-20 cents) to every pitch, so Python's voice pitch is not
+  repeatable; the JS dithers the same way by default (`stats.dither = false` to compare). numpy 2 keeps float32 when
+  an array meets a Python float (env_follow, thresholds, percentile + 1e-9), so those run in float32 here too. On
+  Windows, two servers can listen on the same port (another session's took half the requests): pick a free one.
+- Words (`words.mjs`, `tags.mjs`, `whisper.mjs`, `whisper.dsp.mjs`): `songInfo(bytes, name, sha)` is song_info with its
+  own tag reader (ID3v1/v2, MP3 Xing/LAME/VBRI, MP4, FLAC, Ogg Vorbis/Opus, WAV; FFmpeg 9.0.2's key names and length
+  arithmetic, no ffprobe); `lyricsFor(info, dur, vocals44, rt)` is lyrics_for: LRCLIB (header `Lrclib-Client` where a
+  browser forbids User-Agent; LRCLIB allows it cross-origin), find_lyrics, parse_lrc, difflib's matching blocks, and
+  place_words. Whisper is a port of faster-whisper 1.2.1's transcribe and the CTranslate2 parts it calls (Silero VAD v6,
+  log-mel, language, the temperature fallback with CTranslate2's beam search and best_of sampling as one batch, the
+  logits processors, align's median filter and DTW, word merging), on our own ONNX export (`tools/export_whisper.py`:
+  one input per layer for the encoder's keys and values and the cache, and an `order` input that reorders the cache
+  for the beams). Medium, as the pipeline: float16 for the browser (715 + 919 MB to download, cached once), float32
+  for Node's CPU (ONNX Runtime's CPU provider has no float16 products; onnxruntime-node cannot keep tensors on the GPU,
+  so its decoder runs on the CPU). Smaller models time words worse against medium: small and base 3-20 % within 0.1 s,
+  0.16-0.3 s early, where medium against itself is 93-100 %.
+  `python tools/parity.py words`, all nine songs, Node: songInfo identical to song_info on all nine; the same LRCLIB
+  record or the same reason for none on all nine (Code Monkey: none at this length). Placed words within 0.1 s of
+  Python's: Dropping Out 100 %, Incoherent 96 %, Hey Ruth 83 %, Fluoride 78 % (Python against its own second run:
+  100, 100, 100, 95 %). faster-whisper is not repeatable where a window falls back to sampling (Fluoride: four Python
+  runs heard 189, 243, 309 and 193 words). Where nothing samples, the port is CTranslate2's to the token: on Fluoride
+  and Hey Ruth every greedy window has the same tokens and scores within 0.005 of CTranslate2 float32 on the CPU, and
+  Hey Ruth's 4th window loops to 224 tokens and falls back in both, where CTranslate2 float16 on the GPU (the pipeline)
+  decodes it cleanly; Chrome's float16 falls back there too. Chrome 155, RTX 5080: Dropping Out (no fallback) same
+  record, same matched share, 97 % of heard words within 0.1 s, Whisper 32.5 s (Python on the GPU 26-33 s); Hey Ruth
+  112 s; Fluoride 133 s. Node: 47-235 s a song (decoder on the CPU, 100 ms a step). `tools/browser_words.html?song=NAME`
+  runs the stage in a browser (served by browser_check.py).
+- Learned: the decoder's time is dispatch, not arithmetic: a step costs about 3 ms a layer on WebGPU whatever the
+  precision or batch (base 21 ms, small 30, medium 73; five beams cost the same as one), so beams and best_of go in one
+  batch. Slicing one stacked [layers, ...] input copies it on every call (ONNX Runtime's CPU provider spent more on
+  that than on the step). An empty cache ([b, heads, 0, dh]) works on WebGPU.
 
 ## Versions: bump them together
 

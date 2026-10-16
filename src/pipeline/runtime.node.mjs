@@ -3,6 +3,9 @@
 //   session(name) -> {run(feeds) -> outputs}, feeds and outputs as {name: {data, dims}}; ep: the provider in use;
 //   pool: worker threads for CPU work (pool.mjs); decode(bytes, sr, channels); sha256(bytes); where ('node' or
 //   'browser'); eps ({model: provider}); close() when done. Feeds may give a `type` ('int64'...; float32 if none).
+//   session(name, {keep, ep}): keep names outputs the browser leaves on the GPU between calls (keeps: whether it can;
+//   such outputs go back in as feeds as they are, and release() frees them); ep picks a provider for that session.
+//   file(name): a manifest file that is not a model, as bytes.
 //   Calls to models on the GPU take turns (one at a time across sessions); CPU models run alongside them.
 import {spawn} from 'node:child_process';
 import os from 'node:os';
@@ -36,6 +39,9 @@ export async function nodeRuntime({ep = null, models = path.join(ROOT, 'models')
       return {post: (m, t) => w.postMessage(m, t), onMessage: f => w.on('message', f), terminate: () => w.terminate()};
     }),
     close() { rt.pool.terminate(); },
+    keeps: false,                  // onnxruntime-node gives every output back in CPU memory
+    file: async name => new Uint8Array(readFileSync(path.join(models, manifest[name].file))),
+    release() {},
     sha256: async bytes => createHash('sha256').update(new Uint8Array(bytes)).digest('hex'),
     async decode(bytes, sr, channels = 2) {
       // ffmpeg reads a file (an MP4 may keep its index at the end, which a pipe cannot seek to)
@@ -45,13 +51,14 @@ export async function nodeRuntime({ep = null, models = path.join(ROOT, 'models')
         return await decode(path.join(dir, 'song'), sr, channels);
       } finally { rmSync(dir, {recursive: true, force: true}); }
     },
-    async session(name) {
-      if (cache[name]) return cache[name];
+    async session(name, {ep: want = null} = {}) {
+      const key = want ? name + '|' + want : name;
+      if (cache[key]) return cache[key];
       const file = path.join(models, manifest[name].file);
       if (!existsSync(file)) throw new Error(`no ${file}: run python tools/export_models.py ${name}`);
       let sess, err;
       // a model the manifest says runs better on the CPU (tools/export_models.py says why) is not put on the GPU
-      for (const p of manifest[name].ep === 'cpu' ? ['cpu'] : order) {
+      for (const p of want ? [want] : manifest[name].ep === 'cpu' ? ['cpu'] : order) {
         try {
           sess = await ort.InferenceSession.create(file, {executionProviders: [p], graphOptimizationLevel: 'all'});
           rt.ep = p;
@@ -65,17 +72,17 @@ export async function nodeRuntime({ep = null, models = path.join(ROOT, 'models')
       log(`${name}: running on ${rt.ep}`);
       rt.eps[name] = rt.ep;
       const onGpu = rt.ep !== 'cpu';
-      cache[name] = {
+      cache[key] = {
         run(feeds) {
           const t = {};
-          for (const [k, v] of Object.entries(feeds)) t[k] = new ort.Tensor(v.type || 'float32', v.data, v.dims);
+          for (const [k, v] of Object.entries(feeds)) t[k] = v instanceof ort.Tensor ? v : new ort.Tensor(v.type || 'float32', v.data, v.dims);
           if (!onGpu) return sess.run(t);
           const r = gpu.then(() => sess.run(t));
           gpu = r.catch(() => {});
           return r;
         },
       };
-      return cache[name];
+      return cache[key];
     },
   };
   return rt;
