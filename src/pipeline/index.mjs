@@ -24,12 +24,13 @@ const mono = ([l, r]) => { const y = new Float32Array(l.length); for (let i = 0;
 /** bytes: the song file (ArrayBuffer); name: its file name (read as "Artist - Title" when it has no tags).
  * words: false to skip LRCLIB and Whisper. shifts: Demucs's (1, as the pipeline). stems: stems already made
  * ({name: [left, right]} at 44.1 kHz, e.g. Python's, to compare the later stages on the same input; Demucs is then
- * skipped, as pipeline.analyze's stems_dir). Returns the pack. */
-export async function analyze(bytes, name, rt, {progress = () => {}, words = true, shifts = 1, stats = {}, stems: given = null} = {}) {
+ * skipped, as pipeline.analyze's stems_dir). mix: the song already decoded ([left, right] at 44.1 kHz; the page
+ * decodes it, as a Worker cannot). Returns the pack. */
+export async function analyze(bytes, name, rt, {progress = () => {}, words = true, shifts = 1, stats = {}, stems: given = null, mix: decoded = null} = {}) {
   const t0 = performance.now(), ms = {};
   const timed = async (key, p) => { const t = performance.now(); const v = await p; ms[key] = Math.round(performance.now() - t); return v; };
   const sha = await rt.sha256(bytes);
-  const [song, mix] = await Promise.all([songInfo(bytes, name, sha), timed('decode', rt.decode(bytes, 44100))]);
+  const [song, mix] = await Promise.all([songInfo(bytes, name, sha), decoded || timed('decode', rt.decode(bytes, 44100))]);
   const dur = mix[0].length / 44100, F = frameCount(dur);
 
   if (given) progress('stems: given');
