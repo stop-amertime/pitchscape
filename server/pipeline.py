@@ -29,9 +29,19 @@ HOP = 512                       # 23.2 ms per frame, the page's dt
 DT = HOP / SR
 DB = 16                         # drum spectrum bands, log-spaced 30 Hz .. 11 kHz (must match DSP.DRUM_BANDS)
 DRUM_BANDS = [30 * (SR / 2 / 30) ** (i / DB) for i in range(DB + 1)]
-EVW, SEGW = 5 + DB, 16
+EVW, SEGW = 6 + DB, 17
 NOTE_STEMS = ('other', 'guitar', 'piano')   # a note's source: its index here
 TYPES = {'kick': 0, 'snare': 1, 'hat': 2, 'tom': 3, 'cymbal': 4}
+
+# Every cutoff that decides whether something prints is applied by the page, from a Lab lever, so it can be tried
+# out without analysing the song again. The server finds things down to these floors (the far end of each lever)
+# and sends how certain or how loud each one was. The levers' defaults are the models' own settings.
+DRUM_FLOOR = 0.6        # hits found down to 0.6x ADTOF's thresholds; each carries the multiple it passed at
+HOLD_FLOOR = 0.15       # notes followed until Basic Pitch is under 15% sure they still sound (its default: 30%)
+NOTE_MIN_MS = 50        # notes down to 50 ms (Basic Pitch's default here: 100)
+VOICE_P_FLOOR = 0.15    # voice frames down to CREPE periodicity 0.15 (the default cutoff: 0.45)
+VOICE_L_FLOOR = 0.01    # and down to 1% of the vocal stem's loud level (default 4%)
+BASS_L_FLOOR = 0.02     # bass down to 2% of the bass stem's loud level (default 8%)
 
 
 def log(*a):
@@ -78,7 +88,8 @@ ADTOF_OUT = [('kick', 0.22), ('snare', 0.24), ('tom', 0.32), ('hat', 0.22), ('cy
 
 
 def peak_pick(act, threshold, fps=100, pre_avg=0.1, post_avg=0.01, pre_max=0.02, post_max=0.01, combine=0.02):
-    """madmom's NotePeakPickingProcessor (the procedure ADTOF's thresholds were tuned with), for one class."""
+    """madmom's NotePeakPickingProcessor (the procedure ADTOF's thresholds were tuned with), for one class. Returns
+    the peaks and how far each rose above the moving average (what the threshold is compared with)."""
     from scipy.ndimage import maximum_filter1d, uniform_filter1d
     pa, po, pm, pq = (int(round(fps * v)) for v in (pre_avg, post_avg, pre_max, post_max))
     mov_avg = uniform_filter1d(act, pa + po + 1, mode='constant', origin=int(np.floor((pa - po) / 2))) if pa + po else 0
@@ -90,7 +101,8 @@ def peak_pick(act, threshold, fps=100, pre_avg=0.1, post_avg=0.01, pre_max=0.02,
         if (i - last) / fps > combine:
             kept.append(i)
             last = i
-    return np.array(kept, dtype=int)
+    kept = np.array(kept, dtype=int)
+    return kept, (act - mov_avg)[kept] if len(kept) else np.zeros(0)
 
 
 def drum_hits(drums44, model_path):
@@ -101,8 +113,10 @@ def drum_hits(drums44, model_path):
     act = sess.run(None, {sess.get_inputs()[0].name: mono[None]})[0][0]          # (frames, 5) at 100 fps
     hits = []
     for c, (kind, thr) in enumerate(ADTOF_OUT):
-        for i in peak_pick(act[:, c], thr):
-            hits.append((i / 100.0, kind, float(act[i, c])))
+        idx, rise = peak_pick(act[:, c], thr * DRUM_FLOOR)
+        for i, r in zip(idx, rise):
+            # margin: the multiple of ADTOF's threshold this hit still passes (1 or more: found at the default)
+            hits.append((i / 100.0, kind, float(act[i, c]), float(r) / thr))
     hits.sort()
     return hits
 
@@ -121,10 +135,10 @@ def drum_details(hits, drums22):
     ring_band = {'kick': (30, 150), 'snare': (150, 6000), 'tom': (60, 1000), 'hat': (5000, 11025), 'cymbal': (3000, 11025)}
     nF = E.shape[1]
     by_kind = {}
-    for t, kind, a in hits:
+    for t, kind, a, m in hits:
         by_kind.setdefault(kind, []).append(t)
     events = []
-    for t, kind, a in hits:
+    for t, kind, a, margin in hits:
         f = min(nF - 1, int(round(t * SR / hop)))
         cur = np.maximum(E[:, f], E[:, min(nF - 1, f + 1)])
         before = np.maximum(E[:, max(0, f - 1)], E[:, max(0, f - 2)])
@@ -150,7 +164,7 @@ def drum_details(hits, drums22):
         else:
             hz = float((prof * centres).sum() / prof.sum()) if prof.sum() > 0 else 1000.0
         strength = float(np.clip((a - 0.12) / 0.7, 0.15, 1.0))
-        events.append([t, TYPES[kind], strength, hz, ring] + [float(v) for v in prof])
+        events.append([t, TYPES[kind], strength, hz, ring] + [float(v) for v in prof] + [margin])
     return events
 
 
@@ -211,7 +225,9 @@ def bass_line(bass22, F):
     bassN = np.zeros(F, np.float32)
     bassN[:n] = env_follow(np.minimum(1.2, rms[:n] / ref))
     bassHz = np.zeros(F, np.float32)
-    ok = vflag[:n] & np.isfinite(f0[:n]) & (bassN[:n] >= 0.08)
+    # pYIN decides whether the bass sounds (its voicing is a decision over the whole line, not a cutoff on one
+    # frame); how quiet a bass still prints is the page's (it hides bass under its "quietest bass" lever, 8%)
+    ok = vflag[:n] & np.isfinite(f0[:n]) & (bassN[:n] >= BASS_L_FLOOR)
     bassHz[:n][ok] = f0[:n][ok]
     spec = Spec(y)
     br = np.zeros(F, np.float32)
@@ -226,6 +242,24 @@ def bass_line(bass22, F):
 
 
 # ------------------------------------------------------------------ voice
+def voice_gate(per, rel, hz, p_min, l_min, run_min):
+    """Which frames are sung: CREPE at least p_min sure of the pitch (periodicity), the vocal at least l_min of its
+    loud level, in runs of at least run_min frames. The page applies the same rule from its levers."""
+    v = np.isfinite(hz) & (per >= p_min) & (rel >= l_min)
+    f, F = 0, len(v)
+    while f < F:
+        if v[f]:
+            g = f
+            while g < F and v[g]:
+                g += 1
+            if g - f < run_min:
+                v[f:g] = False
+            f = g
+        else:
+            f += 1
+    return v
+
+
 def voice_line(vocals44, F, device):
     import librosa, torch, torchcrepe
     v16 = to_rate(vocals44.mean(0), 44100, 16000).astype(np.float32)
@@ -241,27 +275,18 @@ def voice_line(vocals44, F, device):
     y = to_rate(vocals44.mean(0), 44100, SR)
     rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=HOP, center=True)[0]
     rms = np.pad(rms, (0, max(0, F - len(rms))))[:F]
-    loud = rms > 0.04 * (np.percentile(rms, 98) + 1e-9)
-    voiced = (pr > 0.45) & loud & np.isfinite(hz)
-    # drop flickers: voiced runs shorter than 4 frames (~90 ms)
-    f = 0
-    while f < F:
-        if voiced[f]:
-            g = f
-            while g < F and voiced[g]:
-                g += 1
-            if g - f < 4:
-                voiced[f:g] = False
-            f = g
-        else:
-            f += 1
+    rel = (rms / (np.percentile(rms, 98) + 1e-9)).astype(np.float32)
+    voiced = voice_gate(pr, rel, hz, 0.45, 0.04, 4)          # the page's default cutoffs, for the reference levels
+    heard = np.isfinite(hz) & (pr >= VOICE_P_FLOOR) & (rel >= VOICE_L_FLOOR)
     ref = np.percentile(rms[voiced], 95) + 1e-9 if voiced.any() else 1.0
-    leadHz = np.where(voiced, hz, 0).astype(np.float32)
-    leadN = np.where(voiced, np.minimum(1.2, np.sqrt(rms / ref)), 0).astype(np.float32)
-    leadNz = np.where(voiced, 1 - pr, 0).astype(np.float32)
+    leadHz = np.where(heard, hz, 0).astype(np.float32)
+    leadP = np.where(heard, pr, 0).astype(np.float32)
+    leadL = np.where(heard, rel, 0).astype(np.float32)
+    leadN = np.where(heard, np.minimum(1.2, np.sqrt(rms / ref)), 0).astype(np.float32)
+    leadNz = np.where(heard, 1 - pr, 0).astype(np.float32)
     spec = Spec(y)
     leadBr = np.zeros(F, np.float32)
-    for f in np.nonzero(voiced)[0]:
+    for f in np.nonzero(heard)[0]:
         leadBr[f] = brightness(spec, f, leadHz[f], n=10, split=4)
     noiseRef = [float(np.percentile(leadNz[voiced], 20)), float(np.percentile(leadNz[voiced], 90))] if voiced.any() else [0, 1]
     # syllable-ish onsets for placing pasted lyrics: the start of each sung run, plus onsets inside runs
@@ -280,7 +305,7 @@ def voice_line(vocals44, F, device):
             if k in inner:
                 onsets.append([k * DT, 0.0, g * DT, 0.7])
         prev_end, f = g, g
-    return leadHz, leadN, leadBr, leadNz, noiseRef, onsets
+    return leadHz, leadP, leadL, leadN, leadBr, leadNz, noiseRef, onsets
 
 
 # ------------------------------------------------------------------ notes
@@ -288,13 +313,16 @@ BP_BEND_BIAS = 1         # Basic Pitch reports an in-tune note's bend as +1 bin 
                          # notes at exact MIDI pitches and on every steady note of the test song; taken off here
 
 
-def raw_bends(t0, t1, bends):
-    """Basic Pitch's bends for one note as (times, semitones from its MIDI pitch), unsmoothed: one value per model
-    frame, evenly spread over the note, in thirds of a semitone."""
+def raw_bends(t0, t1, bends, act):
+    """Basic Pitch's bends for one note as (times, semitones from its MIDI pitch, how sure it is the note still
+    sounds), unsmoothed: one value per model frame, evenly spread over the note; bends in thirds of a semitone."""
     if not bends:
-        return np.array([t0, t1]), np.zeros(2)
+        return np.array([t0, t1]), np.zeros(2), np.full(2, float(np.mean(act)) if len(act) else 1.0)
     b = (np.asarray(bends, np.float64) - BP_BEND_BIAS) / 3
-    return t0 + (t1 - t0) * (np.arange(len(b)) + 0.5) / len(b), b
+    a = np.asarray(act, np.float64)[:len(b)]
+    if len(a) < len(b):
+        a = np.pad(a, (0, len(b) - len(a)), mode='edge') if len(a) else np.ones(len(b))
+    return t0 + (t1 - t0) * (np.arange(len(b)) + 0.5) / len(b), b, a
 
 
 def smooth_bend(m):
@@ -312,10 +340,11 @@ def join_bends(notes, gap=0.15, near=0.75):
     after losing it for a few frames). A note that starts within `gap` s of where one on another pitch ended, at the
     pitch that one had bent to by its last frame (within `near` semitones: a plain step to the next semitone is a
     whole one), is the same note still bending: they become one note, its bend running on. A note struck again at
-    the same pitch stays two notes. Returns (t0, t1, MIDI pitch, amp, bend times, bend semitones from that pitch)."""
+    the same pitch stays two notes. Returns (t0, t1, MIDI pitch, amp, times, bend semitones from that pitch, how sure
+    Basic Pitch is the note still sounds)."""
     out = []
-    for t0, t1, pitch, amp, bends in sorted(notes, key=lambda n: n[0]):
-        tb, cb = raw_bends(t0, t1, bends)
+    for t0, t1, pitch, amp, bends, act in sorted(notes, key=lambda n: n[0]):
+        tb, cb, ab = raw_bends(t0, t1, bends, act)
         best, bd = None, near
         for a in out[-200:]:
             if a['t1'] < t0 - gap or a['t1'] > t0 + gap or a['t1'] > t1 or a['last'] == pitch:
@@ -324,17 +353,18 @@ def join_bends(notes, gap=0.15, near=0.75):
             if d <= bd:
                 best, bd = a, d
         if best is None:
-            out.append({'t0': t0, 't1': t1, 'pitch': pitch, 'last': pitch, 'amps': [(amp, t1 - t0)], 't': tb, 'm': pitch + cb})
+            out.append({'t0': t0, 't1': t1, 'pitch': pitch, 'last': pitch, 'amps': [(amp, t1 - t0)], 't': tb, 'm': pitch + cb, 'a': ab})
             continue
         keep = best['t'] < tb[0]
         best['t'] = np.concatenate([best['t'][keep], tb])
         best['m'] = np.concatenate([best['m'][keep], pitch + cb])
+        best['a'] = np.concatenate([best['a'][keep], ab])
         best['t1'], best['last'] = t1, pitch
         best['amps'].append((amp, t1 - t0))
     res = []
     for a in out:
         w = sum(d for _, d in a['amps']) or 1.0
-        res.append((a['t0'], a['t1'], a['pitch'], sum(v * d for v, d in a['amps']) / w, a['t'], smooth_bend(a['m']) - a['pitch']))
+        res.append((a['t0'], a['t1'], a['pitch'], sum(v * d for v, d in a['amps']) / w, a['t'], smooth_bend(a['m']) - a['pitch'], a['a']))
     return res
 
 
@@ -347,7 +377,7 @@ def note_details(notes, other22):
     spec = Spec(y, n_fft=4096, hop=256)
     fps = SR / 256
     segs = []
-    for t0, t1, pitch, amp, tb, cb in notes:
+    for t0, t1, pitch, amp, tb, cb, ab in notes:
         midi = pitch + float(np.median(cb))
         off = cb - (midi - pitch)
         fa, fb = int(t0 * fps), max(int(t0 * fps) + 2, int(t1 * fps))
@@ -391,7 +421,7 @@ def note_details(notes, other22):
             fam = 2
         hollow = 1 - min(1.0, 2 * ev / (ev + od)) if ev + od > 0 else 0.0
         segs.append([t0, t1, midi, amp, float(np.mean(br)) if br else 0.0,
-                     float(np.mean(nz)) if nz else 0.0, fam, attack, fade, vd, vr, hollow, float(env[pk]), (tb, off)])
+                     float(np.mean(nz)) if nz else 0.0, fam, attack, fade, vd, vr, hollow, float(env[pk]), (tb, off, ab)])
     segs.sort(key=lambda s: s[0])
     return segs
 
@@ -431,32 +461,44 @@ def notes_by_stem(stems, st22):
     return [r[:3] + [min(1.2, r[3] / aref)] + r[4:12] + [r[14], r[13]] for r in kept]
 
 
-def pack_bends(segs):
-    """Each note's bend on the page's frame grid (every DT s from t0 to t1), semitones from its pitch, all in one
-    flat list; a note that never strays a twelfth of a semitone from its pitch gets none. Returns the list and each
-    note's (start, count) in it."""
-    flat, where = [], []
+def pack_curves(segs):
+    """Each note through time on the page's frame grid (every DT s from t0 to t1): its bend, in semitones from its
+    pitch, and how sure Basic Pitch is that it still sounds (which the page's "note hold" lever cuts at). Two flat
+    lists, and each note's (start, count) in both."""
+    bends, holds, where = [], [], []
     for r in segs:
-        tb, off = r[13]
-        if len(off) < 2 or float(np.max(np.abs(off))) < 1 / 12:
-            where.append((0, 0))
-            continue
+        tb, off, ab = r[13]
         n = max(2, int(round((r[1] - r[0]) / DT)) + 1)
         tt = r[0] + (r[1] - r[0]) * np.arange(n) / (n - 1)
-        where.append((len(flat), n))
-        flat += [round(float(v), 3) for v in np.interp(tt, tb, off)]
-    return flat, where
+        where.append((len(bends), n))
+        bends += [round(float(v), 3) for v in np.interp(tt, tb, off)]
+        holds += [round(float(v), 3) for v in np.interp(tt, tb, ab)]
+    return bends, holds, where
 
 
 def notes_from_stem(other44):
+    """Basic Pitch's notes, followed down to HOLD_FLOOR, each with how sure the model is, frame by frame, that it still
+    sounds (its note activation at that pitch). Its amplitude is the mean of that over the frames above Basic Pitch's
+    own default (0.3), so a note's weight does not change with how far down it was followed."""
     import soundfile as sf
     from basic_pitch import ICASSP_2022_MODEL_PATH
     from basic_pitch.inference import predict
+    from basic_pitch.note_creation import model_frames_to_time
     with tempfile.NamedTemporaryFile(suffix='.wav') as tmp:
         sf.write(tmp.name, other44.T, 44100, subtype='FLOAT')
-        _, _, events = predict(tmp.name, ICASSP_2022_MODEL_PATH, onset_threshold=0.5, frame_threshold=0.3,
-                               minimum_note_length=100, melodia_trick=True)
-    return [(float(a), float(b), int(p), float(v), list(bd) if bd is not None else None) for a, b, p, v, bd in events]
+        out, _, events = predict(tmp.name, ICASSP_2022_MODEL_PATH, onset_threshold=0.5, frame_threshold=HOLD_FLOOR,
+                                 minimum_note_length=NOTE_MIN_MS, melodia_trick=True)
+    note = out['note']
+    times = model_frames_to_time(note.shape[0])
+    res = []
+    for a, b, p, v, bd in events:
+        i0 = int(np.argmin(np.abs(times - a)))
+        n = len(bd) if bd is not None else max(1, int(np.argmin(np.abs(times - b))) - i0)
+        act = note[i0:i0 + n, int(p) - 21].astype(np.float64)
+        top = act[act >= 0.3]
+        res.append((float(a), float(b), int(p), float(np.mean(top)) if len(top) else float(v),
+                    list(bd) if bd is not None else None, act))
+    return res
 
 
 # ------------------------------------------------------------------ tone
@@ -491,7 +533,8 @@ def _tone_slice(job):
 
 def harshness(rough, sharp):
     """How harsh a sound is, 0 (smooth) to 1, from the two measures of it: roughness counts above 0.1 asper (a
-    clearly grating sound by 0.4), sharpness above 1.75 acum (where it starts to annoy in Zwicker's model) to 3."""
+    clearly grating sound by 0.4), sharpness above 1.75 acum (where it starts to annoy in Zwicker's model) to 3.
+    The page does this itself, from its levers; this is the same rule at their defaults, for the stats."""
     r = min(1.0, max(0.0, (rough - 0.1) / 0.3))
     sh = min(1.0, max(0.0, (sharp - 1.75) / 1.25))
     return min(1.0, math.hypot(r, sh))
@@ -528,17 +571,17 @@ def tone(stems, segs, leadHz, bassHz, F, workers=None):
     with concurrent.futures.ProcessPoolExecutor(max_workers=workers or min(8, os.cpu_count() or 1), mp_context=ctx,
                                                 initializer=_tone_init, initargs=(paths,)) as ex:
         for key, res in zip(keys, ex.map(_tone_slice, keys, chunksize=8)):
-            jobs[key] = harshness(*res)
+            jobs[key] = res
     for path in paths.values():
         os.remove(path)
-    note_h = [jobs.get((NOTE_STEMS[int(r[12])], round((r[0] + min(0.3, 0.5 * (r[1] - r[0]))) / 0.2) * 0.2), 0.0) or 0.0 for r in segs]
+    note_rs = [jobs.get((NOTE_STEMS[int(r[12])], round((r[0] + min(0.3, 0.5 * (r[1] - r[0]))) / 0.2) * 0.2)) or (0.0, 0.0) for r in segs]
     lines = {}
     for name in ('vocals', 'bass'):
-        h = np.zeros(F, np.float32)
+        rough, sharp = np.zeros(F, np.float32), np.zeros(F, np.float32)
         for f in np.nonzero(grid[name])[0]:
-            h[f] = jobs.get((name, round(f * DT / 0.5) * 0.5), 0.0) or 0.0
-        lines[name] = h
-    return note_h, lines['vocals'], lines['bass'], len(keys)
+            rough[f], sharp[f] = jobs.get((name, round(f * DT / 0.5) * 0.5)) or (0.0, 0.0)
+        lines[name] = (rough, sharp)
+    return note_rs, lines['vocals'], lines['bass'], len(keys)
 
 
 # ------------------------------------------------------------------ words
@@ -757,12 +800,12 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
     bassN, bassHz, bassBr = bass_line(st22['bass'], F)
 
     progress('voice: CREPE')
-    leadHz, leadN, leadBr, leadNz, noiseRef, onsets = voice_line(stems['vocals'], F, device)
+    leadHz, leadP, leadL, leadN, leadBr, leadNz, noiseRef, onsets = voice_line(stems['vocals'], F, device)
 
     progress('tone: roughness and sharpness')
-    note_h, leadHarsh, bassHarsh, slices = tone(stems, segs, leadHz, bassHz, F)
-    bends, where = pack_bends(segs)
-    segs = [r[:13] + [h, w[0], w[1]] for r, h, w in zip(segs, note_h, where)]
+    note_rs, (leadRough, leadSharp), (bassRough, bassSharp), slices = tone(stems, segs, leadHz, bassHz, F)
+    bends, holds, where = pack_curves(segs)
+    segs = [r[:13] + [rs[0], rs[1], w[0], w[1]] for r, rs, w in zip(segs, note_rs, where)]
 
     lyrics, found = None, None
     if words:
@@ -775,7 +818,7 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
     sg = np.array(segs, np.float32).reshape(-1) if segs else np.zeros(0, np.float32)
     on = np.array(onsets, np.float32).reshape(-1) if onsets else np.zeros(0, np.float32)
     pack = {
-        'format': 'song-overprint-pack', 'version': 6, 'source': 'pitchscape-server',
+        'format': 'song-overprint-pack', 'version': 7, 'source': 'pitchscape-server',
         'models': {'stems': 'htdemucs_6s', 'drums': 'ADTOF Frame_RNN', 'notes': 'Basic Pitch ICASSP 2022',
                    'bass': 'pYIN', 'voice': 'CREPE', 'tone': 'MOSQITO roughness_dw, sharpness_din',
                    'words': 'LRCLIB, timed by Whisper' if words else None},
@@ -784,15 +827,21 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
         'dur': dur, 'dt': DT, 'frames': F, 'stereo': True, 'noiseRef': noiseRef,
         'segStride': SEGW, 'eventStride': EVW,
         'arrays': {'bassN': b64f32(bassN), 'bassHz': b64f32(bassHz), 'bassBr': b64f32(bassBr),
-                   'leadHz': b64f32(leadHz), 'leadN': b64f32(leadN), 'leadBr': b64f32(leadBr), 'leadNz': b64f32(leadNz),
+                   'leadHz': b64f32(leadHz), 'leadP': b64f32(leadP), 'leadL': b64f32(leadL), 'leadN': b64f32(leadN),
+                   'leadBr': b64f32(leadBr), 'leadNz': b64f32(leadNz),
                    'events': b64f32(ev), 'segs': b64f32(sg), 'onsets': b64f32(on),
-                   'leadHarsh': b64f32(leadHarsh), 'bassHarsh': b64f32(bassHarsh), 'bends': b64f32(bends)},
+                   'leadRough': b64f32(leadRough), 'leadSharp': b64f32(leadSharp),
+                   'bassRough': b64f32(bassRough), 'bassSharp': b64f32(bassSharp),
+                   'bends': b64f32(bends), 'holds': b64f32(holds)},
         'timing': None, 'lyrics': lyrics,
-        'stats': {'seconds': round(time.time() - t_start, 1), 'hits': {k: sum(1 for h in hits if h[1] == k) for k in TYPES},
-                  'notes': len(segs), 'voiced': float((leadHz > 0).mean()),
+        'floors': {'drums': DRUM_FLOOR, 'hold': HOLD_FLOOR, 'noteMs': NOTE_MIN_MS, 'voiceP': VOICE_P_FLOOR,
+                   'voiceL': VOICE_L_FLOOR, 'bassL': BASS_L_FLOOR},
+        'stats': {'seconds': round(time.time() - t_start, 1),
+                  'hits': {k: sum(1 for h in hits if h[1] == k and h[3] >= 1) for k in TYPES},
+                  'notes': len(segs), 'voiced': float(voice_gate(leadP, leadL, np.where(leadHz > 0, leadHz, np.nan), 0.45, 0.04, 4).mean()),
                   'notesByStem': {n: sum(1 for r in segs if int(r[12]) == i) for i, n in enumerate(NOTE_STEMS)},
-                  'harshNotes': round(float(np.mean([r[13] > 0.3 for r in segs])) if segs else 0.0, 3), 'toneSlices': slices,
-                  'bentNotes': sum(1 for r in segs if r[15] > 0), 'lyrics': found},
+                  'harshNotes': round(float(np.mean([harshness(r[13], r[14]) > 0.3 for r in segs])) if segs else 0.0, 3),
+                  'toneSlices': slices, 'lyrics': found},
     }
     progress('done in %.0f s' % (time.time() - t_start))
     return pack

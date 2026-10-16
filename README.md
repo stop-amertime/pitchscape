@@ -83,6 +83,26 @@ struck again at the same pitch stay separate notes. On a synthetic plucked note 
 then wobbled, Basic Pitch gave 11 fragments; joined, they are one stroke within 0.35 semitone of the true bend
 throughout. On Made in the Dark, whose guitar barely bends, 3 of 766 guitar notes were joined.
 
+**No cutoff is baked in.** Every threshold that decides whether something prints is applied by the page, from the
+Lab's Cutoffs tab, so it can be tried on a song without analysing it again. The server finds things down to a floor
+(the far end of each lever) and sends how sure each detector was or how loud each sound was; each lever starts at the
+detector's own setting:
+
+| Lever | What it cuts | Default (the model's own) | Server floor |
+| --- | --- | --- | --- |
+| Voice certainty | CREPE periodicity per frame | 0.45 | 0.15 |
+| Voice quietest | vocal loudness, share of its loud level | 4% | 1% |
+| Voice shortest | runs of sung frames | 90 ms | none |
+| Bass quietest | bass loudness (whether a bass note sounds at all is pYIN's own decision over the line) | 8% | 2% |
+| Note hold | Basic Pitch's frame by frame certainty that a note still sounds; dips under 0.13 s are bridged, as Basic Pitch does | 30% | 15% |
+| Note shortest | note length | 100 ms | 50 ms |
+| Drum certainty | multiple of ADTOF's per-drum thresholds each hit passed | 1x | 0.6x |
+| Rough from / Sharp from | where harshness starts (MOSQITO roughness, sharpness) | 0.1 asper / 1.75 acum | none |
+| Line break | a voice or bass leap that starts a new stroke | 4 semitones | none |
+
+At the defaults Made in the Dark prints as before: the same 146 kicks, 75 snares and 243 hats, the same voiced frames,
+and 1280 note stretches holding 606 s of note ink (pipeline 3 drew 1338 notes, 637 s). Hold at 15% gives 1167 s.
+
 Lyrics are the published ones, never a transcription. The pipeline reads the artist and title from the file's tags
 (or an "Artist - Title" file name), asks LRCLIB for the song at that length (within 3 s, since another length is
 another version), and times its words to the vocal stem: LRCLIB's words and Whisper's are matched in order, a matched
@@ -208,10 +228,12 @@ one that would steps up, or down, until it is clear.
   spectrum (what each of 16 log-spaced bands from 30 Hz to 11 kHz gained over the frames before it, each drum type
   limited to its own region), how long it rings (until its band falls 14 dB), and for kicks the pitch of the boom;
   `segs` as `[t0, t1, midi, amp, brightness, noise, family, attack, fadeDbPerS, vibratoDepth, vibratoHz, hollowness,
-  stem (0 other, 1 guitar, 2 piano), harshness, bendStart, bendCount]` x n (version 6, `segStride` 16, the only version
-  the page draws); `bends`: each bent note's pitch in semitones from its `midi`, every `dt` from t0 to t1, `bendCount`
-  values from `bendStart` (none for a note that holds its pitch); `leadHarsh`, `bassHarsh` per frame; `onsets` as
-  `[time, gapBefore, runEnd, strength]` x n. `lyrics`: `{language, source, lines: [{text, words: [[word, seconds]]}]}`
+  stem (0 other, 1 guitar, 2 piano), roughness, sharpness, curveStart, curveCount]` x n (version 7, `segStride` 17, the
+  only version the page draws); each note every `dt` from t0 to t1, `curveCount` values from `curveStart` in `bends`
+  (its pitch in semitones from `midi`) and `holds` (Basic Pitch's certainty it still sounds); `events` from version 7
+  end with the hit's margin (`eventStride` 22); per frame `leadP` (CREPE periodicity) and `leadL` (vocal loudness
+  share), `leadRough`, `leadSharp`, `bassRough`, `bassSharp`; voice and bass carry every frame down to the server's
+  floors, uncut; `onsets` as `[time, gapBefore, runEnd, strength]` x n. `lyrics`: `{language, source, lines: [{text, words: [[word, seconds]]}]}`
   or null, with why in `stats.lyrics`.
 - **Timing** (`song-overprint-timing`): `{lines: [{h, t, e, words: [startSeconds, ...]}]}`, one entry per sung line in
   sung order. `h` is `lineHash(line)`: FNV-1a 32-bit over the line lowercased with accents, punctuation and spaces

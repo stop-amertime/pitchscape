@@ -120,6 +120,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 .k i { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; border: 1.2px solid currentColor; border-radius: 50%; font: italic 700 10px/1 Georgia, "Times New Roman", serif; text-transform: none; }
 .k[aria-expanded="true"] { color: var(--ink); }
 .k-static { font: 500 11px/1.2 var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+.lab-h { margin: 14px 0 2px; font: 600 12px/1.2 var(--display); letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
 .lab-v { font: 500 11px/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
 .seg { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
 .seg button { min-height: 34px; padding: 0 10px; font: 600 13px/1 var(--display); color: var(--ink); background: transparent; border: 1px solid var(--rule); border-radius: 4px; cursor: pointer; }
@@ -210,7 +211,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 
   <section class="panel lab" id="labPanel" aria-label="Lab" hidden>
     <div class="panel-head"><button class="btn btn-small" id="labPlay" type="button" disabled>Play</button><input type="range" id="labSeek" min="0" max="1" step="0.01" value="0" aria-label="Position in song"><button class="btn btn-small btn-primary" type="button" data-close>Done</button></div>
-    <div class="tabs" role="tablist" aria-label="Lab sections"><button type="button" role="tab" id="tab-colour" data-tab="colour" aria-controls="pane-colour" aria-selected="false">Colour</button><button type="button" role="tab" id="tab-shapes" data-tab="shapes" aria-controls="pane-shapes" aria-selected="false">Shapes</button><button type="button" role="tab" id="tab-words" data-tab="words" aria-controls="pane-words" aria-selected="false">Words</button><button type="button" role="tab" id="tab-motion" data-tab="motion" aria-controls="pane-motion" aria-selected="false">Motion</button><button type="button" role="tab" id="tab-print" data-tab="print" aria-controls="pane-print" aria-selected="false">Print</button><button type="button" role="tab" id="tab-layers" data-tab="layers" aria-controls="pane-layers" aria-selected="false">Layers</button></div>
+    <div class="tabs" role="tablist" aria-label="Lab sections"><button type="button" role="tab" id="tab-colour" data-tab="colour" aria-controls="pane-colour" aria-selected="false">Colour</button><button type="button" role="tab" id="tab-shapes" data-tab="shapes" aria-controls="pane-shapes" aria-selected="false">Shapes</button><button type="button" role="tab" id="tab-words" data-tab="words" aria-controls="pane-words" aria-selected="false">Words</button><button type="button" role="tab" id="tab-motion" data-tab="motion" aria-controls="pane-motion" aria-selected="false">Motion</button><button type="button" role="tab" id="tab-print" data-tab="print" aria-controls="pane-print" aria-selected="false">Print</button><button type="button" role="tab" id="tab-cuts" data-tab="cuts" aria-controls="pane-cuts" aria-selected="false">Cutoffs</button><button type="button" role="tab" id="tab-layers" data-tab="layers" aria-controls="pane-layers" aria-selected="false">Layers</button></div>
       <div class="pane" id="pane-colour" data-pane="colour" role="tabpanel" aria-labelledby="tab-colour" hidden>
         <div class="row"><button type="button" class="k" data-tip="Instrument: each has its own ink for the whole song, warmer the more it is out front: voice pink, guitar orange, piano yellow, everything else (synths, strings, brass, organ) teal, darker for held notes and paler for swells, bass blue, drums black. Height: colour follows how high a sound sits. Note: colour follows the note name." aria-expanded="false" aria-describedby="ld-colour">Colour by<i aria-hidden="true">i</i></button><div class="seg" data-key="colour" role="group" aria-label="Colour by" aria-describedby="ld-colour"><button type="button" id="lab-colour-inst" data-v="inst">Instrument</button><button type="button" id="lab-colour-height" data-v="height">Height</button><button type="button" id="lab-colour-note" data-v="note">Note</button></div><span class="vh" id="ld-colour">Instrument: each has its own ink for the whole song, warmer the more it is out front: voice pink, guitar orange, piano yellow, everything else (synths, strings, brass, organ) teal, darker for held notes and paler for swells, bass blue, drums black. Height: colour follows how high a sound sits. Note: colour follows the note name.</span></div>
       </div>
@@ -234,6 +235,25 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
         <div class="row slide"><button type="button" class="k" data-tip="How dark everything prints." aria-expanded="false" aria-describedby="ld-ink">Ink<i aria-hidden="true">i</i></button><input type="range" id="lab-ink" data-key="ink" min="0.4" max="1.6" step="0.05" aria-label="Ink" aria-describedby="ld-ink"><span class="lab-v" id="lab-ink-v"></span><span class="vh" id="ld-ink">How dark everything prints.</span></div>
         <div class="row slide"><button type="button" class="k" data-tip="How thick the lines are." aria-expanded="false" aria-describedby="ld-weight">Thickness<i aria-hidden="true">i</i></button><input type="range" id="lab-weight" data-key="weight" min="0.5" max="1.8" step="0.05" aria-label="Thickness" aria-describedby="ld-weight"><span class="lab-v" id="lab-weight-v"></span><span class="vh" id="ld-weight">How thick the lines are.</span></div>
         <div class="row slide"><button type="button" class="k" data-tip="White flecks over the print, where the ink missed the paper." aria-expanded="false" aria-describedby="ld-grain">Speckle<i aria-hidden="true">i</i></button><input type="range" id="lab-grain" data-key="grain" min="0" max="1" step="0.05" aria-label="Speckle" aria-describedby="ld-grain"><span class="lab-v" id="lab-grain-v"></span><span class="vh" id="ld-grain">White flecks over the print, where the ink missed the paper.</span></div>
+      </div>
+      <div class="pane" id="pane-cuts" data-pane="cuts" role="tabpanel" aria-labelledby="tab-cuts" hidden>
+        <p class="hint">Where each detector stops printing. The starting values are the detectors’ own settings.</p>
+        <h3 class="lab-h">Voice</h3>
+        <div class="row slide"><button type="button" class="k" data-tip="How sure the pitch tracker must be that it hears a sung note. Lower prints more of the voice, and also breaths and bleed from other instruments. Its own setting: 45%." aria-expanded="false" aria-describedby="ld-vConf">Certainty<i aria-hidden="true">i</i></button><input type="range" id="lab-vConf" data-key="vConf" min="0.15" max="0.8" step="0.05" aria-label="Certainty" aria-describedby="ld-vConf"><span class="lab-v" id="lab-vConf-v"></span><span class="vh" id="ld-vConf">How sure the pitch tracker must be that it hears a sung note. Lower prints more of the voice, and also breaths and bleed from other instruments. Its own setting: 45%.</span></div>
+        <div class="row slide"><button type="button" class="k" data-tip="Singing quieter than this, as a share of the song’s loud singing, doesn’t print. Its own setting: 4%." aria-expanded="false" aria-describedby="ld-vFloor">Quietest<i aria-hidden="true">i</i></button><input type="range" id="lab-vFloor" data-key="vFloor" min="0.01" max="0.15" step="0.01" aria-label="Quietest" aria-describedby="ld-vFloor"><span class="lab-v" id="lab-vFloor-v"></span><span class="vh" id="ld-vFloor">Singing quieter than this, as a share of the song’s loud singing, doesn’t print. Its own setting: 4%.</span></div>
+        <div class="row slide"><button type="button" class="k" data-tip="Bits of voice shorter than this don’t print. Its own setting: 90 ms." aria-expanded="false" aria-describedby="ld-vRun">Shortest<i aria-hidden="true">i</i></button><input type="range" id="lab-vRun" data-key="vRun" min="0" max="300" step="10" aria-label="Shortest" aria-describedby="ld-vRun"><span class="lab-v" id="lab-vRun-v"></span><span class="vh" id="ld-vRun">Bits of voice shorter than this don’t print. Its own setting: 90 ms.</span></div>
+        <h3 class="lab-h">Bass</h3>
+        <div class="row slide"><button type="button" class="k" data-tip="Bass quieter than this, as a share of the song’s loud bass, doesn’t print. Its own setting: 8%." aria-expanded="false" aria-describedby="ld-bFloor">Quietest<i aria-hidden="true">i</i></button><input type="range" id="lab-bFloor" data-key="bFloor" min="0.02" max="0.3" step="0.01" aria-label="Quietest" aria-describedby="ld-bFloor"><span class="lab-v" id="lab-bFloor-v"></span><span class="vh" id="ld-bFloor">Bass quieter than this, as a share of the song’s loud bass, doesn’t print. Its own setting: 8%.</span></div>
+        <h3 class="lab-h">Notes</h3>
+        <div class="row slide"><button type="button" class="k" data-tip="A note keeps printing while the note detector is at least this sure it is still sounding. Lower lets notes ring on; higher cuts them short. Its own setting: 30%." aria-expanded="false" aria-describedby="ld-hold">Hold<i aria-hidden="true">i</i></button><input type="range" id="lab-hold" data-key="hold" min="0.15" max="0.6" step="0.05" aria-label="Hold" aria-describedby="ld-hold"><span class="lab-v" id="lab-hold-v"></span><span class="vh" id="ld-hold">A note keeps printing while the note detector is at least this sure it is still sounding. Lower lets notes ring on; higher cuts them short. Its own setting: 30%.</span></div>
+        <div class="row slide"><button type="button" class="k" data-tip="Notes shorter than this don’t print. Its own setting: 100 ms." aria-expanded="false" aria-describedby="ld-noteMin">Shortest<i aria-hidden="true">i</i></button><input type="range" id="lab-noteMin" data-key="noteMin" min="50" max="300" step="10" aria-label="Shortest" aria-describedby="ld-noteMin"><span class="lab-v" id="lab-noteMin-v"></span><span class="vh" id="ld-noteMin">Notes shorter than this don’t print. Its own setting: 100 ms.</span></div>
+        <h3 class="lab-h">Drums</h3>
+        <div class="row slide"><button type="button" class="k" data-tip="How sure the drum detector must be before a hit prints, as a multiple of its own settings. Lower prints quieter, ghostlier hits." aria-expanded="false" aria-describedby="ld-drumK">Certainty<i aria-hidden="true">i</i></button><input type="range" id="lab-drumK" data-key="drumK" min="0.6" max="1.6" step="0.05" aria-label="Certainty" aria-describedby="ld-drumK"><span class="lab-v" id="lab-drumK-v"></span><span class="vh" id="ld-drumK">How sure the drum detector must be before a hit prints, as a multiple of its own settings. Lower prints quieter, ghostlier hits.</span></div>
+        <h3 class="lab-h">Edges</h3>
+        <div class="row slide"><button type="button" class="k" data-tip="A sound rougher than this starts to get a jagged edge. Roughness is the grating buzz of beating tones, in asper. Default: 0.10." aria-expanded="false" aria-describedby="ld-rough0">Rough from<i aria-hidden="true">i</i></button><input type="range" id="lab-rough0" data-key="rough0" min="0.02" max="0.4" step="0.02" aria-label="Rough from" aria-describedby="ld-rough0"><span class="lab-v" id="lab-rough0-v"></span><span class="vh" id="ld-rough0">A sound rougher than this starts to get a jagged edge. Roughness is the grating buzz of beating tones, in asper. Default: 0.10.</span></div>
+        <div class="row slide"><button type="button" class="k" data-tip="A sound sharper than this starts to get a jagged edge. Sharpness is how much of it is high and piercing, in acum. Default: 1.75." aria-expanded="false" aria-describedby="ld-sharp0">Sharp from<i aria-hidden="true">i</i></button><input type="range" id="lab-sharp0" data-key="sharp0" min="1" max="3" step="0.05" aria-label="Sharp from" aria-describedby="ld-sharp0"><span class="lab-v" id="lab-sharp0-v"></span><span class="vh" id="ld-sharp0">A sound sharper than this starts to get a jagged edge. Sharpness is how much of it is high and piercing, in acum. Default: 1.75.</span></div>
+        <h3 class="lab-h">Lines</h3>
+        <div class="row slide"><button type="button" class="k" data-tip="A voice or bass line that jumps more than this many semitones at once starts a new stroke. Default: 4." aria-expanded="false" aria-describedby="ld-leap">Line break<i aria-hidden="true">i</i></button><input type="range" id="lab-leap" data-key="leap" min="1" max="12" step="0.5" aria-label="Line break" aria-describedby="ld-leap"><span class="lab-v" id="lab-leap-v"></span><span class="vh" id="ld-leap">A voice or bass line that jumps more than this many semitones at once starts a new stroke. Default: 4.</span></div>
       </div>
       <div class="pane" id="pane-layers" data-pane="layers" role="tabpanel" aria-labelledby="tab-layers" hidden>
         <div class="ink-grid">
@@ -309,7 +329,9 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   var LAB_DEF = {
     colour: 'inst', drums: 'sound', kick: 'smudge', bass: 'smudge', font: 'grotesque', wordSize: 'voice',
     shake: reduceMotion ? 0 : 0.25, tilt: reduceMotion ? 0 : 0.5, pulse: reduceMotion ? 0 : 0.6, slip: reduceMotion ? 0 : 0.35,
-    secs: 0, ink: 1, weight: 1, grain: 0.5
+    secs: 0, ink: 1, weight: 1, grain: 0.5,
+    /* cutoffs: the defaults are each model's own settings */
+    vConf: 0.45, vFloor: 0.04, vRun: 90, bFloor: 0.08, hold: 0.3, noteMin: 100, drumK: 1, rough0: 0.1, sharp0: 1.75, leap: 4
   };
   /* only the settings changed from the defaults are kept, so a later change of default reaches everyone who left
      that setting alone. Settings saved in the older all-in-one form are dropped once. */
@@ -357,30 +379,75 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   /* ------------------------------------------------------------ analysis results */
   function setAnalysis(ana) {
     S.ana = ana; S.dur = ana.dur;
-    S.kicks = []; S.snares = []; S.hats = []; S.toms = []; S.cymbals = [];
-    var lists = [S.kicks, S.snares, S.hats, S.toms, S.cymbals], i;
-    /* drum hits: [time, type, strength, Hz] and, from engine v3, [ring s, spectrum in DRUM_BANDS] */
-    var EW = ana.evW || 4, ev = ana.events;
+    /* drum hits: [time, type, strength, Hz, ring s, spectrum in DRUM_BANDS, margin]. Margin: the multiple of the
+       drum detector's own threshold the hit passed at (it found hits down to 0.6x); the "drum certainty" lever cuts
+       there. */
+    var EW = ana.evW, ev = ana.events, i;
+    S.hits = [];
     for (i = 0; i + EW <= ev.length; i += EW) {
-      var e = { t: ev[i], s: ev[i + 2], hz: ev[i + 3], d: EW > 4 ? ev[i + 4] : 0.08, p: EW > 4 ? ev.subarray(i + 5, i + EW) : null, id: i / EW };
-      e.br = brightOf(e.p); e.mhz = markHz(ev[i + 1], e);
-      lists[ev[i + 1]].push(e);
+      var e = { t: ev[i], k: ev[i + 1], s: ev[i + 2], hz: ev[i + 3], d: ev[i + 4], p: ev.subarray(i + 5, i + 5 + 16), mg: ev[i + EW - 1], id: i / EW };
+      e.br = brightOf(e.p); e.mhz = markHz(e.k, e);
+      S.hits.push(e);
     }
-    S.segs = []; S.segMax = 0; S.bends = ana.bends;
+    S.segs = []; S.bends = ana.bends; S.holds = ana.holds;
     /* note records: [t0, t1, midi, amp, brightness, noise, family, attack s, fade dB/s, vibrato depth st, vibrato
-       rate Hz, hollowness, stem, harshness, bend start, bend count]. Family: 0 struck, 1 swell, 2 held. Stem: 0
-       other, 1 guitar, 2 piano. Harshness 0..1. The bend is the note's pitch, in semitones from midi, every dt from t0
-       to t1: bend count values in ana.bends from bend start (none for a note that holds its pitch). */
+       rate Hz, hollowness, stem, roughness asper, sharpness acum, curve start, curve count]. Family: 0 struck, 1
+       swell, 2 held. Stem: 0 other, 1 guitar, 2 piano. The curve is the note every dt from t0 to t1, count values
+       from start in ana.bends (its pitch, in semitones from midi) and ana.holds (how sure the note detector is that it
+       still sounds, which the "note hold" lever cuts at). */
     var SW = ana.segW, q = ana.segs;
     for (i = 0; i + SW <= q.length; i += SW) {
-      var sg = { t0: q[i], t1: q[i + 1], m: q[i + 2], a: q[i + 3], b: q[i + 4], z: q[i + 5], f: q[i + 6], att: q[i + 7], dec: q[i + 8], vd: q[i + 9], vr: q[i + 10], h: q[i + 11], src: q[i + 12], hs: q[i + 13], bs: q[i + 14], bn: q[i + 15], id: i / SW };
-      S.segs.push(sg); if (sg.t1 - sg.t0 > S.segMax) S.segMax = sg.t1 - sg.t0;
+      S.segs.push({ t0: q[i], t1: q[i + 1], m: q[i + 2], a: q[i + 3], b: q[i + 4], z: q[i + 5], f: q[i + 6], att: q[i + 7], dec: q[i + 8], vd: q[i + 9], vr: q[i + 10], h: q[i + 11], src: q[i + 12], ro: q[i + 13], sh: q[i + 14], bs: q[i + 15], bn: q[i + 16], id: i / SW });
     }
-    ana.leadHz = steadyVoice(ana.leadHz);
+    /* the voice and bass as they came (every frame the models heard anything), before the cutoffs */
+    ana.leadHz0 = ana.leadHz; ana.bassHz0 = ana.bassHz;
+    applyCuts();
+  }
+  /* how harsh a sound is, 0 (smooth) to 1: roughness above the "rough from" lever (clearly grating 0.3 asper past it)
+     and sharpness above "sharp from" (1.25 acum past it), taken together */
+  function harsh(ro, sh) { return Math.min(1, Math.hypot(clamp((ro - L.rough0) / 0.3, 0, 1), clamp((sh - L.sharp0) / 1.25, 0, 1))); }
+  /* every cutoff, from the Lab's levers: what prints of the voice, bass, notes and drums, and how harsh each is */
+  function applyCuts() {
+    var ana = S.ana; if (!ana) return;
+    var F = ana.frames, i, k;
+    /* voice: sung where the pitch tracker is sure enough and the voice loud enough, in long enough runs */
+    var v = new Uint8Array(F), run = Math.max(1, Math.round(L.vRun / 1000 / ana.dt));
+    for (i = 0; i < F; i++) v[i] = ana.leadHz0[i] > 0 && ana.leadP[i] >= L.vConf && ana.leadL[i] >= L.vFloor ? 1 : 0;
+    for (i = 0; i < F;) { if (!v[i]) { i++; continue; } k = i; while (k < F && v[k]) k++; if (k - i < run) v.fill(0, i, k); i = k; }
+    var lh = new Float32Array(F); for (i = 0; i < F; i++) lh[i] = v[i] ? ana.leadHz0[i] : 0;
+    ana.leadHz = steadyVoice(lh);
+    /* bass: where its tracker heard a note, if loud enough */
+    var bh = new Float32Array(F); for (i = 0; i < F; i++) bh[i] = ana.bassN[i] >= L.bFloor ? ana.bassHz0[i] : 0;
+    ana.bassHz = bh;
     /* how harsh the voice and bass are, measured every half second: eased over a quarter of a second each way */
-    ana.leadH = easeOut(ana.leadHarsh, 11); ana.bassH = easeOut(ana.bassHarsh, 11);
+    var hl = new Float32Array(F), hb = new Float32Array(F);
+    for (i = 0; i < F; i++) { hl[i] = harsh(ana.leadRough[i], ana.leadSharp[i]); hb[i] = harsh(ana.bassRough[i], ana.bassSharp[i]); }
+    ana.leadH = easeOut(hl, 11); ana.bassH = easeOut(hb, 11);
+    /* drums */
+    S.kicks = []; S.snares = []; S.hats = []; S.toms = []; S.cymbals = [];
+    var lists = [S.kicks, S.snares, S.hats, S.toms, S.cymbals];
+    S.hits.forEach(function (e) { if (e.mg >= L.drumK) lists[e.k].push(e); });
+    /* notes: each prints while the note detector is at least "note hold" sure it still sounds, bridging dips
+       shorter than Basic Pitch's own 11 frames (0.13 s); a stretch shorter than "shortest note" is dropped */
+    S.pieces = []; S.segMax = 0;
+    var tol = 11 * 256 / 22050, minLen = L.noteMin / 1000, H = S.holds;
+    S.segs.forEach(function (sg) {
+      sg.hs = harsh(sg.ro, sg.sh);
+      var n = sg.bn, dtn = (sg.t1 - sg.t0) / Math.max(1, n - 1), a = -1, last = -1, first = true;
+      function close() {
+        var t0 = a === 0 ? sg.t0 : sg.t0 + a * dtn, t1 = Math.min(sg.t1, sg.t0 + last * dtn + dtn);
+        if (t1 - t0 >= minLen) { S.pieces.push({ s: sg, t0: t0, t1: t1 }); if (t1 - t0 > S.segMax) S.segMax = t1 - t0; }
+      }
+      for (var j = 0; j < n; j++) {
+        /* a note starts where it was struck, even if the detector takes a moment to be sure of it */
+        if (H[sg.bs + j] >= L.hold) { if (a < 0) a = first && j * dtn <= tol ? 0 : j; last = j; }
+        else if (a >= 0 && (j - last) * dtn > tol) { close(); a = -1; first = false; }
+      }
+      if (a >= 0) close();
+    });
+    S.pieces.sort(function (x, y) { return x.t0 - y.t0; });
     var hz = []; for (i = 0; i < ana.leadHz.length; i += 3) if (ana.leadHz[i] > 0) hz.push(ana.leadHz[i]);
-    hz.sort(function (a, b) { return a - b; }); S.medHz = hz.length ? hz[hz.length >> 1] : 330;
+    hz.sort(function (x, y) { return x - y; }); S.medHz = hz.length ? hz[hz.length >> 1] : 330;
     fitRange(ana); scaleY();
   }
   /* the sheet's pitch range, fitted to the song: from a little below its lowest notes to a little above its highest
@@ -389,7 +456,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     var hz = [], i;
     for (i = 0; i < ana.bassHz.length; i += 2) if (ana.bassHz[i] > 0) hz.push(ana.bassHz[i]);
     for (i = 0; i < ana.leadHz.length; i += 2) if (ana.leadHz[i] > 0) hz.push(ana.leadHz[i]);
-    S.segs.forEach(function (sg) { var f = DSP.mtof(sg.m); for (var k = Math.max(1, Math.round((sg.t1 - sg.t0) / (2 * ana.dt))); k > 0; k--) hz.push(f); });
+    S.pieces.forEach(function (pc) { var f = DSP.mtof(pc.s.m); for (var k = Math.max(1, Math.round((pc.t1 - pc.t0) / (2 * ana.dt))); k > 0; k--) hz.push(f); });
     if (hz.length < 50) { F_LO = Math.log2(28); F_HI = Math.log2(10000); return; }
     hz.sort(function (a, b) { return a - b; });
     var lo = Math.log2(hz[Math.floor(hz.length * 0.01)]) - 0.25, hi = Math.log2(hz[Math.floor(hz.length * 0.995)]) + 0.33;
@@ -576,8 +643,8 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       var hz = getHz(f);
       if (!(hz > 0)) { flush(false); continue; }
       var y = yOf(hz), p = { t: f * dt, y: y, w: getW(f), a: getA(f), b: getB(f), z: getZ(f), r: rate(hz), c: tint(group, hz, y) };
-      /* glides stay joined; a leap of more than a major third starts a new stroke (both ends taper) */
-      if (pts.length && Math.abs(12 * Math.log2(hz / lastHz)) > 4) flush(false);
+      /* glides stay joined; a leap of more than the "line break" lever (a major third) starts a new stroke */
+      if (pts.length && Math.abs(12 * Math.log2(hz / lastHz)) > L.leap) flush(false);
       pts.push(p); lastHz = hz;
       if (f === f1) head = p;
     }
@@ -588,23 +655,23 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 
   /* a note's pitch at time t: its MIDI pitch plus its bend there (read between the bend's samples) */
   function bendAt(s, t) {
-    if (!s.bn) return 0;
+    if (s.bn < 2) return 0;
     var u = clamp((t - s.t0) / Math.max(1e-6, s.t1 - s.t0), 0, 1) * (s.bn - 1), k = Math.min(s.bn - 2, Math.floor(u)), f = u - k, b = S.bends, j = s.bs + k;
     return b[j] + (b[j + 1] - b[j]) * f;
   }
   /* the guitar, piano or other notes (src), each drawn along its pitch as it bends */
   var SEMI_PX = 1;
   function drawSegs(now, lv, src, key) {
-    var t0w = now - WIN - 0.2, i = lowerBound(S.segs, t0w - S.segMax, 't0');
-    for (; i < S.segs.length; i++) {
-      var s = S.segs[i]; if (s.t0 > now) break; if (s.t1 < t0w || s.src !== src) continue;
-      var end = Math.min(s.t1, now); if (end - s.t0 < 0.02) continue;
-      if (s.t1 >= now) lv[key] += s.a * 0.5;
-      var hz = DSP.mtof(s.m), y0 = yOf(hz), br = brMap(s.b), z = zSeg(s.z), r = rate(hz), a1 = Math.min(1, s.a), pts = [], seed = 101 + s.id * 7, open = s.t1 > now;
+    var t0w = now - WIN - 0.2, i = lowerBound(S.pieces, t0w - S.segMax, 't0');
+    for (; i < S.pieces.length; i++) {
+      var pc = S.pieces[i], s = pc.s; if (pc.t0 > now) break; if (pc.t1 < t0w || s.src !== src) continue;
+      var end = Math.min(pc.t1, now); if (end - pc.t0 < 0.02) continue;
+      if (pc.t1 >= now) lv[key] += s.a * 0.5;
+      var hz = DSP.mtof(s.m), y0 = yOf(hz), br = brMap(s.b), z = zSeg(s.z), r = rate(hz), a1 = Math.min(1, s.a), pts = [], seed = 101 + s.id * 7, open = pc.t1 > now;
       var q = s.h > 0.5 ? clamp((s.h - 0.5) * 2.5, 0, 1) : 0;
-      var step = s.bn ? S.ana.dt : 0.03;
-      for (var t = s.t0; ; t += step) {
-        var tt = Math.min(t, end), u = tt - s.t0, y = s.bn ? yOf(DSP.mtof(s.m + bendAt(s, tt))) : y0, w, ink;
+      /* u: time since the note was struck (a later stretch of the same note carries on its fade) */
+      for (var t = pc.t0; ; t += S.ana.dt) {
+        var tt = Math.min(t, end), u = tt - s.t0, y = yOf(DSP.mtof(s.m + bendAt(s, tt))), w, ink;
         if (s.f === 0) {
           /* struck: full weight at the strike, thinning and paling at the fade rate measured for this note */
           var g = Math.pow(10, Math.max(-80, Math.min(0, s.dec)) * u / 20);
@@ -613,11 +680,11 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
         } else if (s.f === 1) {
           /* swell: grows in from a point over the attack it was heard to take */
           var A = Math.max(0.08, s.att);
-          w = (1 + 4.2 * s.a) * 1.6 * (0.04 + 0.96 * smooth(0, A, u)) * Math.min(1, (s.t1 - tt) / 0.25 + 0.25);
+          w = (1 + 4.2 * s.a) * 1.6 * (0.04 + 0.96 * smooth(0, A, u)) * Math.min(1, (pc.t1 - tt) / 0.25 + 0.25);
           ink = (0.45 + 0.55 * a1) * (0.3 + 0.7 * smooth(0, A, u));
         } else {
           /* held */
-          w = (1 + 4.2 * s.a) * 1.15 * Math.min(1, u / 0.02 + 0.5); ink = 0.5 + 0.5 * a1;
+          w = (1 + 4.2 * s.a) * 1.15 * Math.min(1, (tt - pc.t0) / 0.02 + 0.5); ink = 0.5 + 0.5 * a1;
         }
         pts.push({ t: tt, y: y, w: w, a: ink, b: s.hs, z: s.f === 1 ? z * 0.5 : z, r: r, q: q });
         if (tt >= end) break;
@@ -1234,9 +1301,9 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   } catch (e) { /* no config */ }
   /* where a song's analysis is kept on the device: a new version of the server's analysis starts afresh */
   function packKey(sha) { return 'pack:' + PIPELINE + ':' + sha; }
-  /* only an analysis from the current pipeline (3, which writes pack version 6) is drawn: an older one lacks what the
+  /* only an analysis from the current pipeline (4, which writes pack version 7) is drawn: an older one lacks what the
      drawing needs, so the song is analysed again rather than drawn with stand-ins */
-  function current(pack) { return !!(pack && pack.version >= 6 && pack.segStride === 16); }
+  function current(pack) { return !!(pack && pack.version >= 7 && pack.segStride === 17); }
   var idb = (function () {
     var dbp = null;
     function open() {
@@ -1402,7 +1469,12 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 
   /* lab */
   var labPanel = $('labPanel'), panels = ['songPanel', 'lyricsPanel', 'labPanel'].map($);
-  function labVal(k, v) { return k === 'secs' ? v.toFixed(1) + ' s' : k === 'ink' || k === 'weight' ? '×' + v.toFixed(2) : Math.round(v * 100) + '%'; }
+  function labVal(k, v) {
+    return k === 'secs' ? v.toFixed(1) + ' s' : k === 'ink' || k === 'weight' || k === 'drumK' ? '×' + v.toFixed(2)
+      : k === 'vRun' || k === 'noteMin' ? Math.round(v) + ' ms' : k === 'rough0' ? v.toFixed(2) + ' asper' : k === 'sharp0' ? v.toFixed(2) + ' acum'
+      : k === 'leap' ? v + ' st' : Math.round(v * 100) + '%';
+  }
+  var CUTS = { vConf: 1, vFloor: 1, vRun: 1, bFloor: 1, hold: 1, noteMin: 1, drumK: 1, rough0: 1, sharp0: 1 };
   function labUI() {
     labPanel.querySelectorAll('.seg').forEach(function (g) {
       var k = g.dataset.key;
@@ -1418,6 +1490,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   }
   function labApply(k) {
     saveLab();
+    if (CUTS[k] || k === 'all') { applyCuts(); layoutWords(); }
     if (k === 'secs' || k === 'all') resize();
     if (k === 'font' || k === 'wordSize' || k === 'weight' || k === 'all') ensureFont(L.font).then(function () { layoutWords(); S.dirty = true; });
     labUI(); S.dirty = true;
