@@ -4,8 +4,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=DM+Mono:wght@400;500&display=swap">
 <style>
-/* One screen that never scrolls: the print fills it. Controls float over its foot while they are wanted and fade
-   while a song plays; Song, Lyrics and Lab open as a panel below the print, which shrinks to sit above it.
+/* It opens on a page for picking a song (the splash); then one screen that never scrolls: the print fills it.
+   Controls float over its foot while they are wanted and fade while a song plays; the Lab opens from a faint cog as a
+   panel below the print, which shrinks to sit above it.
    A single light theme on purpose: the piece is ink on paper, and multiply blending needs a light ground. */
 :root {
   --paper: #EEF0EA;
@@ -54,8 +55,15 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 .scrub { flex: 1; min-width: 0; }
 #seek { width: 100%; margin: 0; accent-color: var(--pink); height: 28px; }
 .times { display: flex; justify-content: space-between; font: 500 11.5px/1 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
-.hud-btns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.hud-btns .btn { justify-content: center; background: rgba(246, 247, 243, 0.9); }
+.hud-top { display: flex; align-items: center; gap: 10px; }
+.hud-top .track { flex: 1; }
+.hud-top .btn { flex: none; background: rgba(246, 247, 243, 0.9); }
+/* the Lab: a faint cog in the top corner, there and gone with the controls */
+.cog { position: absolute; z-index: 1; top: max(6px, env(safe-area-inset-top, 0px)); right: max(6px, env(safe-area-inset-right, 0px)); width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: rgba(238, 240, 234, 0.6); color: var(--ink); opacity: 0.55; cursor: pointer; transition: opacity 220ms ease; }
+.cog:hover, .cog:focus-visible { opacity: 1; }
+.cog svg { width: 22px; height: 22px; }
+.cog.away { opacity: 0; pointer-events: none; }
+.cog:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
 
 /* buttons */
 .btn { position: relative; display: inline-flex; align-items: center; gap: 8px; min-height: 42px; padding: 0 15px; font: 600 14px/1 var(--display); color: var(--ink); background: transparent; border: 1.5px solid var(--ink); border-radius: 6px; cursor: pointer; }
@@ -68,7 +76,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 .file-btn input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; font-size: 100px; }
 
 /* messages and progress, over the print */
-.toast { position: absolute; z-index: 2; top: max(12px, env(safe-area-inset-top, 0px)); left: 12px; right: 12px; margin: 0; padding: 10px 14px; background: rgba(246, 247, 243, 0.97); border: 1px solid var(--rule); border-radius: 8px; font: 500 14px/1.4 var(--display); color: var(--ink); box-shadow: 0 8px 22px -16px rgba(35, 45, 30, 0.7); }
+.toast { position: fixed; z-index: 5; top: max(12px, env(safe-area-inset-top, 0px)); left: 12px; right: 12px; margin: 0; padding: 10px 14px; background: rgba(246, 247, 243, 0.97); border: 1px solid var(--rule); border-radius: 8px; font: 500 14px/1.4 var(--display); color: var(--ink); box-shadow: 0 8px 22px -16px rgba(35, 45, 30, 0.7); }
 .toast.err { color: #B3262E; }
 .toast:empty { display: none; }
 .status { position: absolute; z-index: 1; left: 16px; right: 16px; top: 50%; transform: translateY(-50%); background: rgba(246, 247, 243, 0.96); border: 1px solid var(--rule); border-radius: 8px; padding: 14px 16px; }
@@ -76,14 +84,9 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 .status .bar { height: 4px; margin-top: 10px; background: var(--rule); border-radius: 2px; overflow: hidden; }
 .status .bar i { display: block; height: 100%; width: 0; background: var(--pink); transition: width 120ms linear; }
 .status .note { margin-top: 8px; font: 400 13px/1.4 var(--display); color: var(--muted); }
-.tapzone { position: absolute; z-index: 2; left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom, 0px)); background: rgba(246, 247, 243, 0.96); border: 1.5px solid var(--teal); border-radius: 8px; padding: 10px 12px; display: grid; gap: 6px; }
 .eyebrow { font: 500 11px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
-.tapzone .eyebrow { color: var(--teal); }
-.tapzone .tap-line { margin: 0; font: 600 16px/1.3 var(--display); text-wrap: balance; }
-.tapzone .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
-.tapzone .count { font: 500 12px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
 
-/* panels: Song, Lyrics and Lab, one at a time, below the print */
+/* the Lab panel, below the print */
 .panel {
   position: relative; max-height: 58dvh; overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box;
   background: var(--sheet); border-top: 1px solid var(--rule); border-radius: 14px 14px 0 0; box-shadow: 0 -12px 28px -22px rgba(35, 45, 30, 0.6);
@@ -99,14 +102,29 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 .panel-body { display: grid; gap: 14px; padding-top: 14px; }
 .title { position: relative; font: 800 24px/1 var(--display) !important; font-variation-settings: "opsz" 96; letter-spacing: -0.03em; color: var(--blue); }
 .title::after { content: attr(data-text); position: absolute; inset: 0; transform: translate(1.6px, 1.3px); color: var(--pink); mix-blend-mode: multiply; pointer-events: none; }
-.song-btns, .lyr-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .hint { margin: 0; font: 400 13px/1.45 var(--display); color: var(--muted); }
 .key-box { min-width: 0; display: flex; align-items: center; }
 .key-box input { flex: 1; min-width: 0; min-height: 36px; padding: 0 10px; font: 400 14px var(--mono); color: var(--ink); background: #FBFBF8; border: 1px solid var(--rule); border-radius: 4px; }
 .key-saved { font: 400 14px/1.3 var(--display); color: var(--ink); }
 .key-change { margin-left: 2px; padding: 6px 2px; font: 600 14px/1 var(--display); color: var(--blue); background: none; border: 0; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
-#lyricsText { width: 100%; box-sizing: border-box; min-height: 8.5em; resize: vertical; font: 400 14px/1.5 var(--mono); color: var(--ink); background: #FBFBF8; border: 1px solid var(--rule); border-radius: 4px; padding: 10px; }
-#lyricsText:focus-visible { outline: 2px solid var(--teal); outline-offset: 1px; }
+
+/* the splash: where a song is picked, first and whenever Change song is tapped */
+.splash { position: fixed; z-index: 4; inset: 0; overflow-y: auto; overscroll-behavior: contain; background: var(--paper); }
+.splash-in { box-sizing: border-box; max-width: 460px; min-height: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 14px;
+  padding: max(28px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(18px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.splash .title { margin: 0; font-size: 44px !important; }
+.lede { margin: 0; font: 400 15px/1.45 var(--display); color: var(--ink); text-wrap: pretty; }
+.pick { display: grid; gap: 8px; }
+.pick .file-btn { justify-content: center; }
+.link-row { display: flex; gap: 8px; margin: 0; }
+.link-row input { flex: 1; min-width: 0; min-height: 42px; box-sizing: border-box; padding: 0 12px; font: 400 15px var(--display); color: var(--ink); background: #FBFBF8; border: 1.5px solid var(--rule); border-radius: 6px; }
+.link-row input:focus-visible { outline: 2px solid var(--pink); outline-offset: 1px; }
+.tries { display: grid; gap: 6px; }
+.try { display: flex; align-items: baseline; gap: 10px; min-height: 42px; padding: 8px 12px; box-sizing: border-box; text-align: left; background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; color: var(--ink); cursor: pointer; font: 600 14.5px/1.25 var(--display); }
+.try span { margin-left: auto; font: 400 12.5px/1.25 var(--display); color: var(--muted); text-align: right; }
+.try:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+.splash .row { grid-template-columns: 96px minmax(0, 1fr); }
+.splash-back { align-self: flex-start; }
 
 /* lab */
 .tabs { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding: 12px 0 2px; }
@@ -143,7 +161,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 .ink[aria-pressed="false"] svg { opacity: 0.3; }
 .ink[aria-pressed="false"] .nm { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
 
-@media (prefers-reduced-motion: reduce) { .hud, .ink svg { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .hud, .cog, .ink svg { transition: none; } }
 </style>
 
 <main class="app">
@@ -154,17 +172,12 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       <div class="bar" role="progressbar" aria-labelledby="statusText" aria-valuemin="0" aria-valuemax="100"><i id="statusBar"></i></div>
       <p class="note" id="statusNote" hidden></p>
     </div>
-    <div class="tapzone" id="tapzone" hidden>
-        <div class="row"><span class="eyebrow">Tap the print as each line starts</span><span class="count" id="tapCount">0 / 0</span></div>
-        <p class="tap-line" id="tapLine"></p>
-        <div class="row">
-          <button class="btn btn-small" id="tapUndo" type="button">Undo last tap</button>
-          <button class="btn btn-small btn-primary" id="tapDone" type="button">Done</button>
-        </div>
-      </div>
     <p class="toast" id="msg" role="status"></p>
+    <button class="cog" type="button" id="labBtn" aria-controls="labPanel" aria-expanded="false" aria-label="Lab: how the print is drawn">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M10.3 2.5h3.4l.5 2.6 1.9.8 2.2-1.5 2.4 2.4-1.5 2.2.8 1.9 2.6.5v3.4l-2.6.5-.8 1.9 1.5 2.2-2.4 2.4-2.2-1.5-1.9.8-.5 2.6h-3.4l-.5-2.6-1.9-.8-2.2 1.5-2.4-2.4 1.5-2.2-.8-1.9-2.6-.5v-3.4l2.6-.5.8-1.9-1.5-2.2 2.4-2.4 2.2 1.5 1.9-.8z"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+    </button>
     <div class="hud" id="hud">
-      <p class="track" id="trackName">Demo song</p>
+      <div class="hud-top"><p class="track" id="trackName"></p><button class="btn btn-small" type="button" id="changeSong">Change song</button></div>
       <div class="transport">
         <button class="play" id="play" type="button" aria-label="Play" disabled>
       <svg id="icoPlay" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z" fill="currentColor"/></svg>
@@ -174,37 +187,6 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
           <input type="range" id="seek" min="0" max="1" step="0.01" value="0" aria-label="Position in song">
           <div class="times"><span id="tNow">0:00</span><span id="tDur">0:00</span></div>
         </div>
-      </div>
-      <div class="hud-btns">
-        <button class="btn" type="button" data-panel="songPanel" aria-controls="songPanel" aria-expanded="false">Song</button>
-        <button class="btn" type="button" data-panel="lyricsPanel" aria-controls="lyricsPanel" aria-expanded="false">Lyrics</button>
-        <button class="btn" type="button" data-panel="labPanel" aria-controls="labPanel" aria-expanded="false">Lab</button>
-      </div>
-    </div>
-  </section>
-
-  <section class="panel" id="songPanel" aria-label="Song" hidden>
-    <div class="panel-head"><h2 class="title" data-text="Pitchscape">Pitchscape</h2><button class="btn btn-small btn-primary" type="button" data-close>Done</button></div>
-    <div class="panel-body">
-      <div class="song-btns">
-        <span class="btn btn-primary file-btn">Load a song<input type="file" id="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.oga,.flac,.opus" aria-label="Load a song from your device"></span>
-        <button class="btn" type="button" id="demoBtn">Demo song</button>
-      </div>
-      <div class="row"><span class="k-static" id="lk-key">Server key</span><div class="key-box"><span class="key-saved" id="keySaved" hidden>Saved on this phone. <button type="button" class="key-change" id="keyChange">Change</button></span><input type="password" id="lab-key" autocomplete="off" spellcheck="false" placeholder="passphrase" aria-labelledby="lk-key"></div></div>
-      <p class="hint">The first time a song is played it is analysed on the server, which takes a few minutes. After that it opens at once, on any device.</p>
-    </div>
-  </section>
-
-  <section class="panel" id="lyricsPanel" aria-label="Lyrics" hidden>
-    <div class="panel-head"><h2>Lyrics</h2><button class="btn btn-small btn-primary" type="button" data-close>Done</button></div>
-    <div class="panel-body">
-      <p class="hint" id="lyrSrc"></p>
-      <textarea id="lyricsText" aria-label="Lyrics" spellcheck="false" placeholder="Paste lyrics"></textarea>
-      <div class="lyr-actions">
-        <button class="btn btn-primary" id="placeBtn" type="button">Place</button>
-        <button class="btn" id="tapBtn" type="button">Tap along</button>
-        <span class="btn file-btn">Timing file<input type="file" id="lrcFile" accept=".lrc,.json,.txt,text/plain,application/json" aria-label="Load a timing file"></span>
-        <button class="btn btn-quiet" id="clearLyr" type="button">Clear</button>
       </div>
     </div>
   </section>
@@ -294,6 +276,29 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     <div class="lab-foot"><button class="btn btn-small btn-quiet" id="labReset" type="button">Reset all</button></div>
     <div class="bubble" id="bubble" role="tooltip" hidden></div>
   </section>
+
+  <section class="splash" id="splash" aria-labelledby="splashTitle">
+    <div class="splash-in">
+      <h1 class="title" id="splashTitle" data-text="Pitchscape">Pitchscape</h1>
+      <p class="lede">See a song as it plays: each instrument printed in its own ink, higher notes higher up, scrolling past as you listen.</p>
+      <div class="pick">
+        <span class="btn btn-primary file-btn">Load a song from this device<input type="file" id="file" accept="audio/*,.mp3,.m4a,.aac,.wav,.ogg,.oga,.flac,.opus" aria-label="Load a song from this device"></span>
+        <form class="link-row" id="linkForm"><input type="url" id="linkIn" inputmode="url" autocomplete="off" spellcheck="false" placeholder="Or paste a link to a song" aria-label="Link to a song"><button class="btn" type="submit">Open</button></form>
+        <p class="hint">A link to the audio file itself, like one ending in .mp3, or a Google Drive or Dropbox file shared with anyone who has the link. YouTube and Spotify links won't work.</p>
+      </div>
+      <h2 class="eyebrow">Or try one</h2>
+      <div class="tries">
+        <button class="try" type="button" id="demoBtn">Demo song <span>made on this device, opens at once</span></button>
+        <button class="try" type="button" data-url="https://archive.org/download/bs-out-of-it-remastered/01%20Dropping%20Out%20of%20School.mp3">Dropping Out of School <span>Brad Sucks</span></button>
+        <button class="try" type="button" data-url="https://archive.org/download/JoshWoodwardSelection/20-JoshWoodward-HereToday-01-Incoherent.mp3">Incoherent <span>Josh Woodward</span></button>
+        <button class="try" type="button" data-url="https://archive.org/download/OpenGoldbergVariations/Kimiko%20Ishizaka%20-%20J.S.%20Bach-%20-Open-%20Goldberg%20Variations%2C%20BWV%20988%20%28Piano%29%20-%2001%20Aria.mp3">Goldberg Variations: Aria <span>Kimiko Ishizaka</span></button>
+        <button class="try" type="button" data-url="https://archive.org/download/jamendo-140090/01-1165390-Gigatop%20Arthur-Invincible.mp3">Invincible <span>Gigatop Arthur</span></button>
+      </div>
+      <div class="row" id="keyRow"><span class="k-static" id="lk-key">Server key</span><div class="key-box"><span class="key-saved" id="keySaved" hidden>Saved on this device. <button type="button" class="key-change" id="keyChange">Change</button></span><input type="password" id="lab-key" autocomplete="off" spellcheck="false" placeholder="passphrase" aria-labelledby="lk-key"></div></div>
+      <p class="hint">The first time a song is played it is analysed on the server, which takes a few minutes. After that it opens at once, on any device.</p>
+      <button class="btn btn-small btn-quiet splash-back" type="button" id="splashBack" hidden>Back to the song</button>
+    </div>
+  </section>
 </main>
 <audio id="player" preload="auto" playsinline></audio>
 
@@ -306,7 +311,6 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   var $ = function (id) { return document.getElementById(id); };
   var cv = $('cv'), ctx = cv.getContext('2d'), plate = $('plate'), audio = $('player');
   var playBtn = $('play'), seek = $('seek'), labSeek = $('labSeek'), tNow = $('tNow'), tDur = $('tDur'), msg = $('msg');
-  var lyricsText = $('lyricsText'), lyrSrc = $('lyrSrc');
   var reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
   var css = getComputedStyle(document.documentElement);
@@ -317,7 +321,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 
   var S = {
     ana: null, dur: 0, name: '', key: '', kicks: [], snares: [], hats: [], toms: [], cymbals: [], segs: [], segMax: 0, medHz: 330,
-    lines: [], wt: [], words: [], lineStarts: [], lyricMode: '',
+    lines: [], wt: [], words: [], lineStarts: [],
     vis: { bass: true, kick: true, snare: true, hats: true, toms: true, voice: true, guitar: true, piano: true, synths: true, words: true },
     dirty: true, neverPlayed: true, previewT: 0, tap: null, busy: false, timing: null, song: ''
   };
@@ -1108,8 +1112,8 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     });
     ctx.restore();
   }
-  function applyWordTimes(lines, wt, mode) {
-    S.lines = lines; S.wt = wt; S.lyricMode = mode; S.words = [];
+  function applyWordTimes(lines, wt) {
+    S.lines = lines; S.wt = wt; S.words = [];
     lines.forEach(function (ln, li) {
       ln.words.forEach(function (w, wi) { var t = wt[li] && wt[li][wi]; if (t != null && isFinite(t)) S.words.push({ t: t, text: w.text, li: li, wi: wi }); });
     });
@@ -1117,159 +1121,13 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     S.lineStarts = wt.map(function (l) { for (var i = 0; l && i < l.length; i++) if (l[i] != null) return l[i]; return null; });
     layoutWords(); S.dirty = true;
   }
-  function lyricKey() { return 'pitchscape:lyrics:' + S.key; }
-  function cleanBox() {
-    var c = DSP.cleanPastedLyrics(lyricsText.value);
-    if (c.cleaned) { lyricsText.value = c.text; return true; }
-    return false;
+  /* the demo song's words are placed on its voice here; every other song's words come from the server, timed */
+  function placeLyrics(text) {
+    var lines = DSP.parseLyrics(text);
+    applyWordTimes(lines, lines.length ? DSP.alignLyrics(lines, S.ana) : []);
   }
-  function placeAuto(announce) {
-    if (!S.ana) return;
-    var trimmed = cleanBox();
-    if (S.timing) { applyTiming(S.timing, announce, true, trimmed); return; }
-    var lines = DSP.parseLyrics(lyricsText.value);
-    if (!lines.length) { applyWordTimes([], [], ''); if (announce) say('Paste some lyrics first.', true); return; }
-    var wt = DSP.alignLyrics(lines, S.ana);
-    applyWordTimes(lines, wt, 'auto');
-    if (S.key !== 'demo' || lyricsText.value !== DSP.DEMO_LYRICS) store.set(lyricKey(), { text: lyricsText.value, mode: 'auto' });
-    if (announce) say('');
-  }
-  function applyLRC(text, announce) {
-    var ent = DSP.parseLRC(text);
-    if (!ent.length) { if (announce) say("No timed lines in that file.", true); return false; }
-    var lines = ent.map(function (e) { return { text: e.text, words: e.words }; });
-    var exact = ent.every(function (e) { return e.wt && e.wt[0] != null; });
-    var wt;
-    if (exact) {
-      wt = ent.map(function (e, i) {
-        /* words without their own stamp are spread between their stamped neighbours */
-        var nextT = ent[i + 1] ? ent[i + 1].t : e.t + 4, out = e.wt.slice();
-        for (var k = 1; k < out.length; k++) {
-          if (out[k] != null) continue;
-          var j = k; while (j < out.length && out[j] == null) j++;
-          var startT = out[k - 1], endT = j < out.length ? out[j] : Math.min(nextT, startT + 0.35 * (j - k + 1));
-          for (var q = k; q < j; q++) out[q] = startT + (endT - startT) * (q - k + 1) / (j - k + 1);
-          k = j;
-        }
-        return out;
-      });
-    } else {
-      wt = S.ana ? DSP.alignToAnchors(lines, ent.map(function (e) { return e.t; }), S.ana) : [];
-    }
-    lyricsText.value = lines.map(function (l) { return l.text; }).join('\n');
-    applyWordTimes(lines, wt, 'lrc');
-    store.set(lyricKey(), { text: lyricsText.value, mode: 'lrc', lrc: text });
-    if (announce) say('');
-    return true;
-  }
-  /* word-timing JSON: {format:"song-overprint-timing", lines:[{t, words:[t, ...]}, ...]} matched to the pasted lyrics */
-  function applyTiming(obj, announce, builtin, trimmed) {
-    var pasted = DSP.parseLyrics(lyricsText.value), tl = (obj && obj.lines) || [], lines = [], wt = [], matched = 0;
-    if (!pasted.length) { if (announce) say('Paste the lyrics first.', true); return false; }
-    if (tl.length && tl.every(function (x) { return x.h; })) {
-      /* each entry is one sung line, in the order sung; match it to the pasted text by its fingerprint */
-      var byHash = {};
-      pasted.forEach(function (l) { var h = DSP.lineHash(l.text); if (!byHash[h]) byHash[h] = l; });
-      tl.forEach(function (x) {
-        var l = byHash[x.h]; if (!l) return;
-        matched++; lines.push(l);
-        wt.push(x.words && x.words.length === l.words.length ? x.words.map(Number) : DSP.alignToAnchors([l], [Number(x.t)], S.ana)[0]);
-      });
-    } else {
-      var exact = tl.length === pasted.length && tl.every(function (l, i) { return l && l.words && l.words.length === pasted[i].words.length; });
-      lines = pasted; matched = tl.length;
-      wt = exact ? tl.map(function (l) { return l.words.map(Number); }) : DSP.alignToAnchors(pasted, pasted.map(function (_, i) { return tl[i] && isFinite(tl[i].t) ? Number(tl[i].t) : null; }), S.ana);
-    }
-    if (!matched) {
-      applyWordTimes(pasted, DSP.alignLyrics(pasted, S.ana), 'auto');
-      if (announce) say("Lyrics don't match this song's timing. Placed by ear instead.", true);
-      return false;
-    }
-    applyWordTimes(lines, wt, 'timing');
-    store.set(lyricKey(), builtin ? { text: lyricsText.value, mode: 'builtin' } : { text: lyricsText.value, mode: 'timing', timing: obj });
-    if (announce) {
-      say(matched === tl.length ? '' : matched + ' of ' + tl.length + ' lines matched.');
-    }
-    return true;
-  }
-  function restoreLyrics(saved) {
-    lyricsText.value = saved.text || '';
-    if (saved.mode === 'lrc' && saved.lrc) { applyLRC(saved.lrc, false); return; }
-    if (saved.mode === 'timing' && saved.timing) { applyTiming(saved.timing, false); return; }
-    if (saved.mode === 'builtin' && S.timing) { applyTiming(S.timing, false, true); return; }
-    var lines = DSP.parseLyrics(lyricsText.value);
-    if (!lines.length) { applyWordTimes([], [], ''); return; }
-    if (saved.mode === 'tap' && saved.anchors) applyWordTimes(lines, DSP.alignToAnchors(lines, saved.anchors, S.ana), 'tap');
-    else applyWordTimes(lines, DSP.alignLyrics(lines, S.ana), 'auto');
-  }
-
-  /* tap along */
-  var tapzone = $('tapzone'), tapLine = $('tapLine'), tapCount = $('tapCount');
-  function tapUI() {
-    var T = S.tap, n = T.anchors.length;
-    tapCount.textContent = n + ' / ' + T.lines.length;
-    tapLine.textContent = T.lines[n] ? T.lines[n].text : 'All lines tapped.';
-  }
-  function startTap() {
-    if (!S.ana) return;
-    var lines = DSP.parseLyrics(lyricsText.value);
-    if (!lines.length) { say('Paste lyrics first.', true); return; }
-    closePanels(); S.tap = { lines: lines, anchors: [] }; tapzone.hidden = false; tapUI(); hud.classList.add('away');
-    say('');
-    S.neverPlayed = false;
-    audio.currentTime = 0; playAudio();
-  }
-  function finishTap() {
-    var T = S.tap; if (!T) return;
-    S.tap = null; tapzone.hidden = true; wakeHud();
-    if (!T.anchors.length) { say(''); return; }
-    var anchors = T.lines.map(function (_, i) { return T.anchors[i] != null ? T.anchors[i] : null; });
-    applyWordTimes(T.lines, DSP.alignToAnchors(T.lines, anchors, S.ana), 'tap');
-    store.set(lyricKey(), { text: lyricsText.value, mode: 'tap', anchors: anchors });
-    say('');
-  }
-  $('tapUndo').addEventListener('click', function (e) { e.stopPropagation(); if (S.tap && S.tap.anchors.length) { S.tap.anchors.pop(); tapUI(); } });
-  $('tapDone').addEventListener('click', function (e) { e.stopPropagation(); finishTap(); });
-  tapzone.addEventListener('pointerdown', function (e) { e.stopPropagation(); });
-  tapzone.addEventListener('click', function (e) { e.stopPropagation(); });
-  var swallowClick = false;
-  plate.addEventListener('pointerdown', function (e) {
-    if (!S.tap) return;
-    swallowClick = true;
-    if (e.target.closest && e.target.closest('.tapzone')) return;
-    S.tap.anchors.push(Math.max(0, clock() - 0.08)); tapUI();
-    if (S.tap.anchors.length >= S.tap.lines.length) finishTap();
-  });
   cv.addEventListener('click', function () {
-    if (swallowClick) { swallowClick = false; return; }
-    if (S.tap) return;
-    if (hud.classList.contains('away')) wakeHud(); else if (playing()) hud.classList.add('away');
-  });
-
-  $('placeBtn').addEventListener('click', function () { placeAuto(true); });
-  var inputTimer = null;
-  lyricsText.addEventListener('input', function () {
-    clearTimeout(inputTimer);
-    inputTimer = setTimeout(function () {
-      var trimmed = cleanBox();
-      if (S.timing && S.ana) applyTiming(S.timing, true, true, trimmed);
-      
-    }, 350);
-  });
-  $('tapBtn').addEventListener('click', startTap);
-  $('clearLyr').addEventListener('click', function () { lyricsText.value = ''; applyWordTimes([], [], ''); store.del(lyricKey()); say(''); });
-  $('lrcFile').addEventListener('change', function () {
-    var f = this.files && this.files[0]; this.value = ''; if (!f) return;
-    if (!S.ana) { say('Load the song first.', true); return; }
-    f.text().then(function (txt) {
-      var trimmed = txt.trim();
-      if (trimmed.charAt(0) === '{') {
-        var obj = null; try { obj = JSON.parse(trimmed); } catch (e) { obj = null; }
-        if (obj && obj.format === 'song-overprint-timing') { applyTiming(obj, true); return; }
-        say("Not a timing file.", true); return;
-      }
-      applyLRC(txt, true);
-    }, function () { say("Couldn't read that file.", true); });
+    if (hud.classList.contains('away')) wakeHud(); else if (playing()) setAway(true);
   });
 
   /* ------------------------------------------------------------ audio + clock */
@@ -1296,21 +1154,23 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     } else audio.pause();
   }
   playBtn.addEventListener('click', togglePlay);
-  var hud = $('hud'), hudTimer = null;
+  var hud = $('hud'), cog = $('labBtn'), labPanel = $('labPanel'), hudTimer = null;
   function playing() { return !audio.paused && !audio.ended; }
-  function panelOpen() { return panels.some(function (p) { return !p.hidden; }); }
+  function panelOpen() { return !labPanel.hidden; }
+  /* the controls and the cog come and go together */
+  function setAway(on) { hud.classList.toggle('away', on); cog.classList.toggle('away', on); }
   function wakeHud() {
     clearTimeout(hudTimer);
-    if (panelOpen() || S.tap) { hud.classList.add('away'); return; }
-    hud.classList.remove('away');
-    if (playing()) hudTimer = setTimeout(function () { if (playing() && !keyboardIn(hud)) hud.classList.add('away'); }, 2600);
+    if (panelOpen()) { setAway(true); return; }
+    setAway(false);
+    if (playing()) hudTimer = setTimeout(function () { if (playing() && !keyboardIn(hud) && !keyboardIn(cog)) setAway(true); }, 2600);
   }
   /* a control reached from the keyboard keeps the controls up; one that was just tapped does not */
   function keyboardIn(el) {
     var a = document.activeElement;
     try { return !!a && el.contains(a) && a.matches(':focus-visible'); } catch (e) { return false; }
   }
-  ['pointerdown', 'focusin', 'input'].forEach(function (ev) { hud.addEventListener(ev, wakeHud); });
+  ['pointerdown', 'focusin', 'input'].forEach(function (ev) { hud.addEventListener(ev, wakeHud); cog.addEventListener(ev, wakeHud); });
   plate.addEventListener('mousemove', function (e) { if (e.movementX || e.movementY) wakeHud(); });
   ['play', 'pause', 'ended'].forEach(function (ev) { audio.addEventListener(ev, function () { setIcons(); S.dirty = true; wakeHud(); }); });
   audio.addEventListener('seeked', function () { S.dirty = true; });
@@ -1397,23 +1257,19 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   var loadSeq = 0;
   /* the sheet goes blank while a song loads: nothing is drawn until the server's analysis of it is in */
   function beginLoad(label, songId) {
-    S.timing = null; S.song = songId || ''; S.retry = null;
+    S.song = songId || ''; S.retry = null;
     if (S.busy) cancelJobs();
     S.busy = true; audio.pause(); setPlayable(false);
-    if (S.tap) { S.tap = null; tapzone.hidden = true; }
-    S.ana = null; S.dur = 0; applyWordTimes([], [], '');
+    S.ana = null; S.dur = 0; S.neverPlayed = true; S.previewT = 0; applyWordTimes([], []);
     seek.value = labSeek.value = '0'; tNow.textContent = '0:00'; tDur.textContent = '0:00'; S.dirty = true;
     say(''); showStatus(label, 0.01);
     return ++loadSeq;
   }
-  function finishLoad(res, name, key, defaultLyrics, previewT) {
-    setAnalysis(res); S.name = name; S.key = key; lyrSrc.textContent = '';
+  function finishLoad(res, name, key, lyrics, previewT) {
+    setAnalysis(res); S.name = name; S.key = key;
     $('trackName').textContent = name; tDur.textContent = fmt(res.dur); seek.max = labSeek.max = String(res.dur); seek.value = labSeek.value = '0'; tNow.textContent = '0:00';
     S.neverPlayed = previewT > 0; S.previewT = previewT;
-    var saved = store.get(lyricKey());
-    if (saved) restoreLyrics(saved);
-    else if (defaultLyrics) { lyricsText.value = defaultLyrics; placeAuto(false); }
-    else { lyricsText.value = ''; applyWordTimes([], [], ''); }
+    if (lyrics) placeLyrics(lyrics); else applyWordTimes([], []);
     hideStatus(); setPlayable(true); S.busy = false; S.dirty = true;
   }
   function loadDemo() {
@@ -1429,7 +1285,36 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     $('trackName').textContent = file.name;
     openSong(file, file.name, file.name.replace(/\.[^.]+$/, ''), my, function () { loadFile(file); }, false);
   }
-  function fail(text) { S.busy = false; hideStatus(); say(text, true); setPlayable(!!S.ana); }
+  /* a song that didn't open leaves nothing to print: back to picking one, with the reason */
+  function fail(text) { S.busy = false; hideStatus(); setPlayable(false); showSplash(); say(text, true); }
+  /* a song by link: the server downloads it (a browser may not read another site's files) and keeps it, so the
+     audio is played from the server once the analysis is in */
+  function linkName(url) {
+    try { var u = new URL(url), f = decodeURIComponent(u.pathname.split('/').pop() || ''); return f.replace(/\.[^.]+$/, '') || u.hostname; }
+    catch (e) { return url; }
+  }
+  function loadLink(url, title) {
+    var my = beginLoad('Fetching the song', '');
+    title = title || linkName(url);
+    $('trackName').textContent = title;
+    var fd = new FormData(); fd.append('url', url);
+    analyse(fd, null, my, 'Fetching the song').then(function (got) {
+      if (!got || my !== loadSeq) return null;
+      showStatus('Loading the audio', 0.97);
+      return fetch(API + '/library/' + got.sha + '/audio', { headers: { 'X-Pitchscape-Key': serverKey() } }).then(function (r) {
+        if (!r.ok) throw new Error("The server didn't send the song's audio (" + r.status + '). Open it again.');
+        return r.blob();
+      }, function () { throw new Error("Couldn't reach the server. Check the connection and open the song again."); }).then(function (blob) {
+        if (my !== loadSeq) return;
+        setAudioSrc(URL.createObjectURL(blob));
+        finishLoad(packToRes(got.pack), songName(got.pack, title), 'sha:' + got.sha, null, 0); useServerLyrics(got.pack);
+      });
+    }).catch(function (e) {
+      if (my !== loadSeq) return;
+      fail((e && e.message) || "Couldn't open that link.");
+      if (e && e.needsKey) { S.retry = function () { loadLink(url, title); }; keyIn.focus(); }
+    });
+  }
 
   /* ------------------------------------------------------------ the analysis server
      Every song is drawn from the server's analysis (stems, drum transcription, notes, words) named in config.json,
@@ -1502,7 +1387,9 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       sha = h;
       return my === loadSeq ? findPack(sha) : null;
     }).then(function (pack) {
-      return pack || (my === loadSeq ? analyse(blob, fileName, sha, my) : null);
+      if (pack || my !== loadSeq) return pack;
+      var fd = new FormData(); fd.append('file', blob, fileName);
+      return analyse(fd, sha, my, 'Uploading').then(function (got) { return got && got.pack; });
     }).then(function (pack) {
       if (!pack || my !== loadSeq) return;
       setAudioSrc(URL.createObjectURL(blob));
@@ -1512,7 +1399,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     }).catch(function (e) {
       if (my !== loadSeq) return;
       fail((e && e.message) || "Couldn't open that file.");
-      if (e && e.needsKey) { S.retry = retry; openPanel('songPanel'); }
+      if (e && e.needsKey) { S.retry = retry; keyIn.focus(); }
     });
   }
   /* the song's name from its tags (title and artist), or the file's name when it has none */
@@ -1521,19 +1408,21 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     return sg.title ? sg.title + (sg.artist ? ' \u00b7 ' + sg.artist : '') : fallback;
   }
   function keyError(text) { var e = new Error(text); e.needsKey = true; return e; }
-  function analyse(blob, fileName, sha, my) {
+  /* the song (a file or a link, in fd) analysed by the server: {pack, sha} */
+  function analyse(fd, sha, my, label) {
     return apiReady.then(function () {
       var key = serverKey();
       if (!API) throw new Error('This page has no analysis server set up.');
-      if (!key) throw keyError('Add the server key under Song and this song will be analysed.');
-      showStatus('Uploading', 0.05, 'The first time takes a few minutes. After that this song opens at once.');
-      var fd = new FormData(); fd.append('file', blob, fileName);
+      if (!key) throw keyError('Add the server key below and this song will be analysed.');
+      showStatus(label, 0.05, 'The first time takes a few minutes. After that this song opens at once.');
       return fetch(API + '/analyze', { method: 'POST', headers: { 'X-Pitchscape-Key': key }, body: fd }).then(function (r) {
-        if (r.status === 401) throw keyError('The server key is wrong. Fix it under Song and this song will be analysed.');
-        if (r.status === 413) throw new Error('That file is over 80 MB.');
+        if (r.status === 401) throw keyError('The server key is wrong. Fix it below and this song will be analysed.');
+        /* a link the server would not or could not fetch: its reason, in words */
+        if (r.status === 400 || r.status === 413 || r.status === 502) return r.json().catch(function () { return {}; }).then(function (j) { throw new Error(j.detail || (r.status === 413 ? 'That file is over 80 MB.' : 'The server said ' + r.status + '.')); });
         if (!r.ok) throw new Error('The server said ' + r.status + '. Try again in a minute.');
         return r.json();
-      }, function () { throw new Error("Couldn't reach the server. Check the connection and load the song again."); }).then(function (j) {
+      }, function () { throw new Error("Couldn't reach the server. Check the connection and try again."); }).then(function (j) {
+        sha = j.sha256 || sha;
         if (j.status === 'done') return j.pack;
         return new Promise(function (resolve, reject) {
           var asked = Date.now(), lastStage = '';
@@ -1555,7 +1444,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
       /* in the minutes while a new server deploys, the old one may still answer */
       if (pack && !current(pack)) throw new Error('The server is being updated. Load the song again in a few minutes.');
       if (pack && sha) idb.put(packKey(sha), pack);
-      return pack;
+      return pack ? { pack: pack, sha: sha } : null;
     });
   }
   function packToRes(pack) {
@@ -1565,23 +1454,20 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     res.segW = pack.segStride; res.evW = pack.eventStride; res.earDb = pack.earDb;
     return res;
   }
-  /* the song's published lyrics (from LRCLIB, each word timed to the voice by the server), unless lyrics were already
-     placed for this song on this device. If LRCLIB hasn't got the song there are no words until some are pasted. */
+  /* the song's published lyrics (from LRCLIB, each word timed to the voice by the server). If LRCLIB hasn't got the
+     song there are no words, and a line says why. */
   function useServerLyrics(pack) {
     var st = (pack.stats && pack.stats.lyrics) || {}, has = pack.lyrics && pack.lyrics.lines && pack.lyrics.lines.length;
-    lyrSrc.textContent = has ? 'From LRCLIB: ' + (st.track || st.title) + ', ' + (st.by || st.artist) + '.'
-      : st.why === 'instrumental' ? 'LRCLIB lists this song as instrumental.'
-      : st.why === 'LRCLIB could not be reached' ? 'LRCLIB was down when this song was analysed, so it has no lyrics. Paste them here.'
-      : st.artist && st.title ? 'LRCLIB has no lyrics for ' + st.title + ' by ' + st.artist + ' at this length. Paste them here.'
-      : 'This file names no artist and title, so its lyrics could not be looked up. Paste them here.';
-    if (has && !store.get(lyricKey())) {
+    if (has) {
       var lines = pack.lyrics.lines.map(function (l) { return { text: l.text, words: l.words.map(function (w) { return { text: w[0], syl: Math.max(1, DSP.syllableCount(w[0])) }; }) }; });
-      lyricsText.value = lines.map(function (l) { return l.text; }).join('\n');
-      applyWordTimes(lines, pack.lyrics.lines.map(function (l) { return l.words.map(function (w) { return w[1]; }); }), 'published');
-    } else layoutWords();
+      applyWordTimes(lines, pack.lyrics.lines.map(function (l) { return l.words.map(function (w) { return w[1]; }); }));
+    } else {
+      layoutWords();
+      say(st.why === 'instrumental' ? '' : st.why === 'LRCLIB could not be reached' ? 'No words: the lyrics site was down when this song was analysed.'
+        : st.artist && st.title ? 'No words: no published lyrics were found for ' + st.title + ' by ' + st.artist + ' at this length.'
+        : "No words: this file doesn't name its artist and title, so its lyrics couldn't be looked up.");
+    }
   }
-  /* songs analysed ahead of time and published with the page: stems + word timing, no lyrics */
-  var SONGS = {};
   /* an array sent as bytes: lo + byte * (hi - lo) / 255 */
   function b64u8(o) {
     var bin = atob(o.data), out = new Float32Array(bin.length), k = (o.hi - o.lo) / 255;
@@ -1589,22 +1475,25 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     return out;
   }
   function b64f32(b64) { var bin = atob(b64), u = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return new Float32Array(u.buffer); }
-  function loadPack(id) {
-    var song = SONGS[id], title = song.title || id;
-    var my = beginLoad('Loading ' + title, id);
-    $('trackName').textContent = title;
-    return fetch(song.pack).then(function (r) { if (!r.ok) throw new Error('song data ' + r.status); return r.json(); }).then(function (pack) {
-      showStatus('Loading the audio', 0.5);
-      return fetch(pack.audio).then(function (r) { if (!r.ok) throw new Error('audio ' + r.status); return r.blob(); }).then(function (blob) {
-        if (my !== loadSeq) return;
-        setAudioSrc(URL.createObjectURL(blob));
-        var res = packToRes(pack);
-        S.timing = pack.timing;
-        finishLoad(res, pack.title + ' · ' + pack.artist, 'pack:' + id, null, song.preview);
-      });
-    }).catch(function (e) { if (my === loadSeq) { fail("Couldn't load the built-in song (" + e.message + ')'); } throw e; });
+  /* the splash: pick a song. It opens first, and again from Change song; Back returns to the song that was open */
+  var splash = $('splash');
+  function showSplash() {
+    audio.pause(); closePanels(); splash.hidden = false;
+    $('splashBack').hidden = !S.ana;
   }
-  $('demoBtn').addEventListener('click', function () { closePanels(); loadDemo(); });
+  function hideSplash() { splash.hidden = true; say(''); wakeHud(); }
+  $('changeSong').addEventListener('click', showSplash);
+  $('splashBack').addEventListener('click', function () { hideSplash(); playBtn.focus({ preventScroll: true }); });
+  $('demoBtn').addEventListener('click', function () { hideSplash(); loadDemo(); });
+  splash.querySelectorAll('[data-url]').forEach(function (b) {
+    b.addEventListener('click', function () { hideSplash(); loadLink(b.dataset.url, b.firstChild.textContent.trim()); });
+  });
+  $('linkForm').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var v = $('linkIn').value.trim();
+    if (!/^https?:\/\/\S+$/i.test(v)) { say('Paste a link that starts with https://', true); return; }
+    hideSplash(); loadLink(v);
+  });
   /* if tapping Load opens nothing (some in-app viewers block file pickers), say so instead of failing silently */
   var fileInput = $('file'), pickTimer = null, pickLeft = false;
   fileInput.addEventListener('click', function () {
@@ -1613,7 +1502,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   });
   window.addEventListener('blur', function () { pickLeft = true; });
   document.addEventListener('visibilitychange', function () { if (document.hidden) pickLeft = true; });
-  fileInput.addEventListener('change', function () { clearTimeout(pickTimer); var f = this.files && this.files[0]; this.value = ''; if (f) { closePanels(); loadFile(f); } });
+  fileInput.addEventListener('change', function () { clearTimeout(pickTimer); var f = this.files && this.files[0]; this.value = ''; if (f) { hideSplash(); loadFile(f); } });
 
   /* ink toggles */
   document.querySelectorAll('.ink').forEach(function (b) {
@@ -1624,7 +1513,6 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   });
 
   /* lab */
-  var labPanel = $('labPanel'), panels = ['songPanel', 'lyricsPanel', 'labPanel'].map($);
   function labVal(k, v) {
     return k === 'secs' ? v.toFixed(1) + ' s' : k === 'ink' || k === 'weight' || k === 'drumK' ? '×' + v.toFixed(2)
       : k === 'vRun' || k === 'noteMin' ? Math.round(v) + ' ms' : k === 'rough0' ? v.toFixed(2) + ' asper' : k === 'sharp0' ? v.toFixed(2) + ' acum'
@@ -1658,21 +1546,15 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
     r.addEventListener('input', function () { var k = r.dataset.key; L[k] = parseFloat(r.value); labApply(k); });
   });
   $('labReset').addEventListener('click', function () { L = Object.assign({}, LAB_DEF); labApply('all'); });
-  /* Song, Lyrics and Lab: one panel at a time, below the print (the print shrinks to sit above it) */
-  var panelBtns = document.querySelectorAll('[data-panel]');
-  function openPanel(id) {
-    panels.forEach(function (p) { p.hidden = p.id !== id; });
-    panelBtns.forEach(function (b) { b.setAttribute('aria-expanded', String(b.dataset.panel === id)); });
-    hideBubble(); wakeHud();
-  }
+  /* the Lab, below the print (the print shrinks to sit above it), opened from the cog */
+  function openPanel() { labPanel.hidden = false; cog.setAttribute('aria-expanded', 'true'); hideBubble(); wakeHud(); }
   function closePanels() {
-    var was = panels.filter(function (p) { return !p.hidden; })[0];
-    panels.forEach(function (p) { p.hidden = true; });
-    panelBtns.forEach(function (b) { b.setAttribute('aria-expanded', 'false'); });
+    var had = !labPanel.hidden && labPanel.contains(document.activeElement);
+    labPanel.hidden = true; cog.setAttribute('aria-expanded', 'false');
     hideBubble(); wakeHud();
-    var opener = was && document.querySelector('[data-panel="' + was.id + '"]'); if (opener && document.activeElement && was.contains(document.activeElement)) opener.focus({ preventScroll: true });
+    if (had) cog.focus({ preventScroll: true });
   }
-  panelBtns.forEach(function (b) { b.addEventListener('click', function () { openPanel(b.dataset.panel); }); });
+  cog.addEventListener('click', function () { if (labPanel.hidden) openPanel(); else closePanels(); });
   document.querySelectorAll('[data-close]').forEach(function (b) { b.addEventListener('click', closePanels); });
   $('labPlay').addEventListener('click', togglePlay);
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && (panelOpen() || !bubble.hidden)) { if (!bubble.hidden) hideBubble(); else closePanels(); } });
@@ -1712,7 +1594,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   keyIn.addEventListener('change', function () {
     var v = keyIn.value.trim(); if (v) store.set('pitchscape:key', v); else store.del('pitchscape:key');
     keyUI();
-    if (v && S.retry) { var again = S.retry; S.retry = null; closePanels(); again(); return; }
+    if (v && S.retry) { var again = S.retry; S.retry = null; hideSplash(); again(); return; }
     say(v ? 'Server key saved.' : 'Server key removed.');
   });
   if (L.font !== 'grotesque') ensureFont(L.font).then(function () { layoutWords(); S.dirty = true; });
@@ -1721,7 +1603,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   resize();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { layoutWords(); S.dirty = true; });
   requestAnimationFrame(loop);
-  var firstSong = Object.keys(SONGS)[0];
-  (firstSong ? loadPack(firstSong) : Promise.reject(new Error('no songs'))).catch(function () { loadDemo(); });
+  /* this computer's own server needs no key */
+  apiReady.then(function () { $('keyRow').hidden = LOCAL; });
 })();
 </script>

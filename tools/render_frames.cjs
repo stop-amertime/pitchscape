@@ -20,12 +20,13 @@ const fs = require('fs'), os = require('os'), path = require('path');
     await p.waitForTimeout(250);
   }
   await p.waitForTimeout(400);
+  // a song without words says why in the message line (it fades after a few seconds); one with words says nothing
+  const lyr = await p.evaluate(() => document.getElementById('msg').textContent);
   for (const t of times.split(',').map(Number)) {
-    await p.evaluate((t) => { const s = document.getElementById('seek'); s.value = t; s.dispatchEvent(new Event('input')); document.getElementById('hud').classList.add('away'); }, t);
+    await p.evaluate((t) => { const s = document.getElementById('seek'); s.value = t; s.dispatchEvent(new Event('input')); document.getElementById('hud').classList.add('away'); document.getElementById('labBtn').classList.add('away'); }, t);
     await p.waitForTimeout(450);
     await (await p.$('#plate')).screenshot({ path: `${out}-${t}.png` });
   }
-  const lyr = await p.evaluate(() => document.getElementById('lyrSrc').textContent);
-  console.log(base, '| lyrics:', lyr || '(none)', '| errors:', errs.length ? errs.join(' | ') : 'none');
+  console.log(base, '| lyrics:', lyr || '(found, or instrumental)', '| errors:', errs.length ? errs.join(' | ') : 'none');
   await ctx.close(); fs.rmSync(profile, { recursive: true, force: true });
 })();

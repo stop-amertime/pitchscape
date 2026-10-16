@@ -3,7 +3,7 @@
 A phone-friendly music visualizer. It splits a song into instruments (voice, guitar, piano, bass, drums and the
 rest) and prints each in its own risograph-style ink on a scrolling sheet. Height is pitch. Colour says which
 instrument, warmer the more it is out front; shape says how each note is played (struck, swelling, held); the edge says
-how it sounds, smooth unless it was measured harsh (rough or sharp), and speckle shows breath and noise. Ink strength follows loudness, so quiet passages print pale and thin. Lyrics can be pasted in and are printed
+how it sounds, smooth unless it was measured harsh (rough or sharp), and speckle shows breath and noise. Ink strength follows loudness, so quiet passages print pale and thin. The song's published lyrics are printed
 along the voice line, at the moment and pitch each word is sung.
 
 It started life as a claude.ai artifact, where large models could not load, so it grew its own lightweight analysis
@@ -44,7 +44,8 @@ After editing anything in `src/`, rebuild: `node src/build.js`.
 
 Push the repo, then in the repo settings under Pages choose "Deploy from a branch", branch `main`, folder `/docs`.
 The site is fully static. Commercial audio stays out of this public repo (`.gitignore` blocks `*.mp3`, `*.m4a` and
-`docs/*.pack.json`): the built-in song is the synthetic demo, and you load your own songs from your device.
+`docs/*.pack.json`): the built-in song is the synthetic demo, the splash offers a few freely licensed songs by link (archive.org), and you
+load your own from your device or a link to the audio file.
 
 ## The analysis server
 
@@ -119,7 +120,7 @@ Lyrics are the published ones, never a transcription. The pipeline reads the art
 another version), and times its words to the vocal stem: LRCLIB's words and Whisper's are matched in order, a matched
 word takes the time Whisper heard it at (unless that is far from where the LRC's own line time puts it, as when a
 chorus repeat is matched against the wrong repeat), and the words between are spread evenly. What Whisper hears is used
-for nothing else. If LRCLIB hasn't got the song, the song has no words until some are pasted.
+for nothing else. If LRCLIB hasn't got the song, the song has no words, and the page says why.
 
 The pipeline only wires these together and measures plain properties of what they found (loudness, brightness, how
 long a hit rings, how a note starts and fades). On Made in the Dark, ADTOF found no drum hits at all in the stems that
@@ -159,7 +160,16 @@ library, `~/.pitchscape/library/<sha256>/`: the audio as it came, its cover art,
 recording: title, artist, album, track, year, ISRC, MusicBrainz ids, length, every tag) and one analysis per pipeline
 version (`pack-v5.json`...). A song opens at once the second time, and `--update-library` brings every kept song up to a
 new pipeline version without sending anything again. `GET /library` lists the songs kept; `/library/<sha256>/audio`
-and `/cover` serve them. The cloud server keeps the same in its Modal volume (`library/<sha256>/`).
+and `/cover` serve them. The cloud server keeps the same in its Modal volume (`library/<sha256>/`) and serves
+`/library/<sha256>/audio` (with the key) for songs opened by link.
+
+**Songs by link.** `POST /analyze` takes a `url` instead of a `file`: the server downloads the audio file itself
+(`server/fetch.py`), because a browser may not read another site's files. It opens only http(s) links to public
+addresses: the host name is looked up, every address must be public (no private, loopback, link-local or cloud
+metadata addresses), the connection goes to the address that was checked, and each redirect (up to 5) is checked the
+same way. 80 MB and 60 s at most; a web page (YouTube, Spotify, a Drive file that isn't public) is refused with the
+reason. Google Drive and Dropbox share links are turned into their download links. The file is hashed like an upload,
+so a song opened by link and the same file uploaded share one analysis.
 
 The identity in `song.json` (also in each analysis, as `song`) is what a player for another source would match on.
 For Spotify, say: its Web API finds a recording by ISRC (`isrc:` search) or by artist, title and length, and reports
@@ -215,7 +225,8 @@ never kept. After each deploy the workflow sends a generated 12-second clip thro
 engine analyses each stem separately (voice from the vocal stem, hits from drums, bass from bass, notes from other), and
 every lyric word is placed with wav2vec2 forced alignment on the isolated vocal. The page loads the result instantly.
 
-**Lyrics:** paste plain lyrics or a whole lyrics web page (`cleanPastedLyrics` keeps just the lyric lines). Placement:
+**Lyrics (the old in-browser engine; the page now only uses `alignLyrics`, for the demo):** paste plain lyrics or a
+whole lyrics web page (`cleanPastedLyrics` keeps just the lyric lines). Placement:
 - Song pack with timing: each pasted line is matched to the timing by a fingerprint (`lineHash`), so stray lines and
   repeated choruses work. Exact.
 - Otherwise `alignLyrics`: dynamic programming that places syllables on detected voice onsets, with line starts
@@ -243,15 +254,17 @@ Steps (times measured on a 3-minute song, 2 CPU cores):
 4. `align.py`: wav2vec2 CTC forced alignment of all words in one pass (about 1 min, plus a one-time 1.2 GB model
    download).
 5. `repair_timing.py`: moves any word whose span reaches back across a silence to where the voice resumes.
-6. `build_pack.js`: writes `docs/<slug>.pack.json`. The script prints the two lines to add in `src/app.html`
-   (an entry in `SONGS` and a shelf button); the first entry in `SONGS` loads when the page opens.
+6. `build_pack.js`: writes `docs/<slug>.pack.json`. (The page once loaded these from a `SONGS` list; it no longer
+   does: songs are analysed by the server.)
 
 ## The Lab
 
-The screen shows nothing but the print. Its controls (play, seek, and Song, Lyrics and Lab) float over its foot
-while they are wanted, fade a few seconds into playing, and come back with a tap. Song, Lyrics and Lab each open as a
-panel below the print, which shrinks to sit above it; the page itself never scrolls. Song holds the file picker, the
-demo and the server key, which shows as a line once saved, so the keyboard only comes up when you choose to change it.
+The page opens on the splash, where a song is picked: from the device, by link, the demo, or one of a few freely
+licensed songs. It also holds the server key, which shows as a line once saved, so the keyboard only comes up when you
+choose to change it. Then the screen shows nothing but the print. Its controls (play, seek, Change song) float over
+its foot while they are wanted, fade a few seconds into playing, and come back with a tap, with a faint cog in the top
+corner for the Lab, which opens as a panel below the print (the print shrinks to sit above it; the page itself never
+scrolls).
 The Lab's A/B switches sit in tabs (Colour, Shapes, Words, Motion, Print, Layers), each with an explanation that pops
 up in a bubble from its label. Only settings changed from the defaults are kept on the device (`localStorage` key
 `pitchscape:lab`), so a new default reaches anyone who left that setting alone. Colour by instrument, by height (the
