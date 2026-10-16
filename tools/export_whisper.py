@@ -3,11 +3,16 @@ them in server/pipeline.py. Called by tools/export_models.py (`python tools/expo
 
 whisper_<size>_encoder / whisper_<size>_decoder: OpenAI's Whisper (MIT), the weights of openai/whisper-<size> on
 Hugging Face (the ones faster-whisper's Systran/faster-whisper-<size> were converted from), in two graphs. The encoder
-takes a log-mel window mel [1, n_mels, 3000] and gives every decoder layer's cross-attention keys and values k, v
-[layers, 1500, width], once per window. The decoder takes new tokens [n] (int32), the self-attention cache pk, pv
-[layers, past, width] (past may be 0) and k, v, and gives the new tokens' logits [n, vocab], the grown cache nk, nv
-[layers, past + n, width], and the alignment heads' cross-attention before softmax, qk [heads, n, 1500], which word
-timing reads (CTranslate2's align). Weights in float16 (as faster-whisper runs on a GPU); `_f32` copies in float32 for
+takes a log-mel window mel [1, n_mels, 3000] and gives each decoder layer i's cross-attention keys and values, once per
+window: k<i> [heads, head width, 1500] (transposed for the product with the queries) and v<i> [heads, 1500, head width].
+The decoder takes new tokens [batch, n] (int32; a batch of hypotheses, as CTranslate2 decodes a beam or samples best_of
+at once), order [batch] (int32: which row of the cache each row continues, so a beam search reorders its beams and one
+prompt's cache serves a whole batch), each layer's self-attention cache pk<i>, pv<i> [rows, heads, past, head width]
+(past may be 0) and the k<i>, v<i>, and gives
+the new tokens' logits [batch, n, vocab], the grown cache nk<i>, nv<i> [batch, heads, past + n, head width], and the
+alignment heads' cross-attention before softmax, qk [batch, alignment heads, n, 1500], which word timing reads
+(CTranslate2's align). One input per layer, not one stacked tensor: slicing a stacked input copies it, and on the CPU
+copying the encoder's k and v at every step took more time than the step's arithmetic. Weights in float16 (as faster-whisper runs on a GPU); `_f32` copies in float32 for
 ONNX Runtime's CPU provider, which has no float16 matrix products. Inputs and outputs are float32 either way.
 
 whisper_<size> (JSON): each text token's bytes, the special tokens, the tokens faster-whisper suppresses, the alignment
@@ -37,6 +42,12 @@ class WLayer(nn.Module):
         if cross:
             self.encoder_attn, self.encoder_attn_layer_norm = WAttn(d), nn.LayerNorm(d)
         self.fc1, self.fc2, self.final_layer_norm = nn.Linear(d, ff), nn.Linear(ff, d), nn.LayerNorm(d)
+
+
+def heads_of(x, heads):
+    """[..., n, d] -> [..., heads, n, d / heads]"""
+    *b, n, d = x.shape
+    return x.reshape(*b, n, heads, d // heads).transpose(-3, -2)
 
 
 def attend(q, k, v, heads, mask=None):
@@ -81,14 +92,14 @@ class Encoder(nn.Module):
 
     def forward(self, mel):
         x = self.hidden(mel)
-        k = torch.stack([L.encoder_attn.k_proj(x) for L in self.dec])
-        v = torch.stack([L.encoder_attn.v_proj(x) for L in self.dec])
-        return k.float(), v.float()
+        ks = [heads_of(L.encoder_attn.k_proj(x), self.heads).transpose(1, 2).float() for L in self.dec]
+        vs = [heads_of(L.encoder_attn.v_proj(x), self.heads).float() for L in self.dec]
+        return (*ks, *vs)
 
 
 class Decoder(nn.Module):
-    """tokens [n] with the cache pk, pv [layers, past, d] and the encoder's k, v -> logits [n, vocab], the cache nk, nv
-    [layers, past + n, d] and the alignment heads' cross-attention before softmax, qk [heads, n, 1500]."""
+    """tokens [b, n], order [b], then per layer pk<i>, pv<i> [rows, heads, past, dh], then per layer k<i> [heads, dh,
+    1500], then v<i> [heads, 1500, dh] -> logits [b, n, vocab], nk<i>..., nv<i>... [b, heads, past + n, dh], qk [b, align, n, 1500]."""
     def __init__(self, cfg, align_heads):
         super().__init__()
         d, self.heads = cfg['d_model'], cfg['decoder_attention_heads']
@@ -98,33 +109,35 @@ class Decoder(nn.Module):
         self.layer_norm = nn.LayerNorm(d)
         self.align = align_heads
 
-    def forward(self, tokens, pk, pv, k, v):
-        dt = self.embed_tokens.weight.dtype
-        n, past = tokens.shape[0], pk.shape[1]
-        pk, pv, k, v = (t.to(dt) for t in (pk, pv, k, v))
+    def forward(self, tokens, order, *rest):
+        L, dt, H = len(self.layers), self.embed_tokens.weight.dtype, self.heads
+        pk, pv, k, v = (rest[i * L:(i + 1) * L] for i in range(4))
+        b, n = tokens.shape
+        past = pk[0].shape[2]
         pos = torch.arange(n) + past
         x = self.embed_tokens(tokens) + self.embed_positions(pos)
-        scale = (x.shape[1] // self.heads) ** -0.5
+        scale = (x.shape[-1] // H) ** -0.5
         cols = torch.arange(past + n)
         mask = torch.where(cols[None, :] <= pos[:, None], 0.0, float('-inf')).to(dt)   # causal
+        merge = lambda o: o.transpose(1, 2).reshape(b, n, -1)
         nk, nv, qks = [], [], []
-        for li, L in enumerate(self.layers):
-            h = L.self_attn_layer_norm(x)
-            a = L.self_attn
-            kk = torch.cat([pk[li], a.k_proj(h)], 0)
-            vv = torch.cat([pv[li], a.v_proj(h)], 0)
-            nk.append(kk)
-            nv.append(vv)
-            o, _ = attend(a.q_proj(h) * scale, kk, vv, self.heads, mask)
-            x = x + a.out_proj(o)
-            c = L.encoder_attn
-            o, s = attend(c.q_proj(L.encoder_attn_layer_norm(x)) * scale, k[li], v[li], self.heads)
-            x = x + c.out_proj(o)
-            qks += [s[hh] for hl, hh in self.align if hl == li]
-            x = x + L.fc2(nn.functional.gelu(L.fc1(L.final_layer_norm(x))))
+        for li, Ly in enumerate(self.layers):
+            h = Ly.self_attn_layer_norm(x)
+            a = Ly.self_attn
+            kk = torch.cat([pk[li].index_select(0, order).to(dt), heads_of(a.k_proj(h), H)], 2)
+            vv = torch.cat([pv[li].index_select(0, order).to(dt), heads_of(a.v_proj(h), H)], 2)
+            nk.append(kk.float())
+            nv.append(vv.float())
+            s = heads_of(a.q_proj(h) * scale, H) @ kk.transpose(2, 3) + mask
+            x = x + a.out_proj(merge(torch.softmax(s.float(), -1).to(dt) @ vv))
+            c = Ly.encoder_attn
+            s = heads_of(c.q_proj(Ly.encoder_attn_layer_norm(x)) * scale, H) @ k[li].to(dt)
+            x = x + c.out_proj(merge(torch.softmax(s.float(), -1).to(dt) @ v[li].to(dt)))
+            qks += [s[:, hh] for hl, hh in self.align if hl == li]
+            x = x + Ly.fc2(nn.functional.gelu(Ly.fc1(Ly.final_layer_norm(x))))
         x = self.layer_norm(x)
         logits = x @ self.embed_tokens.weight.t()
-        return logits.float(), torch.stack(nk).float(), torch.stack(nv).float(), torch.stack(qks).float()
+        return (logits.float(), *nk, *nv, torch.stack(qks, 1).float())
 
 
 def load(size):
@@ -149,15 +162,20 @@ def export(size, out):
     """{manifest name: (path, info)} for whisper_<size>_encoder, _decoder (float16), their _f32 copies, whisper_<size>."""
     import onnxruntime as ort
     enc, dec, cfg, fw, heads = load(size)
-    L, d, n_mels = cfg['decoder_layers'], cfg['d_model'], cfg['num_mel_bins']
+    L, d, n_mels, H = cfg['decoder_layers'], cfg['d_model'], cfg['num_mel_bins'], cfg['decoder_attention_heads']
     torch.manual_seed(0)
     mel = torch.randn(1, n_mels, 3000) * 0.5
-    tokens = torch.tensor([50258, 50259, 50359, 50364, 400, 401, 402], dtype=torch.int32)
+    tokens = torch.tensor([[50258, 50259, 50359, 50364, 400, 401, 402]] * 2, dtype=torch.int32)
+    tokens[1, 4:] = torch.tensor([500, 501, 502])
     rel = lambda a, b: float(np.abs(a - b).max() / (np.abs(b).max() + 1e-12))
+    names = lambda p: [f'{p}{i}' for i in range(L)]
+    enc_out = names('k') + names('v')
+    dec_in = ['tokens', 'order'] + names('pk') + names('pv') + enc_out
+    dec_out = ['logits'] + names('nk') + names('nv') + ['qk']
     with torch.no_grad():
-        k32, v32 = enc(mel)
-        z = torch.zeros(L, 0, d)
-        ref = dec(tokens, z, z, k32, v32)
+        kv32 = enc(mel)
+        z = [torch.zeros(2, H, 0, d // H)] * (2 * L)
+        ref = dec(tokens, torch.arange(2, dtype=torch.int32), *z, *kv32)
     res = {}
     for prec, dt in (('f32', torch.float32), ('f16', torch.float16)):
         suffix = '_f32' if prec == 'f32' else ''
@@ -165,31 +183,38 @@ def export(size, out):
         epath = os.path.join(out, f'whisper_{size}_encoder{suffix}.onnx')
         dpath = os.path.join(out, f'whisper_{size}_decoder{suffix}.onnx')
         with torch.no_grad():
-            torch.onnx.export(enc, (mel,), epath, input_names=['mel'], output_names=['k', 'v'], opset_version=17,
+            torch.onnx.export(enc, (mel,), epath, input_names=['mel'], output_names=enc_out, opset_version=17,
                               dynamo=False, do_constant_folding=True)
-            pk = torch.zeros(L, 2, d)
-            torch.onnx.export(dec, (tokens[:3], pk, pk, k32, v32), dpath,
-                              input_names=['tokens', 'pk', 'pv', 'k', 'v'], output_names=['logits', 'nk', 'nv', 'qk'],
-                              dynamic_axes={'tokens': {0: 'n'}, 'pk': {1: 'past'}, 'pv': {1: 'past'},
-                                            'logits': {0: 'n'}, 'nk': {1: 'total'}, 'nv': {1: 'total'},
-                                            'qk': {1: 'n'}},
-                              opset_version=17, dynamo=False, do_constant_folding=True)
+            pk = [torch.zeros(2, H, 2, d // H)] * (2 * L)
+            axes = {'tokens': {0: 'b', 1: 'n'}, 'order': {0: 'b'}, 'logits': {0: 'b', 1: 'n'}, 'qk': {0: 'b', 2: 'n'},
+                    **{x: {0: 'rows', 2: 'past'} for x in names('pk') + names('pv')},
+                    **{x: {0: 'b', 2: 'total'} for x in names('nk') + names('nv')}}
+            torch.onnx.export(dec, (tokens[:, :3], torch.tensor([1, 0], dtype=torch.int32), *pk, *kv32), dpath, input_names=dec_in, output_names=dec_out,
+                              dynamic_axes=axes, opset_version=17, dynamo=False, do_constant_folding=True)
         enc.to(torch.float32), dec.to(torch.float32)
         # checks: the encoder against PyTorch (float32), the decoder at once and in steps through its cache
         if prec == 'f32':
             se = ort.InferenceSession(epath, providers=['CPUExecutionProvider'])
             sd = ort.InferenceSession(dpath, providers=['CPUExecutionProvider'])
-            ok, ov = se.run(None, {'mel': mel.numpy()})
-            z = np.zeros((L, 0, d), np.float32)
-            full = sd.run(None, {'tokens': tokens.numpy(), 'pk': z, 'pv': z, 'k': ok, 'v': ov})
-            a = sd.run(None, {'tokens': tokens[:3].numpy(), 'pk': z, 'pv': z, 'k': ok, 'v': ov})
-            b = sd.run(None, {'tokens': tokens[3:].numpy(), 'pk': a[1], 'pv': a[2], 'k': ok, 'v': ov})
-            print(f'whisper {size}: encoder ONNX vs PyTorch {rel(ok, k32.numpy()):.1e}; decoder ONNX vs PyTorch '
-                  f'{rel(full[0], ref[0].numpy()):.1e} (qk {rel(full[3], ref[3].numpy()):.1e}); in two steps vs at once '
-                  f'{rel(np.concatenate([a[0], b[0]]), full[0]):.1e}', flush=True)
-            assert rel(ok, k32.numpy()) < 1e-3 and rel(full[0], ref[0].numpy()) < 1e-3
-            assert rel(np.concatenate([a[0], b[0]]), full[0]) < 1e-4
-        info = {'size': size, 'precision': prec, 'layers': L, 'width': d, 'n_mels': n_mels,
+            kv = se.run(None, {'mel': mel.numpy()})
+            feed = lambda t, o, cache: dict(zip(dec_in, [t.numpy(), np.array(o, np.int32)] + list(cache) + kv))
+            z = [np.zeros((2, H, 0, d // H), np.float32)] * (2 * L)
+            full = sd.run(None, feed(tokens, [0, 1], z))
+            # the prompt once, then both rows from its cache (order [0, 0]), and a swap (order [1, 0]) undone
+            z1 = [np.zeros((1, H, 0, d // H), np.float32)] * (2 * L)
+            p = sd.run(None, feed(tokens[:1, :4], [0], z1))
+            a = sd.run(None, feed(tokens[:, 4:5], [0, 0], p[1:1 + 2 * L]))
+            sw = [x[::-1].copy() for x in a[1:1 + 2 * L]]
+            b = sd.run(None, feed(tokens[:, 5:], [1, 0], sw))
+            a = [np.concatenate([p[0], p[0]]), a[0]]
+            b = [None, b[0]]
+            kerr = max(rel(o, r.numpy()) for o, r in zip(kv, kv32))
+            print(f'whisper {size}: encoder ONNX vs PyTorch {kerr:.1e}; decoder ONNX vs PyTorch '
+                  f'{rel(full[0], ref[0].numpy()):.1e} (qk {rel(full[-1], ref[-1].numpy()):.1e}); in two steps vs at '
+                  f'once {rel(np.concatenate([a[0], a[1], b[1]], 1), full[0]):.1e}', flush=True)
+            assert kerr < 1e-3 and rel(full[0], ref[0].numpy()) < 1e-3
+            assert rel(np.concatenate([a[0], a[1], b[1]], 1), full[0]) < 1e-4
+        info = {'size': size, 'precision': prec, 'layers': L, 'width': d, 'heads': H, 'n_mels': n_mels,
                 'source': 'https://huggingface.co/openai/whisper-' + size}
         res[f'whisper_{size}_encoder{suffix}'] = (epath, info)
         res[f'whisper_{size}_decoder{suffix}'] = (dpath, info)
@@ -240,7 +265,7 @@ def tokens_json(size, fw, heads, cfg, out):
          'languages': {c: hf.token_to_id('<|%s|>' % c) for c in _LANGUAGE_CODES},
          'lang_ids': fwcfg['lang_ids'], 'alignment_heads': heads,
          'max_length': cfg['max_target_positions'], 'n_mels': cfg['num_mel_bins'],
-         'layers': cfg['decoder_layers'], 'width': cfg['d_model']}
+         'layers': cfg['decoder_layers'], 'width': cfg['d_model'], 'heads': cfg['decoder_attention_heads']}
     path = os.path.join(out, f'whisper_{size}.json')
     json.dump(j, open(path, 'w'), separators=(',', ':'))
     return path
