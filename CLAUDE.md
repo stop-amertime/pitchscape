@@ -9,7 +9,7 @@ A phone-friendly music visualiser in a risograph print style. A song is analysed
 notes, bass, voice, tone, width, lyrics) into a **pack** (JSON); the page plays the song and draws the pack as a
 scrolling print: time runs right to left past a "now" line, pitch runs up the screen, each instrument in its own ink.
 
-- Page: `src/app.html` (+ `src/dsp.js`), built to `docs/index.html`, served by GitHub Pages
+- Page: `src/page/` (Vite + Svelte, + `src/dsp.js`), built to `docs/`, served by GitHub Pages
   (https://stop-amertime.github.io/pitchscape/ redirects to `docs/`).
 - Cloud server: Modal (`server/modal_app.py`), GPU (L4), running `server/pipeline.py`.
 - Local server: `server/local.py` (`Pitchscape.bat` on Windows) runs the same pipeline and serves the page.
@@ -61,7 +61,7 @@ Corollaries the user has stated or endorsed:
 
 ## The flow, end to end
 
-1. **Load** (`openSong` in app.html): the page hashes the file (SHA-256) and looks for its analysis: IndexedDB
+1. **Load** (`openSong` in src/page/legacy.js): the page hashes the file (SHA-256) and looks for its analysis: IndexedDB
    (`pack:<pipeline>:<sha>`), then `GET /packs/<sha>`. A link (`loadLink`) goes straight to `POST /analyze` with `url`:
    the server downloads it (`server/fetch.py`: public addresses only, checked at every redirect, 80 MB, 60 s; Drive and
    Dropbox share links become download links), keeps it in the library and answers with its `sha256`; the page then
@@ -169,14 +169,25 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
 
 When the analysis output changes: bump `PIPELINE_VERSION` in `server/modal_app.py` (the deploy writes it into
 `docs/config.json`; bump that file too so the page and server agree before the deploy runs), bump the pack `version`
-in `pipeline.analyze`, and make `current()` in app.html accept only the new pack version (and `segStride` if it
+in `pipeline.analyze`, and make `current()` in src/page/legacy.js accept only the new pack version (and `segStride` if it
 changed). The page draws only current packs; an older one is analysed again (cloud: re-uploaded; local:
 `--update-library` re-analyses kept songs). Adding a field the page does not require (as `song` was) needs no bump.
 
 ## Editing the page
 
-- Edit `src/app.html` / `src/dsp.js`, then `node src/build.js` (writes `docs/index.html`; commit both). The local
-  server builds from `src/` on each load, so no build step there.
+- The page is `src/page/`, built by Vite (`vite.config.mjs`) into `docs/` (`index.html`, `app/*`, and `pipeline/`
+  copied from `src/pipeline`). `npm install` once; `node src/build.js` (= `npm run build`) builds, commit `docs/` with
+  the source; `npm run dev` serves it with live reload. The local server builds once when it starts.
+  - `index.html`: the static markup (print, controls, Lab). `app.scss`: global styles.
+  - Svelte components (Svelte 5, `<style lang="scss">`): `Splash.svelte`, `Progress.svelte` (a song loading, with its
+    analysis steps), `Where.svelte` (this computer or the server, and the key). They read `ui` and call `api` in
+    `ui.svelte.js`.
+  - `legacy.js`: the old page script as one module (drawing, player, Lab), which sets `ui` and fills `api`. It moves
+    into components piece by piece.
+  - Icons: unplugin-icons, any Iconify set (`import X from '~icons/lucide/x'`; `@iconify-json/lucide` installed).
+  - Transitions: Svelte's (`svelte/transition`), with lengths through `motion()` (0 under reduced motion).
+  - "This computer" is offered only once every stage is in `src/pipeline` (`HERE_READY` in legacy.js); `?here` turns
+    it on to try.
 - `dsp.js` is the old in-browser analysis engine; the page now only uses its lyric helpers (`parseLyrics`,
   `alignLyrics`, `alignToAnchors`, `parseLRC`...), `mtof`/`ftom`, `DRUM_BANDS` and the demo song synthesis. Drawing
   always comes from a server pack. `tests/*.js` test that engine (`node tests/engine_test.js`).
@@ -202,7 +213,7 @@ changed). The page draws only current packs; an older one is analysed again (clo
 - After a push to `server/**`, the deploy workflow's smoke test sends a generated clip through the live server; it
   waits until the server reports the new version (the old container answers for minutes after a deploy).
 - Before committing: `node src/build.js`, `node tests/engine_test.js`, `python tests/route_test.py`,
-  `python -m py_compile server/*.py tools/*.py`, a syntax check of the built script, and `node --check` on each
+  `python -m py_compile server/*.py tools/*.py`, and `node --check` on each
   `src/pipeline/*.mjs` (`npm install` once for the Node tools).
 
 ## Things learned the hard way

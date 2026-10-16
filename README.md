@@ -15,11 +15,12 @@ uses it for lyric placement and the demo song's audio; the tests and benches bel
 
 ```
 docs/                     the site (GitHub Pages can serve this folder as-is)
-  index.html              built page: engine + renderer, no build step needed to view
+  index.html, app/        the built page (Vite); pipeline/ is src/pipeline copied beside it
 src/
-  dsp.js                  analysis engine (pure JS, no DOM). Runs in a Web Worker in the page and in Node for tools/tests
-  app.html                page template: layout, canvas renderer, lyrics, playback
-  build.js                inlines dsp.js into app.html and writes docs/index.html
+  page/                   the page: Vite + Svelte (Splash, Progress, Where), app.scss, legacy.js (renderer, player, Lab)
+  pipeline/               the analysis in JavaScript (in progress), run in the page and under Node
+  dsp.js                  old analysis engine (pure JS, no DOM); the page uses its lyric helpers and demo song
+  build.js                builds the page into docs/ (same as npm run build)
 tools/                    pipeline for adding a song with real stems and word timing (Python + Node)
 tests/engine_test.js      renders the synthetic demo song and scores the engine against its ground truth
 tests/bass_bench.js       bass line accuracy on synthetic clips: four bass sounds over drums and chord pads
@@ -38,7 +39,7 @@ The page fetches its song files, so serve it over HTTP rather than opening the f
 cd docs && python3 -m http.server 8000      # then open http://localhost:8000
 ```
 
-After editing anything in `src/`, rebuild: `node src/build.js`.
+To change the page: `npm install` once, then `npm run dev` (live reload) and `npm run build` (writes `docs/`).
 
 ## Host it on GitHub Pages
 
@@ -176,7 +177,7 @@ For Spotify, say: its Web API finds a recording by ISRC (`isrc:` search) or by a
 what is playing and how far in, which the page could follow to draw the visuals while Spotify plays the sound. The
 analysis must still come from a file of the same recording (Spotify's audio cannot be read), so the length is the
 check that the two are the same version. The page is built
-from `src/` on every load, so an edit to `src/app.html` or `src/dsp.js` shows on the next refresh, with no build step.
+from `src/page` when the server starts (if Node and `npm install` are there; otherwise the committed `docs/` is served).
 Options: `--device cpu|cuda`, `--whisper small` (a smaller model to time the lyrics), `--port`, `--library DIR`, `--open`, and
 `--host 0.0.0.0` to open it from a phone on the same network (at the PC's address, port 8000).
 

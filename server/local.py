@@ -16,8 +16,9 @@ analysis for each pipeline version (pack-v5.json etc.). So a song is analysed on
   GET /library                    every song kept: its sha256, song.json and which versions are analysed
   GET /library/<sha256>/audio     the song's audio;  /library/<sha256>/cover  its cover art
 
-The page is built from src/ on every load (the same steps as src/build.js), so an edit to src/app.html or src/dsp.js
-shows on the next refresh. Setup: see "Run it on your own computer" in README.md.
+The page is built from src/page into docs/ when this starts (node src/build.js, if Node and `npm install` are there),
+so an edit to the page shows after a restart; for live editing of the page itself, `npm run dev`. Setup: see "Run it
+on your own computer" in README.md.
 """
 import argparse, email.parser, email.policy, hashlib, json, os, queue, re, sys, tempfile, threading, time, traceback
 import urllib.parse
@@ -29,16 +30,14 @@ PIPELINE_VERSION = re.search(r"^PIPELINE_VERSION = '([^']+)'", open(os.path.join
 
 
 def build_page():
-    """docs/index.html as src/build.js would write it, from the current src/app.html and src/dsp.js."""
-    app = open(os.path.join(ROOT, 'src', 'app.html'), encoding='utf-8').read()
-    dsp = open(os.path.join(ROOT, 'src', 'dsp.js'), encoding='utf-8').read()
-    page = app.replace('/*DSP_SOURCE*/', dsp, 1)
-    cut = page.index('<main class="app">')
-    reset = ('html{color-scheme:light}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}'
-             'body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}')
-    return ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
-            '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">\n<style>' + reset
-            + '</style>\n' + page[:cut] + '</head>\n<body>\n' + page[cut:] + '</body>\n</html>\n')
+    """Builds docs/ from src/page (node src/build.js, Vite) when Node and the packages are here; otherwise the docs/
+    already built (committed with every page change) is served as it is."""
+    import shutil, subprocess
+    if not (shutil.which('node') and os.path.isdir(os.path.join(ROOT, 'node_modules', 'vite'))):
+        print('serving the page as built in docs/ (for a fresh build: npm install, then restart)')
+        return
+    if subprocess.run(['node', os.path.join(ROOT, 'src', 'build.js')], cwd=ROOT).returncode:
+        print('the page did not build; serving docs/ as it was')
 
 
 class Jobs:
@@ -195,8 +194,6 @@ def handler(jobs):
 
         def do_GET(self):
             path = urllib.parse.urlparse(self.path).path
-            if path in ('/', '/index.html'):
-                return self.send(build_page().encode('utf-8'), 'text/html; charset=utf-8')
             if path == '/config.json':
                 return self.reply({'api': 'http://' + self.headers.get('Host', 'localhost'), 'pipeline': PIPELINE_VERSION, 'local': True})
             if path == '/api' or path == '/version':
@@ -278,6 +275,7 @@ def main():
                 device = 'cpu'
     jobs = Jobs(a.library, device, a.whisper)
     url = 'http://%s:%d' % ('localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host, a.port)
+    build_page()
     server = ThreadingHTTPServer((a.host, a.port), handler(jobs))
     print('Pitchscape %s on %s; songs kept in %s' % (PIPELINE_VERSION, device.upper(), a.library))
     if a.update_library:
