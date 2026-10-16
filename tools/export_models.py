@@ -16,6 +16,9 @@ in the graph); output activations [1, frames, 5] at 100 frames per second. Marke
 GRU layers step through the song a frame at a time. A 240 s song on the RTX 5080 laptop: Node 39 s on ONNX Runtime's
 WebGPU provider against 3.7 s on its CPU provider; Chrome 32 s on WebGPU against 17 s on wasm (one thread: the page is
 not cross-origin isolated). The same hits either way.
+
+whisper_<size> (base, small, medium) and silero_vad: the words stage's models; tools/export_whisper.py says what they
+are. One export there gives several files (encoder, decoder, their float32 copies, the tokenizer).
 """
 import hashlib, json, os, sys
 
@@ -139,12 +142,17 @@ def sha256(path):
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
     sys.path.insert(0, ROOT)
-    EXPORTS = {'htdemucs_6s': export_demucs, 'adtof_frame_rnn': export_adtof}
+    import export_whisper
+    EXPORTS = {'htdemucs_6s': export_demucs, 'adtof_frame_rnn': export_adtof,
+               'silero_vad': lambda: export_whisper.export_silero(OUT),
+               **{'whisper_' + s: (lambda s=s: export_whisper.export(s, OUT)) for s in ('base', 'small', 'medium')}}
     want = sys.argv[1:] or list(EXPORTS)
     mpath = os.path.join(OUT, 'manifest.json')
     manifest = json.load(open(mpath)) if os.path.exists(mpath) else {}
     for name in want:
-        path, info = EXPORTS[name]()
-        manifest[name] = dict(info, file=os.path.basename(path), bytes=os.path.getsize(path), sha256=sha256(path))
+        res = EXPORTS[name]()
+        # an export gives one file, (path, info), or several, {name: (path, info)}
+        for key, (path, info) in (res.items() if isinstance(res, dict) else [(name, res)]):
+            manifest[key] = dict(info, file=os.path.basename(path), bytes=os.path.getsize(path), sha256=sha256(path))
     json.dump(manifest, open(mpath, 'w'), indent=1)
     print(json.dumps(manifest, indent=1))

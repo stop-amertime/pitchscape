@@ -235,6 +235,34 @@ def print_drums(song, res):
         r['max_abs']), flush=True)
 
 
+def py_words(path, vocals_wav, out, device, size='medium'):
+    """server/pipeline.py song_info and lyrics_for on a song and its vocal stem, as analyze() runs them (Whisper on
+    the GPU in float16, as on Modal), keeping Whisper's own words (heard) to compare their times."""
+    import hashlib
+    import soundfile as sf
+    from server import pipeline as P
+    vocals = sf.read(vocals_wav, dtype='float32')[0].T
+    sha = hashlib.sha256(open(path, 'rb').read()).hexdigest()
+    info = P.song_info(path, path, sha)
+    kept, real = {}, P.heard_words
+    def heard(*a):
+        t = time.time()
+        kept['heard'], kept['language'] = real(*a)
+        kept['whisper_s'] = round(time.time() - t, 2)
+        return kept['heard'], kept['language']
+    P.heard_words = heard
+    t = time.time()
+    try:
+        lyrics, found = P.lyrics_for(path, path, vocals.shape[1] / 44100, vocals, device, size)
+    finally:
+        P.heard_words = real
+    os.makedirs(out, exist_ok=True)
+    json.dump({'info': info, 'lyrics': lyrics, 'found': found, 'heard': kept.get('heard'),
+               'language': kept.get('language')}, open(os.path.join(out, 'words.json'), 'w'), indent=1)
+    json.dump({'words_s': round(time.time() - t, 2), 'whisper_s': kept.get('whisper_s'), 'size': size,
+               'device': device}, open(os.path.join(out, 'timing.json'), 'w'))
+
+
 STAGES = {'stems': stems, 'drums': drums}
 
 if __name__ == '__main__':
