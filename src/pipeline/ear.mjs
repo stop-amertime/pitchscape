@@ -1,8 +1,9 @@
 // width: how wide each sound spreads along the ear, as server/pipeline.py's width stage measures it (Ear, pack_curves,
-// ear_line): Glasberg & Moore roex excitation patterns per stem, read at ISO 532-2's resolutions, and for every note
-// sample (every other one measured, read between), voice frame and bass frame, how far either side of the sound its
-// excitation stays within 1, 3 and 10 dB of its peak. Patterns are made only for the note stems that have notes,
-// and for the vocals and bass.
+// ear_line): Glasberg & Moore roex excitation patterns per stem, read at ISO 532-2's resolutions, and for every voice
+// and bass frame how far either side of the sound its excitation stays within 1, 3 and 10 dB of its peak. A note's
+// stem may hold a whole chord, so for every note sample (every other one measured, read between) it is the same of
+// a pure tone at its pitch and at the level its stem has there. Patterns are made only for the note stems that have
+// notes, and for the vocals and bass.
 //
 // Each stem is cut into runs of frames; a worker (ear.dsp.mjs) makes the pattern of its run and measures every width
 // asked for in it, so no pattern is ever held whole (Python: 2049 x frames float32 per stem).
@@ -26,8 +27,9 @@ function interp(x, xp, fp) {
   return (fp[lo + 1] - fp[lo]) / (xp[lo + 1] - xp[lo]) * (x - xp[lo]) + fp[lo];
 }
 
-/** Measure Ear.widths at many (frame, hz) on one stem: y its mono samples at 22.05 kHz. Returns Float64Array(q * 6). */
-async function measure(y, gain, frames, hz, rt) {
+/** Measure widths at many (frame, hz) on one stem (y: its mono samples at 22.05 kHz): Ear.widths, or with `tone`
+ * tone_widths at Ear.level. Returns Float64Array(q * 6). */
+async function measure(y, gain, frames, hz, rt, tone = false) {
   const n = y.length, F = 1 + Math.floor(n / HOP), q = frames.length;
   const out = new Float64Array(q * W);
   const order = Array.from({length: q}, (_, i) => i).filter(i => frames[i] < F).sort((a, b) => frames[a] - frames[b]);
@@ -41,7 +43,7 @@ async function measure(y, gain, frames, hz, rt) {
     const from = Math.max(0, p0 * HOP - REACH), to = Math.min(n, p1 * HOP + REACH);
     const part = y.slice(from, to);
     const fr = Int32Array.from(ids, i => frames[i]), h = Float64Array.from(ids, i => hz[i]);
-    jobs.push(rt.pool.call(DSP, 'earChunk', [part, from, n, gain, p0, p1, fr, h], [part.buffer, fr.buffer, h.buffer])
+    jobs.push(rt.pool.call(DSP, 'earChunk', [part, from, n, gain, p0, p1, fr, h, tone], [part.buffer, fr.buffer, h.buffer])
       .then(w => ids.forEach((i, j) => out.set(w.subarray(j * W, j * W + W), i * W))));
   }
   await Promise.all(jobs);
@@ -104,7 +106,7 @@ export async function ears(st22, gain, segs, leadHz, bassHz, rt, {stats = {}} = 
     }
   });
   const lead = lineFrames(leadHz), bass = lineFrames(bassHz);
-  const jobs = Object.entries(ask).map(([stem, a]) => measure(st22[stem], gain, a.frames, a.hz, rt).then(w => {
+  const jobs = Object.entries(ask).map(([stem, a]) => measure(st22[stem], gain, a.frames, a.hz, rt, true).then(w => {
     a.at.forEach((s, i) => widths.set(w.subarray(i * W, i * W + W), s * W));
   }));
   let leadEar, bassEar;

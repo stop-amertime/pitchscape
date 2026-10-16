@@ -1049,7 +1049,7 @@ export function start() {
   function packKey(sha) { return 'pack:' + PIPELINE + ':' + sha; }
   /* only an analysis from the current pipeline (5, which writes pack version 8) is drawn: an older one lacks what the
      drawing needs, so the song is analysed again rather than drawn with stand-ins */
-  function current(pack) { return !!(pack && pack.version >= 8 && pack.segStride === 17 && pack.bytes); }
+  function current(pack) { return !!(pack && pack.version >= 9 && pack.segStride === 17 && pack.bytes); }
   var idb = (function () {
     var dbp = null;
     function open() {
