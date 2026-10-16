@@ -6,17 +6,21 @@ properties of what they found (how loud, how bright, how long a hit rings, how a
   stems   Demucs htdemucs_6s (Meta, MIT)                drums / bass / other / vocals / guitar / piano
   drums   ADTOF Frame_RNN (Zehren et al., CC BY-NC-SA)  kick, snare, toms, hi-hat, cymbals, read from the drum stem
   notes   Basic Pitch (Spotify, Apache-2.0)             note events with pitch bends, read from the guitar, piano
-                                                        and other stems separately; each note keeps its stem
+                                                        and other stems separately; each note keeps its stem and
+                                                        its bend curve, and a bend split across notes is rejoined
   bass    pYIN (librosa, ISC)                           pitch contour of the bass stem
   voice   CREPE (torchcrepe, MIT)                       pitch contour and periodicity of the vocal stem
   tone    MOSQITO (Eomys, Apache-2.0)                   roughness (Daniel & Weber) and sharpness (DIN 45692) of
                                                         every note, and of the voice and bass, on their own stems
-  words   Whisper (faster-whisper, MIT)                 words with timestamps, read from the vocal stem
+  words   LRCLIB (lrclib.net)                           the song's published lyrics, found by its tags or file name
+          Whisper (faster-whisper, MIT)                 when each of those words is sung, read from the vocal stem;
+                                                        what Whisper hears is never shown, only used for timing
 
 Usage (local, CPU is fine for testing):
   python -m server.pipeline SONG.mp3 OUT.json [--stems DIR_WITH_drums.wav_etc] [--device cpu|cuda] [--no-words]
 """
-import argparse, base64, json, math, os, subprocess, sys, tempfile, time
+import argparse, base64, difflib, json, math, os, re, subprocess, sys, tempfile, time, unicodedata
+import urllib.error, urllib.parse, urllib.request
 
 import numpy as np
 
@@ -25,7 +29,7 @@ HOP = 512                       # 23.2 ms per frame, the page's dt
 DT = HOP / SR
 DB = 16                         # drum spectrum bands, log-spaced 30 Hz .. 11 kHz (must match DSP.DRUM_BANDS)
 DRUM_BANDS = [30 * (SR / 2 / 30) ** (i / DB) for i in range(DB + 1)]
-EVW, SEGW = 5 + DB, 14
+EVW, SEGW = 5 + DB, 16
 NOTE_STEMS = ('other', 'guitar', 'piano')   # a note's source: its index here
 TYPES = {'kick': 0, 'snare': 1, 'hat': 2, 'tom': 3, 'cymbal': 4}
 
@@ -280,21 +284,77 @@ def voice_line(vocals44, F, device):
 
 
 # ------------------------------------------------------------------ notes
+BP_BEND_BIAS = 1         # Basic Pitch reports an in-tune note's bend as +1 bin (1/3 semitone): measured on synthetic
+                         # notes at exact MIDI pitches and on every steady note of the test song; taken off here
+
+
+def raw_bends(t0, t1, bends):
+    """Basic Pitch's bends for one note as (times, semitones from its MIDI pitch), unsmoothed: one value per model
+    frame, evenly spread over the note, in thirds of a semitone."""
+    if not bends:
+        return np.array([t0, t1]), np.zeros(2)
+    b = (np.asarray(bends, np.float64) - BP_BEND_BIAS) / 3
+    return t0 + (t1 - t0) * (np.arange(len(b)) + 0.5) / len(b), b
+
+
+def smooth_bend(m):
+    """Lone outlier frames removed and the third-semitone steps smoothed (~35 ms)."""
+    from scipy.ndimage import gaussian_filter1d, median_filter
+    if len(m) >= 3:
+        m = median_filter(m, size=3, mode='nearest')
+    if len(m) >= 4:
+        m = gaussian_filter1d(m, 1.5, mode='nearest')
+    return m
+
+
+def join_bends(notes, gap=0.15, near=0.75):
+    """Basic Pitch ends a note when a bend carries it into the next semitone and starts another there (sometimes
+    after losing it for a few frames). A note that starts within `gap` s of where one on another pitch ended, at the
+    pitch that one had bent to by its last frame (within `near` semitones: a plain step to the next semitone is a
+    whole one), is the same note still bending: they become one note, its bend running on. A note struck again at
+    the same pitch stays two notes. Returns (t0, t1, MIDI pitch, amp, bend times, bend semitones from that pitch)."""
+    out = []
+    for t0, t1, pitch, amp, bends in sorted(notes, key=lambda n: n[0]):
+        tb, cb = raw_bends(t0, t1, bends)
+        best, bd = None, near
+        for a in out[-200:]:
+            if a['t1'] < t0 - gap or a['t1'] > t0 + gap or a['t1'] > t1 or a['last'] == pitch:
+                continue
+            d = abs(a['m'][-1] - (pitch + cb[0]))
+            if d <= bd:
+                best, bd = a, d
+        if best is None:
+            out.append({'t0': t0, 't1': t1, 'pitch': pitch, 'last': pitch, 'amps': [(amp, t1 - t0)], 't': tb, 'm': pitch + cb})
+            continue
+        keep = best['t'] < tb[0]
+        best['t'] = np.concatenate([best['t'][keep], tb])
+        best['m'] = np.concatenate([best['m'][keep], pitch + cb])
+        best['t1'], best['last'] = t1, pitch
+        best['amps'].append((amp, t1 - t0))
+    res = []
+    for a in out:
+        w = sum(d for _, d in a['amps']) or 1.0
+        res.append((a['t0'], a['t1'], a['pitch'], sum(v * d for v, d in a['amps']) / w, a['t'], smooth_bend(a['m']) - a['pitch']))
+    return res
+
+
 def note_details(notes, other22):
-    """Basic Pitch notes -> the page's note records: [t0, t1, midi, amp, brightness, noise, family, attack s,
-    fade dB/s, vibrato depth st, vibrato rate Hz, hollowness]. Family: 0 struck, 1 swell, 2 held."""
+    """Notes (t0, t1, MIDI pitch, amp, bend times, bend semitones) -> the page's note records: [t0, t1, midi, amp,
+    brightness, noise, family, attack s, fade dB/s, vibrato depth st, vibrato rate Hz, hollowness, strength, curve]
+    where midi is the note's typical pitch and curve its bend: [times], [semitones from midi]. Family: 0 struck,
+    1 swell, 2 held. The harmonics are read along the bent pitch, frame by frame."""
     y = other22.mean(0) if other22.ndim > 1 else other22
     spec = Spec(y, n_fft=4096, hop=256)
     fps = SR / 256
-    amps = np.array([n[3] for n in notes]) if notes else np.array([1.0])
-    aref = np.percentile(amps, 95) + 1e-9
     segs = []
-    for t0, t1, pitch, amp, bends in notes:
-        midi = pitch + (float(np.mean(bends)) / 3 if bends else 0.0)
-        f0 = 440 * 2 ** ((midi - 69) / 12)
+    for t0, t1, pitch, amp, tb, cb in notes:
+        midi = pitch + float(np.median(cb))
+        off = cb - (midi - pitch)
         fa, fb = int(t0 * fps), max(int(t0 * fps) + 2, int(t1 * fps))
         env, trk, br, nz, ev, od = [], [], [], [], 0.0, 0.0
         for f in range(fa, min(fb, spec.M.shape[1])):
+            fm = midi + float(np.interp(f / fps, tb, off))
+            f0 = 440 * 2 ** ((fm - 69) / 12)
             h = [spec.at(f, k * f0) for k in range(1, 9)]
             env.append(sum(h[:4]))
             tot = sum(h)
@@ -305,7 +365,7 @@ def note_details(notes, other22):
             od += h[2] + h[4] + h[6]
             k = int(np.argmax(h[:3])) + 1
             p = spec.peak_hz(f, k * f0)
-            trk.append(12 * math.log2(p / k / 440) + 69 if p > 0 else midi)
+            trk.append(12 * math.log2(p / k / 440) + 69 - fm if p > 0 else 0.0)
         env = np.array(env) if env else np.array([1.0])
         pk = int(np.argmax(env))
         k75 = int(np.argmax(env >= 0.75 * env[pk]))
@@ -331,7 +391,7 @@ def note_details(notes, other22):
             fam = 2
         hollow = 1 - min(1.0, 2 * ev / (ev + od)) if ev + od > 0 else 0.0
         segs.append([t0, t1, midi, amp, float(np.mean(br)) if br else 0.0,
-                     float(np.mean(nz)) if nz else 0.0, fam, attack, fade, vd, vr, hollow, float(env[pk])])
+                     float(np.mean(nz)) if nz else 0.0, fam, attack, fade, vd, vr, hollow, float(env[pk]), (tb, off)])
     segs.sort(key=lambda s: s[0])
     return segs
 
@@ -339,11 +399,12 @@ def note_details(notes, other22):
 def notes_by_stem(stems, st22):
     """Basic Pitch on each instrument stem. A note also found, much weaker, at the same pitch and time in another stem
     is that stem's leak and is dropped there; notes far below the song's level (bleed into a near-empty stem) go too.
-    Records gain their stem's index (NOTE_STEMS) and lose the strength used for this."""
+    Records gain their stem's index (NOTE_STEMS) in place of the strength used for this, and keep their bend curve
+    last."""
     found = []
     for i, name in enumerate(NOTE_STEMS):
         if name in stems:
-            found += [r + [i] for r in note_details(notes_from_stem(stems[name]), st22[name])]
+            found += [r + [i] for r in note_details(join_bends(notes_from_stem(stems[name])), st22[name])]
     if not found:
         return []
     energy = np.array([r[12] for r in found])
@@ -356,7 +417,7 @@ def notes_by_stem(stems, st22):
             b = found[j]
             if b[0] >= a[1]:
                 break
-            if a[13] == b[13] or abs(a[2] - b[2]) > 0.6:
+            if a[14] == b[14] or abs(a[2] - b[2]) > 0.6:
                 continue
             shared = min(a[1], b[1]) - max(a[0], b[0])
             if shared < 0.5 * min(a[1] - a[0], b[1] - b[0]):
@@ -367,7 +428,24 @@ def notes_by_stem(stems, st22):
                 drop.add(j)
     kept = [r for k, r in enumerate(found) if k not in drop]
     aref = np.percentile([r[3] for r in kept], 95) + 1e-9
-    return [r[:3] + [min(1.2, r[3] / aref)] + r[4:12] + [r[13]] for r in kept]
+    return [r[:3] + [min(1.2, r[3] / aref)] + r[4:12] + [r[14], r[13]] for r in kept]
+
+
+def pack_bends(segs):
+    """Each note's bend on the page's frame grid (every DT s from t0 to t1), semitones from its pitch, all in one
+    flat list; a note that never strays a twelfth of a semitone from its pitch gets none. Returns the list and each
+    note's (start, count) in it."""
+    flat, where = [], []
+    for r in segs:
+        tb, off = r[13]
+        if len(off) < 2 or float(np.max(np.abs(off))) < 1 / 12:
+            where.append((0, 0))
+            continue
+        n = max(2, int(round((r[1] - r[0]) / DT)) + 1)
+        tt = r[0] + (r[1] - r[0]) * np.arange(n) / (n - 1)
+        where.append((len(flat), n))
+        flat += [round(float(v), 3) for v in np.interp(tt, tb, off)]
+    return flat, where
 
 
 def notes_from_stem(other44):
@@ -464,26 +542,195 @@ def tone(stems, segs, leadHz, bassHz, F, workers=None):
 
 
 # ------------------------------------------------------------------ words
-def words_from_vocals(vocals44, device, size):
+LRCLIB = 'https://lrclib.net/api/'
+UA = 'Pitchscape (https://github.com/stop-amertime/pitchscape)'
+
+
+def song_tags(path, name):
+    """(artist, title, album) from the file's tags, else from a file name of the form "Artist - Title"."""
+    try:
+        out = subprocess.run(['ffprobe', '-v', 'error', '-show_entries', 'format_tags:stream_tags', '-of', 'json', path],
+                             capture_output=True, check=True, timeout=30).stdout
+        j = json.loads(out or b'{}')
+        tags = {}
+        for d in [j.get('format', {}).get('tags', {})] + [st.get('tags', {}) for st in j.get('streams', [])]:
+            for k, v in (d or {}).items():
+                tags.setdefault(k.lower(), str(v).strip())
+        artist = tags.get('artist') or tags.get('album_artist') or ''
+        if artist and tags.get('title'):
+            return artist, tags['title'], tags.get('album', '')
+    except Exception as e:
+        log('tags: none read', e)
+    stem = re.sub(r'^\s*\d{1,3}\s*[-._)]?\s+', '', os.path.splitext(os.path.basename(name or ''))[0].replace('_', ' '))
+    if ' - ' in stem:
+        artist, title = stem.split(' - ', 1)
+        return artist.strip(), title.strip(), ''
+    return '', '', ''
+
+
+class Unreachable(Exception):
+    pass
+
+
+def lrclib(path_q, tries=6):
+    """One LRCLIB API call: the JSON, or None for "not found". LRCLIB often answers "busy" (503) for a moment, so a
+    call is retried for about 20 s before giving up (Unreachable)."""
+    for k in range(tries):
+        try:
+            req = urllib.request.Request(LRCLIB + path_q, headers={'User-Agent': UA})
+            with urllib.request.urlopen(req, timeout=15) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            log('lrclib:', e.code, path_q)
+        except Exception as e:
+            log('lrclib:', e, path_q)
+        time.sleep(1 + k)
+    raise Unreachable(path_q)
+
+
+def find_lyrics(artist, title, album, dur):
+    """The song's record on LRCLIB: an exact match on artist, title and length first, then a search, taking only a
+    record within 3 s of the song's length (another length is another version, timed differently)."""
+    if not (artist and title):
+        return None
+    q = {'artist_name': artist, 'track_name': title, 'duration': str(int(round(dur)))}
+    if album:
+        q['album_name'] = album
+    hit = lrclib('get?' + urllib.parse.urlencode(q))
+    if not hit and album:
+        del q['album_name']
+        hit = lrclib('get?' + urllib.parse.urlencode(q))
+    if hit and abs(float(hit.get('duration') or 0) - dur) <= 3:
+        return hit
+    found = lrclib('search?' + urllib.parse.urlencode({'artist_name': artist, 'track_name': title})) or []
+    ok = [h for h in found if isinstance(h, dict) and abs(float(h.get('duration') or 0) - dur) <= 3
+          and (h.get('instrumental') or h.get('syncedLyrics') or h.get('plainLyrics'))]
+    ok.sort(key=lambda h: (not h.get('syncedLyrics'), abs(float(h.get('duration') or 0) - dur)))
+    return ok[0] if ok else None
+
+
+def parse_lrc(text):
+    """Synced lyrics -> [(line time s, text)], in time order; a line stamped several times appears at each."""
+    out = []
+    for raw in (text or '').splitlines():
+        stamps = re.findall(r'\[(\d+):(\d+(?:\.\d+)?)\]', raw)
+        body = re.sub(r'<\d+:\d+(?:\.\d+)?>', '', re.sub(r'\[[^\]]*\]', '', raw)).strip()
+        if body:
+            out += [(int(m) * 60 + float(sec), body) for m, sec in stamps]
+    out.sort(key=lambda x: x[0])
+    return out
+
+
+def norm(w):
+    w = unicodedata.normalize('NFKD', w.lower())
+    return ''.join(c for c in w if c.isalnum())
+
+
+def heard_words(vocals44, device, size):
+    """Whisper's words, with when each starts and ends: [(word, start, end)], and the language it heard."""
     from faster_whisper import WhisperModel
     v16 = to_rate(vocals44.mean(0), 44100, 16000).astype(np.float32)
     model = WhisperModel(size, device='cuda' if device != 'cpu' else 'cpu', compute_type='float16' if device != 'cpu' else 'int8')
     segments, info = model.transcribe(v16, word_timestamps=True, vad_filter=True, condition_on_previous_text=False)
-    words = [[w.word.strip(), round(float(w.start), 3), round(float(w.end), 3)]
-             for seg in segments for w in (seg.words or []) if w.word.strip()]
-    # Whisper's segments run long; a sung line ends at a pause (or after ~9 words)
-    lines, cur = [], []
-    for i, w in enumerate(words):
-        cur.append(w)
-        nxt = words[i + 1] if i + 1 < len(words) else None
-        if nxt is None or nxt[1] - w[2] > 0.45 or len(cur) >= 9:
-            lines.append({'text': ' '.join(x[0] for x in cur), 'words': [[x[0], x[1]] for x in cur]})
-            cur = []
-    return {'language': info.language, 'lines': lines}
+    words = [(w.word.strip(), float(w.start), float(w.end)) for seg in segments for w in (seg.words or []) if w.word.strip()]
+    return words, info.language
+
+
+def place_words(lines, heard):
+    """Times for the published words. lines: [(LRC line time or None, text)]; heard: Whisper's [(word, start, end)].
+    The two word lists are matched in order (difflib); a matched word takes the time Whisper heard it at, unless that
+    is far from where the LRC puts its line (a match against a different repeat of a chorus). Words between matches
+    are spread evenly between them, and a line starting on an unmatched word starts at its LRC time. Returns the
+    lines with times and the share of words matched."""
+    toks = [(li, w) for li, (_, text) in enumerate(lines) for w in text.split()]
+    a = [norm(w) for _, w in toks]
+    b = [norm(w) for w, _, _ in heard]
+    t = [None] * len(toks)
+    for blk in difflib.SequenceMatcher(None, a, b, autojunk=False).get_matching_blocks():
+        for k in range(blk.size):
+            if a[blk.a + k]:
+                t[blk.a + k] = heard[blk.b + k][1]
+    starts = [lt for lt, _ in lines]
+    synced = all(x is not None for x in starts)
+    first = {}
+    for k, (li, _) in enumerate(toks):
+        first.setdefault(li, k)
+    if synced:
+        # the LRC may be timed against a copy that starts a little earlier or later: one offset for the song
+        d = [t[k] - starts[li] for li, k in first.items() if t[k] is not None]
+        off = float(np.median(d)) if d else 0.0
+        st = [x + off for x in starts]
+        for k, (li, _) in enumerate(toks):
+            hi = st[li + 1] if li + 1 < len(st) else st[li] + 15
+            if t[k] is not None and not (st[li] - 1.5 <= t[k] <= hi + 1.0):
+                t[k] = None
+        for li, k in first.items():
+            if t[k] is None or abs(t[k] - st[li]) > 1.0:
+                t[k] = max(0.0, st[li])
+    # keep only times that run forward
+    last = -1.0
+    for k in range(len(t)):
+        if t[k] is not None:
+            if t[k] <= last:
+                t[k] = None
+            else:
+                last = t[k]
+    known = [k for k in range(len(t)) if t[k] is not None]
+    matched = sum(1 for x in t if x is not None) / max(1, len(t))
+    if not known:
+        return None, 0.0
+    for k in range(len(t)):
+        if t[k] is not None:
+            continue
+        lo = max([j for j in known if j < k], default=None)
+        hi = min([j for j in known if j > k], default=None)
+        if lo is not None and hi is not None:
+            t[k] = t[lo] + (t[hi] - t[lo]) * (k - lo) / (hi - lo)
+        elif lo is not None:
+            t[k] = t[lo] + 0.3 * (k - lo)
+        else:
+            t[k] = max(0.0, t[hi] - 0.3 * (hi - k))
+    out = []
+    for li, (_, text) in enumerate(lines):
+        ws = [[w, round(t[k], 3)] for k, (lj, w) in enumerate(toks) if lj == li]
+        if ws:
+            out.append({'text': text, 'words': ws})
+    return out, matched
+
+
+def lyrics_for(path, name, dur, vocals44, device, size):
+    """The song's published lyrics with each word timed to the vocal, or None (with why) if LRCLIB hasn't got them.
+    Whisper only times the words; what it hears is never shown."""
+    artist, title, album = song_tags(path, name)
+    info = {'artist': artist, 'title': title}
+    if not (artist and title):
+        return None, dict(info, found=False, why='no artist and title in the tags or the file name')
+    try:
+        hit = find_lyrics(artist, title, album, dur)
+    except Unreachable:
+        return None, dict(info, found=False, why='LRCLIB could not be reached')
+    if not hit:
+        return None, dict(info, found=False, why='not on LRCLIB at this length')
+    info.update(found=True, lrclib=hit.get('id'), track=hit.get('trackName'), by=hit.get('artistName'))
+    if hit.get('instrumental'):
+        return None, dict(info, why='instrumental')
+    lines = parse_lrc(hit.get('syncedLyrics'))
+    if not lines:
+        lines = [(None, ln.strip()) for ln in (hit.get('plainLyrics') or '').splitlines() if ln.strip()]
+    if not lines:
+        return None, dict(info, why='no lyrics in the record')
+    heard, lang = heard_words(vocals44, device, size)
+    placed, matched = place_words(lines, heard)
+    info.update(synced=lines[0][0] is not None, matched=round(matched, 3), heard=len(heard))
+    if not placed:
+        return None, dict(info, why='none of the words were heard')
+    return {'language': lang, 'source': 'LRCLIB', 'lines': placed}, info
 
 
 # ------------------------------------------------------------------ the whole thing
-def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, progress=log, title=None):
+def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, progress=log, title=None, name=None):
     from huggingface_hub import hf_hub_download
     t_start = time.time()
     mix44 = decode(path, 44100)
@@ -514,21 +761,24 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
 
     progress('tone: roughness and sharpness')
     note_h, leadHarsh, bassHarsh, slices = tone(stems, segs, leadHz, bassHz, F)
-    segs = [r + [h] for r, h in zip(segs, note_h)]
+    bends, where = pack_bends(segs)
+    segs = [r[:13] + [h, w[0], w[1]] for r, h, w in zip(segs, note_h, where)]
 
-    lyrics = None
+    lyrics, found = None, None
     if words:
-        progress('words: Whisper')
-        lyrics = words_from_vocals(stems['vocals'], device, whisper_size or ('medium' if device != 'cpu' else 'base'))
+        progress('words: LRCLIB, timed by Whisper')
+        lyrics, found = lyrics_for(path, name or path, dur, stems['vocals'], device,
+                                   whisper_size or ('medium' if device != 'cpu' else 'base'))
+        log('words:', json.dumps(found))
 
     ev = np.array(events, np.float32).reshape(-1) if events else np.zeros(0, np.float32)
     sg = np.array(segs, np.float32).reshape(-1) if segs else np.zeros(0, np.float32)
     on = np.array(onsets, np.float32).reshape(-1) if onsets else np.zeros(0, np.float32)
     pack = {
-        'format': 'song-overprint-pack', 'version': 5, 'source': 'pitchscape-server',
+        'format': 'song-overprint-pack', 'version': 6, 'source': 'pitchscape-server',
         'models': {'stems': 'htdemucs_6s', 'drums': 'ADTOF Frame_RNN', 'notes': 'Basic Pitch ICASSP 2022',
                    'bass': 'pYIN', 'voice': 'CREPE', 'tone': 'MOSQITO roughness_dw, sharpness_din',
-                   'words': 'Whisper' if words else None},
+                   'words': 'LRCLIB, timed by Whisper' if words else None},
         'noteStems': list(NOTE_STEMS),
         'title': title or os.path.splitext(os.path.basename(path))[0], 'artist': '', 'audio': None,
         'dur': dur, 'dt': DT, 'frames': F, 'stereo': True, 'noiseRef': noiseRef,
@@ -536,12 +786,13 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
         'arrays': {'bassN': b64f32(bassN), 'bassHz': b64f32(bassHz), 'bassBr': b64f32(bassBr),
                    'leadHz': b64f32(leadHz), 'leadN': b64f32(leadN), 'leadBr': b64f32(leadBr), 'leadNz': b64f32(leadNz),
                    'events': b64f32(ev), 'segs': b64f32(sg), 'onsets': b64f32(on),
-                   'leadHarsh': b64f32(leadHarsh), 'bassHarsh': b64f32(bassHarsh)},
+                   'leadHarsh': b64f32(leadHarsh), 'bassHarsh': b64f32(bassHarsh), 'bends': b64f32(bends)},
         'timing': None, 'lyrics': lyrics,
         'stats': {'seconds': round(time.time() - t_start, 1), 'hits': {k: sum(1 for h in hits if h[1] == k) for k in TYPES},
                   'notes': len(segs), 'voiced': float((leadHz > 0).mean()),
                   'notesByStem': {n: sum(1 for r in segs if int(r[12]) == i) for i, n in enumerate(NOTE_STEMS)},
-                  'harshNotes': round(float(np.mean([r[13] > 0.3 for r in segs])) if segs else 0.0, 3), 'toneSlices': slices},
+                  'harshNotes': round(float(np.mean([r[13] > 0.3 for r in segs])) if segs else 0.0, 3), 'toneSlices': slices,
+                  'bentNotes': sum(1 for r in segs if r[15] > 0), 'lyrics': found},
     }
     progress('done in %.0f s' % (time.time() - t_start))
     return pack
@@ -555,8 +806,9 @@ if __name__ == '__main__':
     ap.add_argument('--device', default='cpu')
     ap.add_argument('--no-words', action='store_true')
     ap.add_argument('--whisper', help='Whisper model size (default: medium on GPU, base on CPU)')
+    ap.add_argument('--name', help="the uploaded file's name, read as \"Artist - Title\" when the file has no tags")
     a = ap.parse_args()
-    pk = analyze(a.song, device=a.device, stems_dir=a.stems, words=not a.no_words, whisper_size=a.whisper)
+    pk = analyze(a.song, device=a.device, stems_dir=a.stems, words=not a.no_words, whisper_size=a.whisper, name=a.name)
     with open(a.out, 'w') as fh:
         json.dump(pk, fh)
     log('wrote', a.out, '%.0f KB' % (os.path.getsize(a.out) / 1024), json.dumps(pk['stats']))

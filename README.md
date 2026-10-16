@@ -60,7 +60,8 @@ every push to `main` that touches `server/`.
 | bass line | pYIN (librosa) | ISC |
 | voice line | CREPE (torchcrepe) | MIT |
 | tone: roughness (Daniel & Weber) and sharpness (DIN 45692) | MOSQITO (Eomys) | Apache-2.0 |
-| words | Whisper (faster-whisper) | MIT |
+| lyrics: the song's published words | LRCLIB (lrclib.net), found by the file's tags or an "Artist - Title" file name | free API, no key |
+| when each of those words is sung | Whisper (faster-whisper), read from the vocal stem | MIT |
 
 Colour by instrument comes from the stems, so an instrument keeps its ink for the whole song, warmer the more it is
 out front: voice fluorescent pink, guitar orange, piano sunflower, the other stem's notes (synths, strings, brass,
@@ -72,11 +73,29 @@ half second, after setting the whole mix to 70 dB SPL so harshness is absolute r
 roughness counts above 0.1 asper, sharpness above 1.75 acum, and together they make a note's edge anything from a
 faint smooth ripple to a sawtooth. The slices run in parallel on the server's eight CPU cores.
 
+Every note is drawn along its own pitch as it bends, the way the voice is: Basic Pitch reports each note's bend frame
+by frame (in thirds of a semitone; it reads an in-tune note one third high, which is taken off), and the pipeline keeps
+that curve, smoothed, instead of one pitch per note. Basic Pitch ends a note when a bend carries it into the next
+semitone and starts another there, sometimes after losing it for a few frames; a note that starts within 0.15 s of
+where one on another pitch ended, within three quarters of a semitone of the pitch that one had bent to, is joined back
+onto it, so a bent guitar note prints as one stroke. A plain step to the next semitone (a whole semitone) and a note
+struck again at the same pitch stay separate notes. On a synthetic plucked note bent up a whole tone, held, released and
+then wobbled, Basic Pitch gave 11 fragments; joined, they are one stroke within 0.35 semitone of the true bend
+throughout. On Made in the Dark, whose guitar barely bends, 3 of 766 guitar notes were joined.
+
+Lyrics are the published ones, never a transcription. The pipeline reads the artist and title from the file's tags
+(or an "Artist - Title" file name), asks LRCLIB for the song at that length (within 3 s, since another length is
+another version), and times its words to the vocal stem: LRCLIB's words and Whisper's are matched in order, a matched
+word takes the time Whisper heard it at (unless that is far from where the LRC's own line time puts it, as when a
+chorus repeat is matched against the wrong repeat), and the words between are spread evenly. What Whisper hears is used
+for nothing else. If LRCLIB hasn't got the song, the song has no words until some are pasted.
+
 The pipeline only wires these together and measures plain properties of what they found (loudness, brightness, how
 long a hit rings, how a note starts and fades). On Made in the Dark, ADTOF found no drum hits at all in the stems that
 hold no drums (the old in-browser detector found hundreds there: piano read as hats, voice read as snares), and on the
 full mix 99% of its snares, 93% of its hats and 84% of its kicks matched the hits it found in the isolated drum stem.
-Whisper's word starts landed within 0.3 s of the forced-alignment reference for 84% of words (small model, CPU).
+On Made in the Dark, LRCLIB's synced lyrics were found from the file's tags and 82% of their words were matched to
+words Whisper heard (base model, CPU; the server uses medium); the rest were spread between them.
 
 Run it locally (Python 3.11, ffmpeg): `python -m server.pipeline SONG.mp3 OUT.json` (`--stems DIR` reuses Demucs stems).
 Deploying needs three repository secrets: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` (a token from
@@ -86,7 +105,9 @@ the GPU credit). The workflow writes the server's address to `docs/config.json`,
 In the page, put the passphrase in Lab → Server key once. A song is known by the SHA-256 of its file. If its analysis
 exists, on the device (IndexedDB) or on the server (a JSON file per song in a Modal Volume, kept for good; the first TiB
 a month is free), it loads at once. Otherwise it is uploaded, the sheet shows each stage of the analysis, and the song
-plays once the analysis is in (with the words Whisper heard, unless you have placed lyrics for that song yourself).
+plays once the analysis is in (with the song's lyrics from LRCLIB, unless you have placed lyrics for that song
+yourself). Only an analysis from the current pipeline is drawn; an older one is analysed again rather than drawn with
+stand-ins for what it lacks.
 The demo song goes the same way: rendered on the phone, then analysed once like any other song. Both stores are keyed by `PIPELINE_VERSION` in
 `server/modal_app.py` as well: bump it when the analysis changes and songs are analysed afresh. The audio itself is
 never kept. After each deploy the workflow sends a generated 12-second clip through the live server
@@ -186,8 +207,12 @@ one that would steps up, or down, until it is clear.
   `events` from version 3 as `[time, type, strength, Hz, ringSeconds, band0..band15]` x n (`eventStride` 21): the hit's own
   spectrum (what each of 16 log-spaced bands from 30 Hz to 11 kHz gained over the frames before it, each drum type
   limited to its own region), how long it rings (until its band falls 14 dB), and for kicks the pitch of the boom;
-  `segs` as `[t0, t1, midi, amp, brightness, noise, family, attack, fadeDbPerS, vibratoDepth, vibratoHz, hollowness]` x n
-  (version 2, `segStride` 12; version 1 packs have the first six only and print in the old single orange style); `onsets` as `[time, gapBefore, runEnd, strength]` x n.
+  `segs` as `[t0, t1, midi, amp, brightness, noise, family, attack, fadeDbPerS, vibratoDepth, vibratoHz, hollowness,
+  stem (0 other, 1 guitar, 2 piano), harshness, bendStart, bendCount]` x n (version 6, `segStride` 16, the only version
+  the page draws); `bends`: each bent note's pitch in semitones from its `midi`, every `dt` from t0 to t1, `bendCount`
+  values from `bendStart` (none for a note that holds its pitch); `leadHarsh`, `bassHarsh` per frame; `onsets` as
+  `[time, gapBefore, runEnd, strength]` x n. `lyrics`: `{language, source, lines: [{text, words: [[word, seconds]]}]}`
+  or null, with why in `stats.lyrics`.
 - **Timing** (`song-overprint-timing`): `{lines: [{h, t, e, words: [startSeconds, ...]}]}`, one entry per sung line in
   sung order. `h` is `lineHash(line)`: FNV-1a 32-bit over the line lowercased with accents, punctuation and spaces
   removed, in base 36. Word lists follow the page's own word split (`parseLyrics`).

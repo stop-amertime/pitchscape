@@ -205,6 +205,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
   <section class="panel" id="lyricsPanel" aria-label="Lyrics" hidden>
     <div class="panel-head"><h2>Lyrics</h2><button class="btn btn-small btn-primary" type="button" data-close>Done</button></div>
     <div class="panel-body">
+      <p class="hint" id="lyrSrc"></p>
       <textarea id="lyricsText" aria-label="Lyrics" spellcheck="false" placeholder="Paste lyrics"></textarea>
       <div class="lyr-actions">
         <button class="btn btn-primary" id="placeBtn" type="button">Place</button>
@@ -1297,7 +1298,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
   var $ = function (id) { return document.getElementById(id); };
   var cv = $('cv'), ctx = cv.getContext('2d'), plate = $('plate'), audio = $('player');
   var playBtn = $('play'), seek = $('seek'), labSeek = $('labSeek'), tNow = $('tNow'), tDur = $('tDur'), msg = $('msg');
-  var lyricsText = $('lyricsText');
+  var lyricsText = $('lyricsText'), lyrSrc = $('lyrSrc');
   var reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
   var css = getComputedStyle(document.documentElement);
@@ -1379,21 +1380,19 @@ if (typeof module !== 'undefined') module.exports = DSP;
       e.br = brightOf(e.p); e.mhz = markHz(ev[i + 1], e);
       lists[ev[i + 1]].push(e);
     }
-    S.segs = []; S.segMax = 0;
-    /* note records: [t0, t1, midi, amp, brightness, noise] and, from engine v2, [family, attack s, fade dB/s,
-       vibrato depth st, vibrato rate Hz, hollowness] and, from pipeline v2, [stem, harshness]. Family: 0 struck,
-       1 swell, 2 held; -1 for older packs. */
-    var SW = ana.segW || 6, q = ana.segs;
+    S.segs = []; S.segMax = 0; S.bends = ana.bends;
+    /* note records: [t0, t1, midi, amp, brightness, noise, family, attack s, fade dB/s, vibrato depth st, vibrato
+       rate Hz, hollowness, stem, harshness, bend start, bend count]. Family: 0 struck, 1 swell, 2 held. Stem: 0
+       other, 1 guitar, 2 piano. Harshness 0..1. The bend is the note's pitch, in semitones from midi, every dt from t0
+       to t1: bend count values in ana.bends from bend start (none for a note that holds its pitch). */
+    var SW = ana.segW, q = ana.segs;
     for (i = 0; i + SW <= q.length; i += SW) {
-      var v2 = SW >= 12, sg = { t0: q[i], t1: q[i + 1], m: q[i + 2], a: q[i + 3], b: q[i + 4], z: q[i + 5], f: v2 ? q[i + 6] : -1, att: v2 ? q[i + 7] : 0, dec: v2 ? q[i + 8] : 0, vd: v2 ? q[i + 9] : 0, vr: v2 ? q[i + 10] : 0, h: v2 ? q[i + 11] : 0, id: i / SW };
-      /* from pipeline v2: which stem the note came from (0 other, 1 guitar, 2 piano) and how harsh it is, 0..1.
-         Older analyses carry neither: their notes count as "other", and a toned-down brightness stands in. */
-      sg.src = SW >= 13 ? q[i + 12] : 0; sg.hs = SW >= 14 ? q[i + 13] : brMap(sg.b) * 0.4;
+      var sg = { t0: q[i], t1: q[i + 1], m: q[i + 2], a: q[i + 3], b: q[i + 4], z: q[i + 5], f: q[i + 6], att: q[i + 7], dec: q[i + 8], vd: q[i + 9], vr: q[i + 10], h: q[i + 11], src: q[i + 12], hs: q[i + 13], bs: q[i + 14], bn: q[i + 15], id: i / SW };
       S.segs.push(sg); if (sg.t1 - sg.t0 > S.segMax) S.segMax = sg.t1 - sg.t0;
     }
     ana.leadHz = steadyVoice(ana.leadHz);
     /* how harsh the voice and bass are, measured every half second: eased over a quarter of a second each way */
-    ana.leadH = ana.leadHarsh ? easeOut(ana.leadHarsh, 11) : null; ana.bassH = ana.bassHarsh ? easeOut(ana.bassHarsh, 11) : null;
+    ana.leadH = easeOut(ana.leadHarsh, 11); ana.bassH = easeOut(ana.bassHarsh, 11);
     var hz = []; for (i = 0; i < ana.leadHz.length; i += 3) if (ana.leadHz[i] > 0) hz.push(ana.leadHz[i]);
     hz.sort(function (a, b) { return a - b; }); S.medHz = hz.length ? hz[hz.length >> 1] : 330;
     fitRange(ana); scaleY();
@@ -1601,7 +1600,13 @@ if (typeof module !== 'undefined') module.exports = DSP;
     if (head) pen(head.y, soft ? SEMI_PX * 0.55 + 0.6 : head.w, head.c, head.a);
   }
 
-  /* other notes, one family per call: fams lists the families drawn (-1 = older packs, which carry none) */
+  /* a note's pitch at time t: its MIDI pitch plus its bend there (read between the bend's samples) */
+  function bendAt(s, t) {
+    if (!s.bn) return 0;
+    var u = clamp((t - s.t0) / Math.max(1e-6, s.t1 - s.t0), 0, 1) * (s.bn - 1), k = Math.min(s.bn - 2, Math.floor(u)), f = u - k, b = S.bends, j = s.bs + k;
+    return b[j] + (b[j + 1] - b[j]) * f;
+  }
+  /* the guitar, piano or other notes (src), each drawn along its pitch as it bends */
   var SEMI_PX = 1;
   function drawSegs(now, lv, src, key) {
     var t0w = now - WIN - 0.2, i = lowerBound(S.segs, t0w - S.segMax, 't0');
@@ -1611,11 +1616,9 @@ if (typeof module !== 'undefined') module.exports = DSP;
       if (s.t1 >= now) lv[key] += s.a * 0.5;
       var hz = DSP.mtof(s.m), y0 = yOf(hz), br = brMap(s.b), z = zSeg(s.z), r = rate(hz), a1 = Math.min(1, s.a), pts = [], seed = 101 + s.id * 7, open = s.t1 > now;
       var q = s.h > 0.5 ? clamp((s.h - 0.5) * 2.5, 0, 1) : 0;
-      /* vibrato keeps its real speed; its swing is drawn ~6x so it reads on a phone */
-      var vA = s.vd > 0 ? Math.max(2.2, Math.min(7, s.vd * SEMI_PX * 6)) : 0, vw = 6.2832 * s.vr;
-      var step = vA ? Math.min(0.03, 0.2 / Math.max(1, s.vr)) : 0.03;
+      var step = s.bn ? S.ana.dt : 0.03;
       for (var t = s.t0; ; t += step) {
-        var tt = Math.min(t, end), u = tt - s.t0, y = vA ? y0 + vA * Math.sin(vw * u) * Math.min(1, u / 0.15) : y0, w, ink;
+        var tt = Math.min(t, end), u = tt - s.t0, y = s.bn ? yOf(DSP.mtof(s.m + bendAt(s, tt))) : y0, w, ink;
         if (s.f === 0) {
           /* struck: full weight at the strike, thinning and paling at the fade rate measured for this note */
           var g = Math.pow(10, Math.max(-80, Math.min(0, s.dec)) * u / 20);
@@ -1626,10 +1629,9 @@ if (typeof module !== 'undefined') module.exports = DSP;
           var A = Math.max(0.08, s.att);
           w = (1 + 4.2 * s.a) * 1.6 * (0.04 + 0.96 * smooth(0, A, u)) * Math.min(1, (s.t1 - tt) / 0.25 + 0.25);
           ink = (0.45 + 0.55 * a1) * (0.3 + 0.7 * smooth(0, A, u));
-        } else if (s.f === 2) {
-          w = (1 + 4.2 * s.a) * 1.15 * Math.min(1, u / 0.02 + 0.5); ink = 0.5 + 0.5 * a1;
         } else {
-          w = (1 + 4.2 * s.a) * Math.min(1, u / 0.05 + 0.25) * Math.min(1, (s.t1 - tt) / 0.08 + 0.2); ink = 0.45 + 0.55 * a1;
+          /* held */
+          w = (1 + 4.2 * s.a) * 1.15 * Math.min(1, u / 0.02 + 0.5); ink = 0.5 + 0.5 * a1;
         }
         pts.push({ t: tt, y: y, w: w, a: ink, b: s.hs, z: s.f === 1 ? z * 0.5 : z, r: r, q: q });
         if (tt >= end) break;
@@ -1637,11 +1639,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
       var col = tint(src === 1 ? 'guitar' : src === 2 ? 'piano' : s.f === 1 ? 'pad' : s.f === 2 ? 'lead' : 'pluck', hz, y0);
       if (s.f === 1) { ribbon(pts, now, col, 0.12, seed, 1.45, open); ribbon(pts, now, col, 0.78, seed, 1, open); }
       else if (s.f === 0) ribbon(pts, now, col, 0.85, seed, 1, open, 'blunt');
-      else if (s.f === 2) ribbon(pts, now, col, 0.82, seed, 1, open, 'square');
-      else {
-        if (s.hs < 0.5) ribbon(pts, now, col, 0.14 * (1 - s.hs), seed, 1.9, open);
-        ribbon(pts, now, col, 0.8, seed, 1, open);
-      }
+      else ribbon(pts, now, col, 0.82, seed, 1, open, 'square');
       if (open) { var hd = pts[pts.length - 1]; pen(hd.y, hd.w, col, hd.a); }
     }
   }
@@ -1826,10 +1824,10 @@ if (typeof module !== 'undefined') module.exports = DSP;
     layer('piano', function () { drawSegs(now, lv, 2, 'piano'); });
     layer('guitar', function () { drawSegs(now, lv, 1, 'guitar'); });
     layer('bass', function () {
-      frameTrack(now, function (f) { return a.bassHz[f]; }, function (f) { return 0.8 + 12 * a.bassN[f]; }, function (f) { return smooth(0.015, 0.3, a.bassN[f]); }, function (f) { return a.bassH ? a.bassH[f] : brMap(a.bassBr[f]) * 0.4; }, function () { return 0; }, 'bass', 0.86, 0.15, 11);
+      frameTrack(now, function (f) { return a.bassHz[f]; }, function (f) { return 0.8 + 12 * a.bassN[f]; }, function (f) { return smooth(0.015, 0.3, a.bassN[f]); }, function (f) { return a.bassH[f]; }, function () { return 0; }, 'bass', 0.86, 0.15, 11);
     });
     layer('voice', function () {
-      frameTrack(now, function (f) { return a.leadHz[f]; }, function (f) { return 0.8 + 8.5 * a.leadN[f]; }, function (f) { return smooth(0.02, 0.4, a.leadN[f]); }, function (f) { return a.leadH ? a.leadH[f] : brMap(a.leadBr[f]) * 0.4; }, function (f) { return zLead(a.leadNz[f]); }, 'voice', 0.9, 0.16, 37);
+      frameTrack(now, function (f) { return a.leadHz[f]; }, function (f) { return 0.8 + 8.5 * a.leadN[f]; }, function (f) { return smooth(0.02, 0.4, a.leadN[f]); }, function (f) { return a.leadH[f]; }, function (f) { return zLead(a.leadNz[f]); }, 'voice', 0.9, 0.16, 37);
     });
     layer('hats', function () { drawHits(S.hats, now, 'hat'); drawHits(S.cymbals, now, 'cymbal'); });
     layer('toms', function () { drawHits(S.toms, now, 'tom'); });
@@ -2214,7 +2212,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
     return ++loadSeq;
   }
   function finishLoad(res, name, key, defaultLyrics, previewT) {
-    setAnalysis(res); S.name = name; S.key = key;
+    setAnalysis(res); S.name = name; S.key = key; lyrSrc.textContent = '';
     $('trackName').textContent = name; tDur.textContent = fmt(res.dur); seek.max = labSeek.max = String(res.dur); seek.value = labSeek.value = '0'; tNow.textContent = '0:00';
     S.neverPlayed = previewT > 0; S.previewT = previewT;
     var saved = store.get(lyricKey());
@@ -2250,9 +2248,9 @@ if (typeof module !== 'undefined') module.exports = DSP;
   } catch (e) { /* no config */ }
   /* where a song's analysis is kept on the device: a new version of the server's analysis starts afresh */
   function packKey(sha) { return 'pack:' + PIPELINE + ':' + sha; }
-  /* an analysis made by an older server (say, in the minutes while a new one deploys) is shown but not kept under the
-     new version's name, so the song is analysed afresh once the new server is up. Pipeline 2 writes pack version 5. */
-  function current(pack) { return !(+PIPELINE >= 2) || (pack && pack.version >= 5); }
+  /* only an analysis from the current pipeline (3, which writes pack version 6) is drawn: an older one lacks what the
+     drawing needs, so the song is analysed again rather than drawn with stand-ins */
+  function current(pack) { return !!(pack && pack.version >= 6 && pack.segStride === 16); }
   var idb = (function () {
     var dbp = null;
     function open() {
@@ -2273,7 +2271,7 @@ if (typeof module !== 'undefined') module.exports = DSP;
     };
   })();
   var STAGES = [['stems', 'Splitting the song into stems', 0.2], ['drums', 'Reading the drums', 0.45], ['notes', 'Reading the notes', 0.55], ['tone', 'Listening for harsh sounds', 0.8],
-    ['bass', 'Following the bass', 0.65], ['voice', 'Following the voice', 0.75], ['words', 'Listening for the words', 0.85], ['done', 'Finishing', 0.95]];
+    ['bass', 'Following the bass', 0.65], ['voice', 'Following the voice', 0.75], ['words', 'Finding the lyrics', 0.85], ['done', 'Finishing', 0.95]];
   function stageOf(st) { for (var i = 0; st && i < STAGES.length; i++) if (st.indexOf(STAGES[i][0]) === 0) return STAGES[i]; return ['', 'Starting the server', 0.12]; }
   function sha256hex(buf) {
     if (!(window.crypto && crypto.subtle)) return Promise.resolve(null);
@@ -2351,20 +2349,32 @@ if (typeof module !== 'undefined') module.exports = DSP;
           showStatus('Starting the server', 0.1); setTimeout(poll, 2500);
         });
       });
-    }).then(function (pack) { if (pack && sha && current(pack)) idb.put(packKey(sha), pack); return pack; });
+    }).then(function (pack) {
+      /* in the minutes while a new server deploys, the old one may still answer */
+      if (pack && !current(pack)) throw new Error('The server is being updated. Load the song again in a few minutes.');
+      if (pack && sha) idb.put(packKey(sha), pack);
+      return pack;
+    });
   }
   function packToRes(pack) {
     var res = { dur: pack.dur, dt: pack.dt, frames: pack.frames, stereo: pack.stereo, noiseRef: pack.noiseRef };
     for (var k in pack.arrays) res[k] = b64f32(pack.arrays[k]);
-    res.segW = pack.segStride || 6; res.evW = pack.eventStride || 4;
+    res.segW = pack.segStride; res.evW = pack.eventStride;
     return res;
   }
-  /* words the server heard, unless lyrics were already placed for this song on this device */
+  /* the song's published lyrics (from LRCLIB, each word timed to the voice by the server), unless lyrics were already
+     placed for this song on this device. If LRCLIB hasn't got the song there are no words until some are pasted. */
   function useServerLyrics(pack) {
-    if (pack.lyrics && pack.lyrics.lines && pack.lyrics.lines.length && !store.get(lyricKey())) {
+    var st = (pack.stats && pack.stats.lyrics) || {}, has = pack.lyrics && pack.lyrics.lines && pack.lyrics.lines.length;
+    lyrSrc.textContent = has ? 'From LRCLIB: ' + (st.track || st.title) + ', ' + (st.by || st.artist) + '.'
+      : st.why === 'instrumental' ? 'LRCLIB lists this song as instrumental.'
+      : st.why === 'LRCLIB could not be reached' ? 'LRCLIB was down when this song was analysed, so it has no lyrics. Paste them here.'
+      : st.artist && st.title ? 'LRCLIB has no lyrics for ' + st.title + ' by ' + st.artist + ' at this length. Paste them here.'
+      : 'This file names no artist and title, so its lyrics could not be looked up. Paste them here.';
+    if (has && !store.get(lyricKey())) {
       var lines = pack.lyrics.lines.map(function (l) { return { text: l.text, words: l.words.map(function (w) { return { text: w[0], syl: Math.max(1, DSP.syllableCount(w[0])) }; }) }; });
       lyricsText.value = lines.map(function (l) { return l.text; }).join('\n');
-      applyWordTimes(lines, pack.lyrics.lines.map(function (l) { return l.words.map(function (w) { return w[1]; }); }), 'heard');
+      applyWordTimes(lines, pack.lyrics.lines.map(function (l) { return l.words.map(function (w) { return w[1]; }); }), 'published');
     } else layoutWords();
   }
   /* songs analysed ahead of time and published with the page: stems + word timing, no lyrics */

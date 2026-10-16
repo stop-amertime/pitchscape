@@ -23,7 +23,7 @@ import time
 
 import modal
 
-PIPELINE_VERSION = '2'          # bump when the analysis changes, so old cached results are not served
+PIPELINE_VERSION = '3'          # bump when the analysis changes, so old cached results are not served
 ALLOWED_ORIGINS = ['https://stop-amertime.github.io', 'http://localhost:8000', 'http://127.0.0.1:8000']
 SITE = '/usr/local/lib/python3.11/site-packages'
 
@@ -74,7 +74,7 @@ def analyze(audio: bytes, key: str, name: str):
     with tempfile.NamedTemporaryFile(suffix=ext) as f:
         f.write(audio)
         f.flush()
-        pack = run(f.name, device='cuda', title=os.path.splitext(name)[0],
+        pack = run(f.name, device='cuda', title=os.path.splitext(name)[0], name=name,
                    progress=lambda *a: progress.put(key, ' '.join(str(x) for x in a)))
     path = pack_path(key)
     os.makedirs(os.path.dirname(path), exist_ok=True)
