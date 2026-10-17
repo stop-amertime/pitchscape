@@ -63,7 +63,7 @@ export function start() {
   function rate(hz) { return 4 + 3.2 * Math.log2(Math.max(hz, 30) / 30); }
 
   function resize() {
-    dpr = Math.min(2, window.devicePixelRatio || 1);
+    dpr = Math.min(DBG.dpr, window.devicePixelRatio || 1);
     W = Math.max(200, cv.clientWidth); H = Math.max(200, cv.clientHeight);
     cv.width = liveCv.width = Math.round(W * dpr); cv.height = liveCv.height = Math.round(H * dpr);
     WIN = L.secs > 0 ? L.secs : W < 520 ? 4.2 : W < 900 ? 5.5 : 7;
@@ -741,6 +741,8 @@ export function start() {
      every ink does, and multiplying comes to the same in any order. Misprint (each colour slipping on its own) needs
      every layer apart, so it shows only while the Lab is open, when everything is drawn live on #cv so a lever shows
      at once. */
+  /* the speed test's switches (Lab > Speed test): each piece of the stack, on unless a test turns it off */
+  var DBG_DEF = { blend: true, grain: true, glows: true, tilt: true, shake: true, live: false, still: false, dpr: 2 }, DBG = Object.assign({}, DBG_DEF);
   var STRIP = 1024, CHUNK = 128, PER = STRIP / CHUNK, strips = new Map(), stripsFor = '', stripsAna = null, stripPool = [], clipL = -Infinity;
   var SETTLE = { kick: 0.5, words: 0.15, hats: 0.1, toms: 0.1, snare: 0.1 }, REACH = { kick: 60, bass: 40 };
   /* how far back from a stretch of the print a mark can start and still reach into it: a word's text and a cymbal's
@@ -823,7 +825,8 @@ export function start() {
   }
   function draw(now) {
     var a = S.ana;
-    if (L.grain !== lastGrain) { lastGrain = L.grain; grainCv.style.opacity = String(L.grain); grainCv.style.display = L.grain > 0 ? '' : 'none'; }
+    var gr = DBG.grain ? L.grain : 0;
+    if (gr !== lastGrain) { lastGrain = gr; grainCv.style.opacity = String(gr); grainCv.style.display = gr > 0 ? '' : 'none'; }
     if (!a) {
       drawBase(); baseFor = null; setMode(true);
       setGlow(glowBass, 0, '', 0); setGlow(glowKick, 1, '', 0);
@@ -835,18 +838,18 @@ export function start() {
     var fi = clamp(Math.floor(now / a.dt), 0, a.frames - 1);
     var bassNow = a.bassN[fi] || 0, kickImp = impulse(S.kicks, now, 14), snImp = impulse(S.snares, now, 18), hatImp = impulse(S.hats, now, 22);
     var lv = { guitar: 0, piano: 0, synths: 0 };
-    var amp = L.shake * ((S.vis.bass ? bassNow * bassNow * 5 : 0) + (S.vis.kick ? kickImp * 9 : 0) + (S.vis.snare ? snImp * 2 : 0));
+    var amp = (DBG.shake ? L.shake : 0) * ((S.vis.bass ? bassNow * bassNow * 5 : 0) + (S.vis.kick ? kickImp * 9 : 0) + (S.vis.snare ? snImp * 2 : 0));
     var ox = amp * (Math.sin(now * 53.1) + 0.7 * Math.sin(now * 31.7 + 1.3)) / 1.7, oy = amp * (Math.sin(now * 47.3 + 2.1) + 0.7 * Math.sin(now * 29.9 + 0.4)) / 1.7, rot = amp * 0.0022 * Math.sin(now * 37.7 + 0.9);
     var sf = amp > 0.01 ? 'translate(' + ox.toFixed(2) + 'px,' + oy.toFixed(2) + 'px) rotate(' + rot.toFixed(5) + 'rad)' : '';
     if (sf !== lastSf) { lastSf = sf; shakeEl.style.transform = sf; }
     /* tilt: the sheet tips back on each kick and leans with the bass */
-    var rx = L.tilt * (9 * Math.min(1, kickImp) + 3 * bassNow), rz = L.tilt * 1.4 * bassNow * Math.sin(now * 1.3), tf = L.tilt > 0 ? 'perspective(700px) rotateX(' + rx.toFixed(2) + 'deg) rotate(' + rz.toFixed(2) + 'deg)' : '';
+    var rx = L.tilt * (9 * Math.min(1, kickImp) + 3 * bassNow), rz = L.tilt * 1.4 * bassNow * Math.sin(now * 1.3), tf = L.tilt > 0 && DBG.tilt ? 'perspective(700px) rotateX(' + rx.toFixed(2) + 'deg) rotate(' + rz.toFixed(2) + 'deg)' : '';
     if (tf !== lastTf) { lastTf = tf; sheet.style.transform = tf; }
-    setGlow(glowBass, 0, tint('bass', a.bassHz[fi] || 55, H), S.vis.bass && bassNow > 0.05 ? inkA(0.2 * Math.pow(bassNow, 1.5)) : 0);
+    setGlow(glowBass, 0, tint('bass', a.bassHz[fi] || 55, H), DBG.glows && S.vis.bass && bassNow > 0.05 ? inkA(0.2 * Math.pow(bassNow, 1.5)) : 0);
     /* the thud is felt as much as seen: the low end of the sheet darkens for a moment on each kick */
-    setGlow(glowKick, 1, tint('drum', 50, H), S.vis.kick && L.pulse > 0 && kickImp > 0.02 ? Math.min(0.3, 0.22 * L.pulse * kickImp) : 0);
+    setGlow(glowKick, 1, tint('drum', 50, H), DBG.glows && S.vis.kick && L.pulse > 0 && kickImp > 0.02 ? Math.min(0.3, 0.22 * L.pulse * kickImp) : 0);
 
-    if (panelOpen() || (BENCH && BENCH_LIVE)) {
+    if (panelOpen() || DBG.live || (BENCH && BENCH_LIVE)) {
       /* the Lab is open: everything live on #cv, so a lever shows at once, with each colour's misprint slip */
       setMode(true); baseFor = null;
       var misAmt = L.slip * (kickImp * 2.4 + bassNow * 1.1);
@@ -1041,7 +1044,7 @@ export function start() {
   function pct(v, q) { var o = v.slice().sort(function (x, y) { return x - y; }); return o[Math.min(o.length - 1, Math.floor(o.length * q))]; }
   function loop(ts) {
     var playing = !audio.paused && !audio.ended;
-    if (playing || S.dirty) {
+    if ((playing || S.dirty) && !speedRun) {
       var t = S.neverPlayed ? S.previewT : clock(), t0 = performance.now();
       draw(t); S.dirty = false;
       var dt = performance.now() - t0;
@@ -1052,9 +1055,90 @@ export function start() {
         if (++frameN % 30 === 0 && frameT.length >= 10) fpsEl.textContent = 'frame ' + pct(frameT, 0.5).toFixed(1) + ' ms, slowest 5% ' + pct(frameT, 0.95).toFixed(1) + '\ndrawing ' + pct(drawT, 0.5).toFixed(1) + ' ms, slowest 5% ' + pct(drawT, 0.95).toFixed(1);
       } else lastTs = 0;
     }
-    if (fpsEl.hidden !== (L.fps !== 'on')) { fpsEl.hidden = L.fps !== 'on'; fpsEl.textContent = 'frame times show while it plays'; frameT = []; drawT = []; }
+    if (!speedRun && fpsEl.hidden !== (L.fps !== 'on')) { fpsEl.hidden = L.fps !== 'on'; fpsEl.textContent = 'frame times show while it plays'; frameT = []; drawT = []; }
     requestAnimationFrame(loop);
   }
+
+  /* ---- Lab > Speed test: the next 10 s of the song (from where it is), silent, drawn once through with each piece
+     of the stack turned off in turn, then a JSON of the frame times to paste back. Every run plays the same 10 s, so
+     the runs compare. */
+  var SPEED = [
+    ['as now', {}],
+    ['no blend modes', { blend: false }],
+    ['no grain', { grain: false }],
+    ['no glows', { glows: false }],
+    ['no tilt', { tilt: false }],
+    ['no shake', { shake: false }],
+    ['none of those five', { blend: false, grain: false, glows: false, tilt: false, shake: false }],
+    ['all drawn live, as with the Lab open', { live: true }],
+    ['all live, none of the five', { live: true, blend: false, grain: false, glows: false, tilt: false, shake: false }],
+    ['half resolution', { dpr: 1 }],
+    ['nothing drawn: the phone alone', { still: true }]
+  ];
+  var speedRun = false;
+  function setDbg(o) {
+    var d = DBG.dpr;
+    DBG = Object.assign({}, DBG_DEF, o);
+    [stripView, liveCv, glowBass, glowKick].forEach(function (el) { el.style.mixBlendMode = DBG.blend ? '' : 'normal'; });
+    if (DBG.dpr !== d) resize();
+    S.dirty = true;
+  }
+  function stats(v) {
+    var o = v.slice().sort(function (x, y) { return x - y; }), q = function (f) { return +o[Math.min(o.length - 1, Math.floor(o.length * f))].toFixed(1); };
+    return o.length ? { median: q(0.5), p95: q(0.95), p99: q(0.99), max: +o[o.length - 1].toFixed(1) } : null;
+  }
+  function speedTest() {
+    if (!S.ana || speedRun) return;
+    audio.pause(); closePanels(); clearTimeout(hudTimer); setAway(true);
+    var T0 = Math.max(0, Math.min(clock(), (S.dur || 10) - 10)), i = -1, start = 0, last = 0, ft = [], dts = [];
+    var diff = {}; for (var k in L) if (L[k] !== LAB_DEF[k]) diff[k] = L[k];
+    var out = {
+      test: 'pitchscape speed test 1', when: new Date().toISOString(),
+      device: { ua: navigator.userAgent, dpr: window.devicePixelRatio, cores: navigator.hardwareConcurrency || null, memoryGB: navigator.deviceMemory || null },
+      print: { css: W + 'x' + H, px: cv.width + 'x' + cv.height, secondsShown: +WIN.toFixed(2), from: +T0.toFixed(2), to: +(T0 + 10).toFixed(2), lab: diff,
+        hidden: Object.keys(S.vis).filter(function (k) { return !S.vis[k]; }) },
+      runs: []
+    };
+    speedRun = true; fpsEl.hidden = false;
+    function next() {
+      if (++i >= SPEED.length) return finish();
+      setDbg(SPEED[i][1]); start = 0; last = 0; ft = []; dts = [];
+      fpsEl.textContent = 'speed test ' + (i + 1) + ' of ' + SPEED.length + ': ' + SPEED[i][0];
+      requestAnimationFrame(step);
+    }
+    function step(ts) {
+      if (!start) start = ts;
+      var el = (ts - start) / 1000, d = 0;
+      if (!DBG.still) { var t0 = performance.now(); draw(T0 + Math.min(el, 10)); d = performance.now() - t0; }
+      /* the first half second settles (strips drawn, layers made) and is not counted */
+      if (el > 0.5 && last) { ft.push(ts - last); dts.push(d); }
+      last = ts;
+      if (el < 10.5) return requestAnimationFrame(step);
+      var slow = ft.filter(function (x) { return x > 34; }).length;
+      if (!i) { out.print.css = W + 'x' + H; out.print.px = cv.width + 'x' + cv.height; }
+      out.runs.push({ run: SPEED[i][0], frames: ft.length, frameMs: stats(ft), drawMs: DBG.still ? null : stats(dts), over2frames: +(slow / Math.max(1, ft.length)).toFixed(3) });
+      next();
+    }
+    function finish() {
+      setDbg({}); speedRun = false; fpsEl.hidden = L.fps !== 'on'; S.dirty = true; wakeHud();
+      showSpeed(JSON.stringify(out));
+    }
+    next();
+  }
+  function showSpeed(json) {
+    var box = document.createElement('div'); box.className = 'speedout'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'Speed test results');
+    box.innerHTML = '<p>Speed test done. Copy this and paste it to Claude.</p><textarea readonly aria-label="Results"></textarea><div class="speedbtns"><button class="btn btn-small" type="button">Copy</button><button class="btn btn-small btn-quiet" type="button">Close</button></div>';
+    var ta = box.querySelector('textarea'), bs = box.querySelectorAll('button');
+    ta.value = json;
+    bs[0].addEventListener('click', function () {
+      var done = function () { bs[0].textContent = 'Copied'; };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(json).then(done, function () { ta.select(); });
+      else { ta.select(); document.execCommand('copy'); done(); }
+    });
+    bs[1].addEventListener('click', function () { box.remove(); });
+    plate.appendChild(box); bs[0].focus();
+  }
+  $('speedTest').addEventListener('click', speedTest);
 
   /* ------------------------------------------------------------ analysis jobs */
   var worker = null, workerReady = null, workerFailed = false;

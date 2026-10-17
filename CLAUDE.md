@@ -110,7 +110,9 @@ Corollaries the user has stated or endorsed:
    everything is drawn live on `#cv` (with Misprint). A mark must stop changing once `lag` has passed, and stay put
    (a hat's trail specks have fixed places), or the strips go stale. Measured (bench, CPU 4x, Incoherent): raf frame
    interval 25.0 -> 16.7 ms median (p95 67 -> 58), JS per frame 14.0 -> 9.1 ms against everything live; stacked and
-   live frames differ only on anti-aliased edges. Lab > Frame times shows the real numbers on a device.
+   live frames differ only on anti-aliased edges. Lab > Frame times shows the real numbers on a device; Lab > Speed
+   test (`speedTest`, `SPEED`, the `DBG` switches) plays the next 10 s once per variant (blend modes, grain, glows,
+   tilt, shake, all live, half resolution, nothing drawn) and gives a JSON to paste back.
    `node tools/bench_frames.cjs ... '{}' 'http://127.0.0.1:PORT/?live=1&x='` benches the all-live path.
 
 ## The JavaScript pipeline
