@@ -9,7 +9,7 @@
 //
 // progress(message) gets the same stage messages as the Python pipeline ('stems: ...', 'drums: ...'), which the page
 // maps to text (STAGES in src/page/legacy.js).
-import {separate, SOURCES} from './stems.mjs';
+import {separate, consistent, SOURCES} from './stems.mjs';
 import {drums} from './drums.mjs';
 import {notes} from './notes.mjs';
 import {bass} from './bass.mjs';
@@ -24,9 +24,10 @@ const mono = ([l, r]) => { const y = new Float32Array(l.length); for (let i = 0;
 /** bytes: the song file (ArrayBuffer); name: its file name (read as "Artist - Title" when it has no tags).
  * words: false to skip LRCLIB and the alignment; aligner: words.mjs's lyricsFor's ('en', or 'mms'). shifts: Demucs's (1, as the pipeline). stems: stems already made
  * ({name: [left, right]} at 44.1 kHz, e.g. Python's, to compare the later stages on the same input; Demucs is then
- * skipped, as pipeline.analyze's stems_dir). mix: the song already decoded ([left, right] at 44.1 kHz; the page
+ * skipped, as pipeline.analyze's stems_dir). consistent: Demucs's stems made to add up to the mix (stems.mjs; not
+ * applied to given stems). mix: the song already decoded ([left, right] at 44.1 kHz; the page
  * decodes it, as a Worker cannot). Returns the pack. */
-export async function analyze(bytes, name, rt, {progress = () => {}, words = true, aligner = 'en', shifts = 1, stats = {}, stems: given = null, mix: decoded = null} = {}) {
+export async function analyze(bytes, name, rt, {progress = () => {}, words = true, aligner = 'en', shifts = 1, consistent: mc = true, stats = {}, stems: given = null, mix: decoded = null} = {}) {
   const t0 = performance.now(), ms = {};
   const timed = async (key, p) => { const t = performance.now(); const v = await p; ms[key] = Math.round(performance.now() - t); return v; };
   const sha = await rt.sha256(bytes);
@@ -35,7 +36,8 @@ export async function analyze(bytes, name, rt, {progress = () => {}, words = tru
 
   if (given) progress('stems: given');
   else progress('stems: separating with Demucs');
-  const stems = given || await timed('stems', separate(mix, rt, {shifts, progress: (k, n) => progress(`stems: ${k}/${n}`)}));
+  let stems = given || await timed('stems', separate(mix, rt, {shifts, progress: (k, n) => progress(`stems: ${k}/${n}`)}));
+  if (!given && mc) stems = await timed('consistent', consistent(mix, stems, rt));
   // pipeline.analyze's st22: each stem's mono mix at 22.05 kHz (librosa soxr_hq), on the workers
   const st22 = {};
   await timed('resample', Promise.all(SOURCES.map(async s => {

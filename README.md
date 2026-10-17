@@ -58,7 +58,7 @@ to `main` that touches `server/`.
 
 | Layer | Model | Licence |
 | --- | --- | --- |
-| stems: vocals, drums, bass, guitar, piano, other | Demucs htdemucs_6s (Meta) | MIT |
+| stems: vocals, drums, bass, guitar, piano, other | Demucs htdemucs_6s (Meta), then made to add up to the song (mixture-consistency projection, Wisdom et al. 2019) | MIT |
 | drums: kick, snare, toms, hi-hat, cymbals | ADTOF Frame_RNN (Zehren, Alunno, Bientinesi), via `thebluescreen/adtof-drums-onnx` | CC BY-NC-SA 4.0, non-commercial |
 | notes, read from the guitar, piano and other stems separately | Basic Pitch (Spotify) | Apache-2.0 |
 | bass line | pYIN (librosa) | ISC |

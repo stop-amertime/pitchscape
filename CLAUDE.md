@@ -74,7 +74,12 @@ Corollaries the user has stated or endorsed:
    audio and `song.json` under `/cache/library/<sha>/`; dedupes concurrent jobs (`running` Dict, ignores stuck ones);
    stage messages in the `progress` Dict. `server/local.py` does the same on one machine with a library folder.
 4. **Pipeline** (`analyze` in `src/pipeline/index.mjs`; the stage names below are pipeline.py's, which the JS follows), in order (each `progress('<stage>: ...')`):
-   - `stems`: Demucs htdemucs_6s → drums, bass, other, vocals, guitar, piano.
+   - `stems`: Demucs htdemucs_6s → drums, bass, other, vocals, guitar, piano; then (pipeline 10) made to add up to the
+     song: each stem takes its share of the leftover (mix minus their sum) in proportion to its power in each STFT bin
+     (`consistent`, `mixture.dsp.mjs`: Wisdom et al. 2019's mixture-consistency projection). The leftover was about
+     -23 dB below the mix; most stems change by -20 to -35 dB, the quiet ones gain most (other, piano), and sound that
+     cancelled out across stems goes (the guitar solo's bass, other, piano). ~2% more notes. Full Wiener masking was
+     tried and rejected (stems moved -8 to -14 dB to recover a -22 dB leftover). Not in server/pipeline.py.
    - `drums`: ADTOF (ONNX) activations → `peak_pick` (madmom's procedure, the authors' thresholds) down to 0.6x, each hit
      with its margin; `drum_details` adds its spectrum (16 bands), ring time, kick pitch.
    - `notes`: Basic Pitch on other / guitar / piano separately (`notes_from_stem`, followed down to 15% certainty, with

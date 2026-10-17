@@ -86,3 +86,25 @@ export async function separate(mix, rt, {shifts = 1, random = Math.random, progr
   });
   return stems;
 }
+
+/** The stems made to add up to the mix (mixture.dsp.mjs): each takes its share of the leftover. mix: [left, right];
+ * stems: separate's. Returns new stems in the same shape. Blocks of each channel on the workers. */
+export async function consistent(mix, stems, rt) {
+  const n = mix[0].length, pool = rt.pool, M = './mixture.dsp.mjs', N = 4096;
+  const out = {};
+  for (const s of SOURCES) out[s] = [new Float32Array(n), new Float32Array(n)];
+  const B = Math.max(N * 8, Math.ceil(n / (pool.size * 2)));
+  const jobs = [];
+  for (let c = 0; c < 2; c++) {
+    const res = new Float32Array(n);
+    for (let i = 0; i < n; i++) { let v = mix[c][i]; for (const s of SOURCES) v -= stems[s][c][i]; res[i] = v; }
+    for (let b0 = 0; b0 < n; b0 += B) {
+      const b1 = Math.min(n, b0 + B), a0 = Math.max(0, b0 - N), a1 = Math.min(n, b1 + N);
+      const r = res.slice(a0, a1), st = SOURCES.map(s => stems[s][c].slice(a0, a1));
+      jobs.push(pool.call(M, 'projectBlock', [r, st, a0, b0, b1, n], [r.buffer, ...st.map(x => x.buffer)])
+        .then(ys => SOURCES.forEach((s, k) => out[s][c].set(ys[k], b0))));
+    }
+  }
+  await Promise.all(jobs);
+  return out;
+}
