@@ -11,7 +11,9 @@ scrolling print: time runs right to left past a "now" line, pitch runs up the sc
 
 - Page: `src/page/` (Vite + Svelte, + `src/dsp.js`), built to `docs/`, served by GitHub Pages
   (https://stop-amertime.github.io/pitchscape/ redirects to `docs/`).
-- Cloud server: Modal (`server/modal_app.py`), GPU (L4), running `server/pipeline.py`.
+- Cloud server: Modal (`server/modal_app.py`), GPU (L4), running the JavaScript pipeline (`src/pipeline/`) under Node
+  (`server/js.py` → `server/analyse.mjs`, onnxruntime-node on CUDA). `server/pipeline.py` is no longer run: it is the
+  Python reference the JavaScript was ported from and checked against (`tools/parity*.py`).
 - Local server: `server/local.py` (`Pitchscape.bat` on Windows) runs the same pipeline and serves the page.
 
 ## The principle: it should look to the eye the way it sounds to the ear
@@ -71,7 +73,7 @@ Corollaries the user has stated or endorsed:
 3. **Server** (`modal_app.py`): caches packs at `/cache/v<version>/<sha>.json` on a Modal Volume; keeps each song's
    audio and `song.json` under `/cache/library/<sha>/`; dedupes concurrent jobs (`running` Dict, ignores stuck ones);
    stage messages in the `progress` Dict. `server/local.py` does the same on one machine with a library folder.
-4. **Pipeline** (`pipeline.analyze`), in order (each `progress('<stage>: ...')`):
+4. **Pipeline** (`analyze` in `src/pipeline/index.mjs`; the stage names below are pipeline.py's, which the JS follows), in order (each `progress('<stage>: ...')`):
    - `stems`: Demucs htdemucs_6s → drums, bass, other, vocals, guitar, piano.
    - `drums`: ADTOF (ONNX) activations → `peak_pick` (madmom's procedure, the authors' thresholds) down to 0.6x, each hit
      with its margin; `drum_details` adds its spectrum (16 bands), ring time, kick pitch.
@@ -97,11 +99,15 @@ Corollaries the user has stated or endorsed:
    with edge wave from harshness), `smudge` (bass and kick as soft dabs on their own layer), `pen` (dot at "now").
    Snare, hats and cymbals print in a strip along the top (`BEAT_H`); toms and kicks on the sheet at their pitch.
 
-## The JavaScript pipeline (in progress)
+## The JavaScript pipeline
 
-Agreed direction: one pipeline in JavaScript (`src/pipeline/`) replaces `server/pipeline.py`. It runs in the page on
-the user's GPU (WebGPU, no key), and on Modal under Node for phones. The Python stays only as the reference it is
-checked against. Stages are ported one by one; until all are in, the Python pipeline is the one in use.
+One pipeline in JavaScript (`src/pipeline/`), ported stage by stage from `server/pipeline.py` and checked against it.
+It runs in the page on the user's GPU (WebGPU, no key), and on Modal and `server/local.py` under Node. The Python is
+kept only as the reference: a change to the analysis is made in the JavaScript alone. Whole-pack parity (pipeline 7,
+`python tools/parity_pack.py`, all nine songs from Python's stems): every drum hit matched, notes all matched but one
+extra (Invincible), the lyrics identical, bass, tone and widths to float noise, at most one voice or bass frame
+different per song; the voice's ear width on the Goldberg aria and Hiroshima differs more (99th percentile 10.4 and
+4.9, not traced).
 
 - Plain ES modules with no DOM. `runtime.node.mjs` and `runtime.web.mjs` give them the same things: `session(name)`
   (ONNX Runtime: onnxruntime-node or onnxruntime-web), `pool` (worker threads, `worker.mjs` / `pool.mjs`) and
@@ -267,7 +273,7 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
 
 When the analysis output changes: bump `PIPELINE_VERSION` in `server/modal_app.py` (the deploy writes it into
 `docs/config.json`; bump that file too so the page and server agree before the deploy runs), bump the pack `version`
-in `pipeline.analyze`, and make `current()` in src/page/legacy.js accept only the new pack version (and `segStride` if it
+in `src/pipeline/pack.mjs`, and make `current()` in src/page/legacy.js accept only the new pack version (and `segStride` if it
 changed). The page draws only current packs; an older one is analysed again (cloud: re-uploaded; local:
 `--update-library` re-analyses kept songs). Adding a field the page does not require (as `song` was) needs no bump.
 

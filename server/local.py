@@ -1,14 +1,15 @@
 """Pitchscape on your own computer: the page and the analysis server in one, with no Modal and no passphrase.
 
     python -m server.local                 then open http://localhost:8000
-    python -m server.local --port 8123 --device cpu --whisper small --cache D:/pitchscape-cache
+    python -m server.local --port 8123 --ep cpu --library D:/pitchscape-library
 
-It answers the same routes as the Modal server (server/modal_app.py) and runs server/pipeline.py on this machine (on
-a CUDA GPU if PyTorch sees one, otherwise on the CPU), one song at a time.
+It answers the same routes as the Modal server (server/modal_app.py) and runs the analysis (src/pipeline, under Node:
+server/js.py) on this machine, on its GPU when ONNX Runtime can use it (CUDA on Linux, WebGPU on Windows), one song at
+a time. Needs Node and `npm install`, and the models in models/ (README.md, "Run it on your own computer").
 
 Every song it is sent is kept in a library (default ~/.pitchscape/library), one folder per song named by the SHA-256 of
 its file: the audio as it came (audio.mp3 etc.), its cover art if the file has one (cover.jpg), what identifies it
-(song.json: title, artist, album, ISRC, MusicBrainz ids, length, every tag; see song_info in pipeline.py) and its
+(song.json: title, artist, album, ISRC, MusicBrainz ids, length, every tag; see songInfo in src/pipeline/tags.mjs) and its
 analysis for each pipeline version (pack-v5.json etc.). So a song is analysed once per version, and with
 --update-library every song in the library is brought up to the current version without being sent again.
 
@@ -43,8 +44,8 @@ def build_page():
 class Jobs:
     """The library, and one song analysed at a time in a worker thread; each job's latest stage is kept for the page."""
 
-    def __init__(self, library, device, whisper):
-        self.lib, self.device, self.whisper = library, device, whisper
+    def __init__(self, library, ep):
+        self.lib, self.ep = library, ep
         self.q, self.state, self.lock = queue.Queue(), {}, threading.Lock()
         os.makedirs(self.lib, exist_ok=True)
         threading.Thread(target=self.work, daemon=True).start()
@@ -69,7 +70,7 @@ class Jobs:
 
     def keep(self, data, name):
         """The song into the library (once): its audio as it came, its cover art, and what identifies it."""
-        from server.pipeline import song_info
+        from server.js import song_info
         sha = hashlib.sha256(data).hexdigest()
         d = self.folder(sha)
         if self.audio(sha) is None:
@@ -79,7 +80,7 @@ class Jobs:
             with open(f + '.part', 'wb') as fh:
                 fh.write(data)
             os.replace(f + '.part', f)
-            info = song_info(f, name, sha)
+            info = song_info(f, name)
             if info['file']['cover']:
                 import subprocess
                 subprocess.run(['ffmpeg', '-v', 'error', '-y', '-i', f, '-an', '-frames:v', '1', os.path.join(d, 'cover.jpg')],
@@ -126,7 +127,7 @@ class Jobs:
         return out
 
     def work(self):
-        from server.pipeline import analyze, log
+        from server.js import analyze
         while True:
             key = self.q.get()
             sha = key.split(':', 1)[1]
@@ -140,12 +141,10 @@ class Jobs:
                 except Exception:
                     name = os.path.basename(f)
 
-                def progress(*a):
-                    msg = ' '.join(str(x) for x in a)
+                def progress(msg):
                     self.state[key]['stage'] = msg
-                    log(msg)
-                pack = analyze(f, device=self.device, whisper_size=self.whisper, title=os.path.splitext(name)[0],
-                               name=name, progress=progress)
+                    print(time.strftime('%H:%M:%S'), msg, flush=True)
+                pack = analyze(f, name, progress, ep=self.ep)
                 self.write(self.pack_path(key), pack)
                 self.write(os.path.join(self.folder(sha), 'song.json'), pack['song'])
                 self.state[key] = {'status': 'done'}
@@ -255,29 +254,16 @@ def main():
     ap = argparse.ArgumentParser(description='Pitchscape on this computer: the page and the analysis server.')
     ap.add_argument('--port', type=int, default=8000)
     ap.add_argument('--host', default='127.0.0.1', help='0.0.0.0 to let a phone on the same network open it')
-    ap.add_argument('--device', default='auto', help='cuda, cpu or auto (cuda when PyTorch sees a GPU)')
-    ap.add_argument('--whisper', help='Whisper model size for timing the lyrics (default: medium on a GPU, base on CPU)')
+    ap.add_argument('--ep', help='ONNX Runtime provider: cuda, webgpu or cpu (default: the GPU when it can, else the CPU)')
     ap.add_argument('--library', default=os.path.join(os.path.expanduser('~'), '.pitchscape', 'library'))
     ap.add_argument('--update-library', action='store_true', help='analyse every kept song not yet analysed by this version')
     ap.add_argument('--open', action='store_true', help='open the page in the browser once the server is up')
     a = ap.parse_args()
-    device = a.device
-    if device == 'auto':
-        import torch
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        if device == 'cuda':
-            # a PyTorch build has kernels only for the GPU generations it was compiled for (2.5.1 stops at sm_90, so
-            # an RTX 50-series card, sm_120, crashes on its first operation): use the CPU rather than fail every song
-            cap = 'sm_%d%d' % torch.cuda.get_device_capability()
-            if cap not in torch.cuda.get_arch_list():
-                print('This PyTorch (%s) has no kernels for %s (%s); analysing on the CPU instead.'
-                      % (torch.__version__, torch.cuda.get_device_name(), cap))
-                device = 'cpu'
-    jobs = Jobs(a.library, device, a.whisper)
+    jobs = Jobs(a.library, a.ep)
     url = 'http://%s:%d' % ('localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host, a.port)
     build_page()
     server = ThreadingHTTPServer((a.host, a.port), handler(jobs))
-    print('Pitchscape %s on %s; songs kept in %s' % (PIPELINE_VERSION, device.upper(), a.library))
+    print('Pitchscape %s; songs kept in %s' % (PIPELINE_VERSION, a.library))
     if a.update_library:
         n = jobs.update_library()
         print('analysing %d kept song%s with version %s' % (n, '' if n == 1 else 's', PIPELINE_VERSION))

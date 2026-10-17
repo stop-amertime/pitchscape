@@ -14,7 +14,7 @@
 
 Results are kept for good in a Modal Volume, one JSON file per song, named by the audio's SHA-256 (and the pipeline
 version), so a song is only ever analysed once. Each song's audio and what identifies it (title, artist, ISRC...: see
-song_info in pipeline.py) are kept too, in library/<sha256>/ as server/local.py keeps them, so a later pipeline version
+songInfo in src/pipeline/tags.mjs) are kept too, in library/<sha256>/ as server/local.py keeps them, so a later pipeline version
 can analyse it again without it being sent.
 Deployed by .github/workflows/deploy-server.yml on every push to main that touches server/.
 """
@@ -30,7 +30,6 @@ import modal
 
 PIPELINE_VERSION = '8'          # bump when the analysis changes, so old cached results are not served
 ALLOWED_ORIGINS = ['https://stop-amertime.github.io', 'http://localhost:8000', 'http://127.0.0.1:8000']
-SITE = '/usr/local/lib/python3.11/site-packages'
 
 app = modal.App('pitchscape')
 cache = modal.Volume.from_name('pitchscape-cache', create_if_missing=True)      # durable; first TiB free
@@ -44,29 +43,6 @@ def pack_path(key):
     return f'{CACHE}/v{version}/{sha}.json'
 
 
-def _download_models():
-    from demucs.pretrained import get_model
-    from faster_whisper import WhisperModel
-    from huggingface_hub import hf_hub_download
-    get_model('htdemucs_6s')
-    hf_hub_download('thebluescreen/adtof-drums-onnx', 'adtof_frame_rnn.onnx')
-    WhisperModel('medium', device='cpu', compute_type='int8')
-
-
-gpu_image = (
-    modal.Image.debian_slim(python_version='3.11')
-    .apt_install('ffmpeg')
-    .pip_install('torch==2.5.1', 'torchaudio==2.5.1', 'demucs==4.1.0', 'basic-pitch[onnx]==0.4.0', 'onnxruntime==1.31.0',
-                 'faster-whisper==1.2.1', 'ctranslate2==4.8.3', 'torchcrepe==0.0.24', 'librosa==0.11.0', 'soundfile==0.14.0',
-                 'scipy==1.17.1', 'huggingface_hub==2.2.0', 'setuptools==79.0.1',
-                 'mosqito==1.2.1', 'matplotlib==3.11.2')
-    # Basic Pitch pulls in TensorFlow on Linux; it runs on ONNX here, and TensorFlow clashes with NumPy 2
-    .run_commands('pip uninstall -y tensorflow tensorflow-cpu tensorflow-io-gcs-filesystem || true')
-    # faster-whisper on CUDA needs the cuDNN and cuBLAS that came with torch on the library path
-    .env({'LD_LIBRARY_PATH': f'{SITE}/nvidia/cudnn/lib:{SITE}/nvidia/cublas/lib'})
-    .run_function(_download_models)
-    .add_local_python_source('server')
-)
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 APP = '/app'                       # the JavaScript pipeline's checkout in node_image: src/pipeline, server, models
 MODEL_REPO = 'stopamertime/pitchscape-models'
@@ -99,6 +75,7 @@ node_image = (
     .run_function(_fetch_node_models)
     .add_local_dir(os.path.join(ROOT, 'src', 'pipeline'), f'{APP}/src/pipeline')
     .add_local_file(os.path.join(ROOT, 'server', 'analyse.mjs'), f'{APP}/server/analyse.mjs')
+    .env({'PITCHSCAPE_ROOT': APP})
     .add_local_python_source('server')
 )
 web_image = (modal.Image.debian_slim(python_version='3.11').pip_install('fastapi[standard]', 'python-multipart')
@@ -107,15 +84,14 @@ web_image = (modal.Image.debian_slim(python_version='3.11').pip_install('fastapi
 
 # no CPU or memory reservation: with one (8 cores, 16 GiB beside an L4) jobs sat unstarted. A container may use idle
 # cores beyond its request anyway, and the tone measurements spread over up to eight of them.
-@app.function(image=gpu_image, gpu='L4', timeout=1500, max_containers=2, scaledown_window=120, volumes={CACHE: cache})
+@app.function(image=node_image, gpu='L4', timeout=1500, max_containers=2, scaledown_window=120, volumes={CACHE: cache})
 def analyze(audio: bytes, key: str, name: str):
-    from server.pipeline import analyze as run
+    from server.js import analyze as run
     ext = os.path.splitext(name)[1] or '.mp3'
     with tempfile.NamedTemporaryFile(suffix=ext) as f:
         f.write(audio)
         f.flush()
-        pack = run(f.name, device='cuda', title=os.path.splitext(name)[0], name=name,
-                   progress=lambda *a: progress.put(key, ' '.join(str(x) for x in a)))
+        pack = run(f.name, name, lambda msg: progress.put(key, msg), ep='cuda')
     path = pack_path(key)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, 'w') as fh:
