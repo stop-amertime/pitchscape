@@ -24,6 +24,7 @@ SONG = 'https://archive.org/download/JoshWoodwardSelection/20-JoshWoodward-HereT
 
 @app.function(image=node_image, gpu='L4', timeout=1800)
 def trial(url: str, words: bool, runs: int):
+    print("cores", os.cpu_count(), flush=True)
     out = [subprocess.run(['nvidia-smi', '--query-gpu=name,memory.total,driver_version', '--format=csv,noheader'],
                           capture_output=True, text=True).stdout.strip(), f'cores {os.cpu_count()}']
     with urllib.request.urlopen(url, timeout=60) as r:
@@ -34,18 +35,23 @@ def trial(url: str, words: bool, runs: int):
         open(song, 'wb').write(audio)
         for i in range(runs):
             t = time.time()
-            p = subprocess.run(['node', f'{APP}/server/analyse.mjs', song, pack, name] + ([] if words else ['--no-words']),
-                               capture_output=True, text=True, cwd=APP)
+            # every line as it comes (Modal streams the function's output to the caller), with its time; CUDA only,
+            # so a provider that will not start is an error rather than a slow run on the CPU
+            p = subprocess.Popen(['node', f'{APP}/server/analyse.mjs', song, pack, name, '--ep', 'cuda']
+                                 + ([] if words else ['--no-words']), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 text=True, cwd=APP)
+            for line in p.stdout:
+                print(f'{time.time() - t:7.1f}  {line.rstrip()}', flush=True)
+                if 'stage times' in line or 'running on' in line:
+                    out.append(line.rstrip())
+            p.wait()
             out.append(f'run {i + 1}: exit {p.returncode} in {time.time() - t:.1f} s')
-            out += [l for l in p.stderr.splitlines() if 'stage times' in l or 'running on' in l or 'Error' in l
-                    or 'could not' in l][-30:]
             if p.returncode:
-                out.append(p.stderr[-3000:])
                 break
             pk = json.load(open(pack))
             out.append('pack: version %s, %s notes, hits %s, lyrics %s' % (
                 pk['version'], pk['stats']['notes'], json.dumps(pk['stats']['hits']),
-                json.dumps({k: pk['stats']['lyrics'].get(k) for k in ('found', 'matched', 'heard')})))
+                json.dumps({k: pk['stats']['lyrics'].get(k) for k in ('found', 'aligned', 'matched')})))
     return '\n'.join(out)
 
 
