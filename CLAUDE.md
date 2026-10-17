@@ -226,11 +226,35 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
   repeatable; the JS dithers the same way by default (`stats.dither = false` to compare). numpy 2 keeps float32 when
   an array meets a Python float (env_follow, thresholds, percentile + 1e-9), so those run in float32 here too. On
   Windows, two servers can listen on the same port (another session's took half the requests): pick a free one.
-- Words (`words.mjs`, `tags.mjs`, `whisper.mjs`, `whisper.dsp.mjs`): `songInfo(bytes, name, sha)` is song_info with its
-  own tag reader (ID3v1/v2, MP3 Xing/LAME/VBRI, MP4, FLAC, Ogg Vorbis/Opus, WAV; FFmpeg 9.0.2's key names and length
-  arithmetic, no ffprobe); `lyricsFor(info, dur, vocals44, rt)` is lyrics_for: LRCLIB (header `Lrclib-Client` where a
-  browser forbids User-Agent; LRCLIB allows it cross-origin), find_lyrics, parse_lrc, difflib's matching blocks, and
-  place_words. Whisper is a port of faster-whisper 1.2.1's transcribe and the CTranslate2 parts it calls (Silero VAD v6,
+- Words (`words.mjs`, `tags.mjs`, `align.mjs`): `songInfo(bytes, name, sha)` is song_info with its own tag reader
+  (ID3v1/v2, MP3 Xing/LAME/VBRI, MP4, FLAC, Ogg Vorbis/Opus, WAV; FFmpeg 9.0.2's key names and length arithmetic, no
+  ffprobe); `lyricsFor(info, dur, vocals44, rt, {aligner = 'en', stats, fetch, log, onAligned})` finds the record as
+  lyrics_for does (LRCLIB with header `Lrclib-Client` where a browser forbids User-Agent; find_lyrics, parse_lrc) and
+  times each published word by CTC forced alignment to the vocal stem (no Whisper: there is no Python version of this).
+  The model (`tools/export_align.py`): `align_en` = torchaudio's WAV2VEC2_ASR_BASE_960H (MIT, 189 MB float16 for the
+  browser, `align_en_f32` 378 MB for Node), or `aligner: 'mms'` = MMS_FA (CC BY-NC 4.0, 631 MB / 1.26 GB; romanised
+  letters, and text in other scripts needs uroman, not ported, so such words go untimed). Log probabilities per 20 ms
+  frame over the whole stem in 25 s windows (20 s kept: one shape for the GPU); torchaudio.functional.forced_align's
+  CPU kernel ported (`forcedAlign`; on 300 random cases with repeats and tight lengths every path and score is
+  torchaudio's, bit for bit), merge_tokens, and each LRC line aligned in a window from 2 s before its time to 1 s
+  after the next line's, between two star tokens (MMS_FA's with_star: a label with log probability 0 that takes the
+  audio that is not this line); the median shift of the lines' first words is the LRC's offset, and each line is
+  aligned again from 1 s before to 0.5 s after its shifted times. Unsynced lyrics are aligned over the whole song.
+  Without the stars a line before a long instrumental spread its words over the whole gap (Dropping Out: 80 s).
+  `python tools/parity.py words` (en, Node, against Python's lyrics_for: Whisper medium placed by place_words): the
+  same songInfo and LRCLIB record on all nine. Word starts against Whisper's, on the words Whisper heard (the rest it
+  interpolates): Dropping Out median 0.14 s, p90 0.60; Fluoride 0.09 / 0.20; Hey Ruth 0.08 / 0.26; Incoherent
+  0.08 / 0.22; aligned about 0.04 s earlier. Whisper is not ground truth: to the nearest vocal onset (the voice stage's)
+  the aligned starts are a median 0.059 s away (41 % within 50 ms), Whisper's 0.091 s (29 %), no closer than Whisper
+  jittered by +-0.15 s (0.096 s). Worst on Dropping Out (parenthesised backing lines, which Whisper mostly did not
+  hear either). MMS on the same songs: 0.066 s to the onsets (34 %), a little worse than en on English. Every word
+  with a letter gets a time; 96.6-100 % keep it (the rest run backwards across overlapping windows and are spread
+  between their neighbours). Speed: Node (WebGPU, float32) 5-6 s of model and 0.1 s of alignment a song (MMS 10-12 s);
+  Chrome 155, RTX 5080, float16: 9-11 s warm (float32 15 s, with exactly Node's times; float16 moves 4-7 % of words,
+  a few by seconds: Incoherent's worst 4.1 s). Whisper took 38-183 s under Node and 45-174 s in Chrome.
+  MMS not yet run in Chrome. `tools/browser_words.html?song=NAME&aligner=en` runs the stage in a browser (served by
+  browser_check.py).
+- Whisper (`whisper.mjs`, `whisper.dsp.mjs`; no longer called by lyricsFor, kept to compare) is a port of faster-whisper 1.2.1's transcribe and the CTranslate2 parts it calls (Silero VAD v6,
   log-mel, language, the temperature fallback with CTranslate2's beam search and best_of sampling as one batch, the
   logits processors, align's median filter and DTW, word merging), on our own ONNX export (`tools/export_whisper.py`:
   one input per layer for the encoder's keys and values and the cache, and an `order` input that reorders the cache
@@ -239,8 +263,8 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
   for Node's CPU (ONNX Runtime's CPU provider has no float16 products; onnxruntime-node cannot keep tensors on the GPU,
   so its decoder runs on the CPU). Smaller models time words worse against medium: small and base 3-20 % within 0.1 s,
   0.16-0.3 s early, where medium against itself is 93-100 %.
-  `python tools/parity.py words`, all nine songs, Node: songInfo identical to song_info on all nine; the same LRCLIB
-  record or the same reason for none on all nine (Code Monkey: none at this length). Placed words within 0.1 s of
+  Measured while lyricsFor used it (parity.py words then compared Whisper with Whisper), all nine songs, Node:
+  songInfo and the LRCLIB record or reason as Python's on all nine (Code Monkey: none at this length). Placed words within 0.1 s of
   Python's: Dropping Out 100 %, Incoherent 100 %, Hey Ruth 83 %, Fluoride 99 % (Python against its own second run:
   100, 100, 100, 95 %). faster-whisper is not repeatable where a window falls back to sampling (Fluoride: four Python
   runs heard 189, 243, 309 and 193 words). Where nothing samples, the port is CTranslate2's to the token: on Fluoride
@@ -251,8 +275,7 @@ checked against. Stages are ported one by one; until all are in, the Python pipe
   medium, Chrome (median, old graph and new alternating in one page): 66-69 -> 43-52 ms for one row, 77-80 -> 44-52 ms
   for five; GPU time 44 -> 23 ms a step. The whole Whisper run on Dropping Out, both in one Chrome session with the
   laptop busy: 60 -> 45 s (decoder 122 -> 105 ms a call: a real call adds the prompt steps and reading the logits).
-  Node: 38-183 s a song (decoder on the CPU, 85-107 ms a call; 47-235 s before). `tools/browser_words.html?song=NAME`
-  runs the stage in a browser (served by browser_check.py).
+  Node: 38-183 s a song (decoder on the CPU, 85-107 ms a call; 47-235 s before).
 - Learned: a step costs about the same for five rows as for one (beams and best_of go in one batch), but it is GPU
   arithmetic, not dispatch: fusing PyTorch's export into 521 dispatches from 1242 changed nothing. Chrome's profiler
   (session `enableProfiling`, Chrome with `--enable-webgpu-developer-features` or its GPU times are rounded) showed

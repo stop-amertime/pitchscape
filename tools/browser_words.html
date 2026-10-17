@@ -2,18 +2,18 @@
 <meta charset="utf-8">
 <title>Words stage in the browser: check</title>
 <style>body{font:14px system-ui;margin:16px;background:#fff;color:#111}pre{white-space:pre-wrap}</style>
-<p>Runs the words stage (src/pipeline/words.mjs: tags, LRCLIB, Whisper) in this browser on a test song's vocal stem
+<p>Runs the words stage (src/pipeline/words.mjs: tags, LRCLIB, forced alignment) in this browser on a test song's vocal stem
 (Python's, testsongs/parity/NAME/py-s0/vocals.wav) and posts what it found and heard, with the times, to
 testsongs/parity/browser.jsonl. Served by <code>python tools/browser_check.py</code>; query:
-<code>?song=NAME&amp;size=medium&amp;models=URL</code> (models: default ../models/).</p>
+<code>?song=NAME&amp;aligner=en&amp;models=URL</code> (models: default ../models/).</p>
 <pre id="log"></pre>
 <script type="module">
 import {webRuntime} from '../src/pipeline/runtime.web.mjs';
 import {songInfo, lyricsFor} from '../src/pipeline/words.mjs';
 
 const q = new URLSearchParams(location.search);
-const song = q.get('song') || 'brad-sucks-fluoride', size = q.get('size') || 'medium';
-const R = {check: 'words', song, size, ua: navigator.userAgent};
+const song = q.get('song') || 'brad-sucks-fluoride', aligner = q.get('aligner') || 'en';
+const R = {check: 'words', song, aligner, ua: navigator.userAgent};
 const el = document.getElementById('log');
 const log = (...a) => { const s = a.map(x => typeof x === 'string' ? x : JSON.stringify(x)).join(' '); el.textContent += s + '\n'; };
 
@@ -43,14 +43,15 @@ try {
   R.info = info;
   const vocals = readWav(await (await fetch(`../testsongs/parity/${song}/py-s0/vocals.wav`)).arrayBuffer());
   const dur = vocals[0].length / 44100, stats = {}, t = performance.now();
-  let heard = null, language = null;
-  const [lyrics, found] = await lyricsFor(info, dur, vocals, rt, {stats, log, size, onHeard: (h, l) => { heard = h; language = l; }});
-  Object.assign(R, {lyrics, found, heard, language, words_s: +((performance.now() - t) / 1000).toFixed(2),
+  let aligned = null;
+  const [lyrics, found] = await lyricsFor(info, dur, vocals, rt, {stats, log, aligner,
+    onAligned: (toks, al) => { aligned = toks.map(([, w], k) => [w, al.t[k], al.score[k]]); }});
+  const secs = ms => ms != null ? +(ms / 1000).toFixed(2) : null;
+  Object.assign(R, {lyrics, found, aligned, words_s: secs(performance.now() - t),
     downloaded_mb: Object.fromEntries(Object.entries(dl).map(([k, b]) => [k, +(b / 1e6).toFixed(1)])), eps: rt.eps,
-    whisper: Object.fromEntries(Object.entries(stats.whisper || {}).map(([k, v]) => [k, k.endsWith('_ms') ? +(v / 1000).toFixed(2) : v])),
-    lrclib_s: stats.lrclib_ms != null ? +(stats.lrclib_ms / 1000).toFixed(2) : null});
+    lrclib_s: secs(stats.lrclib_ms), emission_s: secs(stats.emission_ms), align_s: secs(stats.align_ms)});
   log('found', found);
-  log('whisper', R.whisper, 'words', R.words_s, 's');
+  log('words', R.words_s, 's: emissions', R.emission_s, 's, alignment', R.align_s, 's');
   rt.close();
   R.done = true;
 } catch (e) { R.error = String(e && e.stack || e); log('ERROR', R.error); }

@@ -191,9 +191,11 @@ if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
     sys.path.insert(0, ROOT)
     import export_whisper
+    import export_align
     EXPORTS = {'htdemucs_6s': export_demucs, 'adtof_frame_rnn': export_adtof, 'basic_pitch': export_basic_pitch,
                'crepe_full': export_crepe, 'silero_vad': lambda: export_whisper.export_silero(OUT),
-               **{'whisper_' + s: (lambda s=s: export_whisper.export(s, OUT)) for s in ('base', 'small', 'medium')}}
+               **{'whisper_' + s: (lambda s=s: export_whisper.export(s, OUT)) for s in ('base', 'small', 'medium')},
+               **{'align_' + s: (lambda s=s: export_align.export(s, OUT)) for s in ('en', 'mms')}}
     want = sys.argv[1:] or list(EXPORTS)
     mpath = os.path.join(OUT, 'manifest.json')
     manifest = json.load(open(mpath)) if os.path.exists(mpath) else {}
