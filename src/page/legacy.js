@@ -65,7 +65,7 @@ export function start() {
   function resize() {
     dpr = Math.min(DBG.dpr, window.devicePixelRatio || 1);
     W = Math.max(200, cv.clientWidth); H = Math.max(200, cv.clientHeight);
-    cv.width = liveCv.width = Math.round(W * dpr); cv.height = liveCv.height = Math.round(H * dpr);
+    cv.width = liveCv.width = Math.round(W * dpr); cv.height = liveCv.height = Math.round(H * dpr); liveLx = null;
     WIN = L.secs > 0 ? L.secs : W < 520 ? 4.2 : W < 900 ? 5.5 : 7;
     scaleY();
     nowX = Math.round(W * (W < 520 ? 0.82 : 0.86)); pps = nowX / WIN; headEl.style.left = nowX - 4.5 + 'px';
@@ -742,7 +742,7 @@ export function start() {
      every layer apart, so it shows only while the Lab is open, when everything is drawn live on #cv so a lever shows
      at once. */
   /* the speed test's switches (Lab > Speed test): each piece of the stack, on unless a test turns it off */
-  var DBG_DEF = { blend: true, grain: true, glows: true, tilt: true, shake: true, live: false, still: false, dpr: 2 }, DBG = Object.assign({}, DBG_DEF);
+  var DBG_DEF = { blend: true, grain: true, glows: true, tilt: true, shake: true, live: false, still: false, dpr: 2, narrow: false, nolive: false, nostrips: false, strip: 1024 }, DBG = Object.assign({}, DBG_DEF), liveLx = null;
   var STRIP = 1024, CHUNK = 128, PER = STRIP / CHUNK, strips = new Map(), stripsFor = '', stripsAna = null, stripPool = [], clipL = -Infinity;
   var SETTLE = { kick: 0.5, words: 0.15, hats: 0.1, toms: 0.1, snare: 0.1 }, REACH = { kick: 60, bass: 40 };
   /* how far back from a stretch of the print a mark can start and still reach into it: a word's text and a cymbal's
@@ -869,14 +869,24 @@ export function start() {
       var ls = stripLayers(), readyT = now, keepW = WIN;
       if (BENCH) benchLayer('strips', function () { readyT = printStrips(now, ls); }); else readyT = printStrips(now, ls);
       /* live: the stretch the strips do not cover yet, on its own canvas, cleared from wherever it began last time */
-      var xr = Math.round(xOf(readyT, now) * dpr) / dpr, xc = Math.max(0, Math.floor(Math.min(xr, lastXr === null ? 0 : lastXr) * dpr) - 2);
+      var xr = Math.round(xOf(readyT, now) * dpr) / dpr;
+      /* narrow: the live canvas only as wide as the live stretch (from a little left of it to the right edge) */
+      var lx = DBG.narrow ? Math.max(0, Math.floor(Math.min(xr, nowX - stripLag(ls) * pps) - 8)) : 0;
+      if (lx !== liveLx) {
+        liveLx = lx; lastXr = null;
+        liveCv.style.left = lx ? lx + 'px' : ''; liveCv.style.width = lx ? W - lx + 'px' : '';
+        liveCv.width = Math.round((W - lx) * dpr); liveCv.height = Math.round(H * dpr);
+      }
+      var lxd = Math.round(lx * dpr), xc = Math.max(0, Math.floor(Math.min(xr, lastXr === null ? 0 : lastXr) * dpr) - 2 - lxd);
       lastXr = xr;
+      liveCv.style.visibility = DBG.nolive ? 'hidden' : '';
       var cvs = ctx;
       ctx = liveCtx;
       try {
         ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
         ctx.clearRect(xc, 0, liveCv.width - xc, liveCv.height);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.globalCompositeOperation = 'multiply';
+        if (DBG.nolive) ls = [];
+        ctx.setTransform(dpr, 0, 0, dpr, -lxd, 0); ctx.globalCompositeOperation = 'multiply';
         ctx.save(); ctx.beginPath(); ctx.rect(xr, -80, W - xr + 80, H + 160); ctx.clip(); clipL = xr;
         ls.forEach(function (Ly) {
           WIN = Math.min(keepW, now - readyT + look(Ly[0]));
@@ -1062,24 +1072,39 @@ export function start() {
   /* ---- Lab > Speed test: the next 10 s of the song (from where it is), silent, drawn once through with each piece
      of the stack turned off in turn, then a JSON of the frame times to paste back. Every run plays the same 10 s, so
      the runs compare. */
+  /* test 1 (Pixel 9 Pro): blend modes, grain, glows, tilt and shake made no difference; half resolution took it from
+     66 ms a frame to 16.7. Test 2 looks for where the cliff is and which canvas is too big. */
   var SPEED = [
     ['as now', {}],
-    ['no blend modes', { blend: false }],
-    ['no grain', { grain: false }],
-    ['no glows', { glows: false }],
-    ['no tilt', { tilt: false }],
-    ['no shake', { shake: false }],
-    ['none of those five', { blend: false, grain: false, glows: false, tilt: false, shake: false }],
-    ['all drawn live, as with the Lab open', { live: true }],
-    ['all live, none of the five', { live: true, blend: false, grain: false, glows: false, tilt: false, shake: false }],
-    ['half resolution', { dpr: 1 }],
+    ['resolution 1.75', { dpr: 1.75 }],
+    ['resolution 1.5', { dpr: 1.5 }],
+    ['resolution 1.25', { dpr: 1.25 }],
+    ['resolution 1', { dpr: 1 }],
+    ['narrow live canvas', { narrow: true }],
+    ['no live canvas', { nolive: true }],
+    ['strips not shown', { nostrips: true }],
+    ['strips 512 wide', { strip: 512 }],
+    ['narrow live, strips 512', { narrow: true, strip: 512 }],
     ['nothing drawn: the phone alone', { still: true }]
   ];
   var speedRun = false;
+  /* the screen stays on while a song plays or the speed test runs (the browser lets go when the page is hidden) */
+  var wake = null, waking = false;
+  function holdScreen(on) {
+    if (on && !wake && !waking && navigator.wakeLock && document.visibilityState === 'visible') {
+      waking = true;
+      navigator.wakeLock.request('screen').then(function (w) { waking = false; wake = w; w.addEventListener('release', function () { wake = null; }); }, function () { waking = false; });
+    }
+    if (!on && wake) { wake.release(); wake = null; }
+  }
+  ['play', 'pause', 'ended'].forEach(function (ev) { audio.addEventListener(ev, function () { holdScreen(speedRun || playing()); }); });
+  document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') holdScreen(speedRun || playing()); });
   function setDbg(o) {
     var d = DBG.dpr;
     DBG = Object.assign({}, DBG_DEF, o);
     [stripView, liveCv, glowBass, glowKick].forEach(function (el) { el.style.mixBlendMode = DBG.blend ? '' : 'normal'; });
+    stripView.style.visibility = DBG.nostrips ? 'hidden' : '';
+    if (DBG.strip !== STRIP) { STRIP = DBG.strip; PER = STRIP / CHUNK; stripsFor = ''; }
     if (DBG.dpr !== d) resize();
     S.dirty = true;
   }
@@ -1093,13 +1118,13 @@ export function start() {
     var T0 = Math.max(0, Math.min(clock(), (S.dur || 10) - 10)), i = -1, start = 0, last = 0, ft = [], dts = [];
     var diff = {}; for (var k in L) if (L[k] !== LAB_DEF[k]) diff[k] = L[k];
     var out = {
-      test: 'pitchscape speed test 1', when: new Date().toISOString(),
+      test: 'pitchscape speed test 2', when: new Date().toISOString(),
       device: { ua: navigator.userAgent, dpr: window.devicePixelRatio, cores: navigator.hardwareConcurrency || null, memoryGB: navigator.deviceMemory || null },
       print: { css: W + 'x' + H, px: cv.width + 'x' + cv.height, secondsShown: +WIN.toFixed(2), from: +T0.toFixed(2), to: +(T0 + 10).toFixed(2), lab: diff,
         hidden: Object.keys(S.vis).filter(function (k) { return !S.vis[k]; }) },
       runs: []
     };
-    speedRun = true; fpsEl.hidden = false;
+    speedRun = true; fpsEl.hidden = false; holdScreen(true);
     function next() {
       if (++i >= SPEED.length) return finish();
       setDbg(SPEED[i][1]); start = 0; last = 0; ft = []; dts = [];
@@ -1120,7 +1145,7 @@ export function start() {
       next();
     }
     function finish() {
-      setDbg({}); speedRun = false; fpsEl.hidden = L.fps !== 'on'; S.dirty = true; wakeHud();
+      setDbg({}); speedRun = false; fpsEl.hidden = L.fps !== 'on'; S.dirty = true; wakeHud(); holdScreen(playing());
       showSpeed(JSON.stringify(out));
     }
     next();
