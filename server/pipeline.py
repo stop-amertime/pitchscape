@@ -467,6 +467,27 @@ BP_BEND_BIAS = 1         # Basic Pitch reports an in-tune note's bend as +1 bin 
                          # notes at exact MIDI pitches and on every steady note of the test song; taken off here
 
 
+def fine_bends(contour, i0, n, pitch, tol=25, w=2):
+    """A note's pitch, frame by frame, from Basic Pitch's contour output, in contour bins (thirds of a semitone) from
+    its MIDI pitch's bin, as get_pitch_bends finds it (the peak of the contour under a Gaussian of 5 bins around the
+    note) but read to a fraction of a bin: the salience-weighted mean over the peak and `w` bins either side, as
+    CREPE decodes its own output (Kim et al. 2018). Basic Pitch's whole bins snap a note to thirds of a semitone (on
+    synthetic tones 15 cents sharp read as in tune, 25 as 33); this reads them to a median of 1.5 cents (steady), 3
+    (vibrato). Same bias as the whole bins (+1 bin: BP_BEND_BIAS)."""
+    from scipy.signal.windows import gaussian
+    c0 = int(round((pitch - 21) * 3))
+    lo, hi = max(0, c0 - tol), min(contour.shape[1], c0 + tol + 1)
+    g = gaussian(2 * tol + 1, std=5)[lo - (c0 - tol):hi - (c0 - tol)]
+    out = []
+    for f in range(i0, min(i0 + n, contour.shape[0])):
+        s = contour[f, lo:hi].astype(np.float64)
+        k = int(np.argmax(s * g))
+        a, b = max(0, k - w), min(hi - lo, k + w + 1)
+        ww = s[a:b]
+        out.append(float(np.sum(np.arange(a, b) * ww) / ww.sum()) + lo - c0 if ww.sum() > 0 else float(k + lo - c0))
+    return out
+
+
 def raw_bends(t0, t1, bends, act):
     """Basic Pitch's bends for one note as (times, semitones from its MIDI pitch, how sure it is the note still
     sounds), unsmoothed: one value per model frame, evenly spread over the note; bends in thirds of a semitone."""
@@ -663,7 +684,7 @@ def notes_from_stem(other44):
         act = note[i0:i0 + n, int(p) - 21].astype(np.float64)
         top = act[act >= 0.3]
         res.append((float(a), float(b), int(p), float(np.mean(top)) if len(top) else float(v),
-                    list(bd) if bd is not None else None, act))
+                    fine_bends(out['contour'], i0, n, int(p)) if bd is not None else None, act))
     return res
 
 
@@ -1060,7 +1081,7 @@ def analyze(path, device='cpu', stems_dir=None, words=True, whisper_size=None, p
     sg = np.array(segs, np.float32).reshape(-1) if segs else np.zeros(0, np.float32)
     on = np.array(onsets, np.float32).reshape(-1) if onsets else np.zeros(0, np.float32)
     pack = {
-        'format': 'song-overprint-pack', 'version': 10, 'source': 'pitchscape-server',
+        'format': 'song-overprint-pack', 'version': 11, 'source': 'pitchscape-server',
         'models': {'stems': 'htdemucs_6s', 'drums': 'ADTOF Frame_RNN', 'notes': 'Basic Pitch ICASSP 2022',
                    'bass': 'pYIN', 'voice': 'CREPE', 'tone': 'MOSQITO roughness_dw, sharpness_din', 'width': 'Glasberg & Moore roex excitation patterns',
                    'words': 'LRCLIB, timed by Whisper' if words else None},

@@ -29,7 +29,7 @@ export function start() {
   var LAB_DEF = {
     colour: 'inst', drums: 'sound', kick: 'smudge', bass: 'smudge', font: 'grotesque', wordSize: 'voice',
     shake: reduceMotion ? 0 : 0.25, tilt: reduceMotion ? 0 : 0.5, pulse: reduceMotion ? 0 : 0.6, slip: reduceMotion ? 0 : 0.35,
-    secs: 0, ink: 1, weight: 1, grain: 0.5, thick: 'ear', edges: 1,
+    secs: 0, ink: 1, weight: 1, grain: 0.5, thick: 'ear', edges: 1, guides: 'on',
     /* cutoffs: the defaults are each model's own settings */
     vConf: 0.45, vFloor: 0.04, vRun: 90, bFloor: 0.08, hold: 0.3, noteMin: 100, drumK: 1, rough0: 0.1, sharp0: 1.75, leap: 4
   };
@@ -630,6 +630,7 @@ export function start() {
     }
   }
   function drawGuides() {
+    if (L.guides === 'off') return;
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1; ctx.lineWidth = 1;
     ctx.font = LABEL_FONT; ctx.textBaseline = 'bottom';
     for (var o = 1; o <= 8; o++) {
@@ -1049,7 +1050,7 @@ export function start() {
   function packKey(sha) { return 'pack:' + PIPELINE + ':' + sha; }
   /* only an analysis from the current pipeline (5, which writes pack version 8) is drawn: an older one lacks what the
      drawing needs, so the song is analysed again rather than drawn with stand-ins */
-  function current(pack) { return !!(pack && pack.version >= 10 && pack.segStride === 17 && pack.bytes); }
+  function current(pack) { return !!(pack && pack.version >= 11 && pack.segStride === 17 && pack.bytes); }
   var idb = (function () {
     var dbp = null;
     function open() {
@@ -1362,6 +1363,11 @@ export function start() {
     r.addEventListener('input', function () { var k = r.dataset.key; L[k] = parseFloat(r.value); labApply(k); });
   });
   $('labReset').addEventListener('click', function () { L = Object.assign({}, LAB_DEF); labApply('all'); });
+  /* every detector followed as far down as its slider goes (the edges and lines levers are not about what is found) */
+  $('labAll').addEventListener('click', function () {
+    ['vConf', 'vFloor', 'vRun', 'bFloor', 'hold', 'noteMin', 'drumK'].forEach(function (k) { L[k] = parseFloat($('lab-' + k).min); });
+    labApply('all');
+  });
   /* the Lab, below the print (the print shrinks to sit above it), opened from the cog */
   function openPanel() { labPanel.hidden = false; cog.setAttribute('aria-expanded', 'true'); hideBubble(); wakeHud(); }
   function closePanels() {

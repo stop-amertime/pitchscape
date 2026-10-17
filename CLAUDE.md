@@ -319,7 +319,11 @@ changed). The page draws only current packs; an older one is analysed again (clo
 
 ## Things learned the hard way
 
-- **Basic Pitch** reports an in-tune note's bend as +1 bin (1/3 semitone): `BP_BEND_BIAS` removes it. It ends a note
+- **Basic Pitch**'s own bends are whole contour bins (thirds of a semitone): synthetic tones 15 cents sharp read as in
+  tune, 25 cents as 33. Since pipeline 8, `fine_bends` reads the same contour peak to a fraction of a bin (CREPE's
+  weighted mean over the peak and 2 bins either side): a median error of 1.5 cents on steady tones, 3 on vibrato; its
+  whole bin is Basic Pitch's own on 99.99% of frames. On Fluoride 13-17% of notes sit 5 cents or more off the
+  semitone. Basic Pitch reports an in-tune note's bend as +1 bin (1/3 semitone): `BP_BEND_BIAS` removes it. It ends a note
   when a bend crosses a semitone and starts another: `join_bends`. It transcribes distorted guitar as dense chords.
 - **Demucs**: the piano stem is the least reliable; stems bleed (a guitar solo leaks into the bass stem). Notes found
   in two stems at the same pitch and time are kept only where much stronger.

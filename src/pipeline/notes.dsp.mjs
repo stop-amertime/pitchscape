@@ -227,7 +227,9 @@ export function outputToNotes(note, onset, contour, nF, {onsetThresh = 0.5, fram
     const fi = pyRound(12.0 * 3 * Math.log2(hz / 27.5));
     const lo = Math.max(fi - tol, 0), hi = Math.min(NC, fi + tol + 1);
     const g0 = Math.max(0, tol - fi), shift = tol - Math.max(0, tol - fi);
-    const bends = [];
+    // and server/pipeline.py fine_bends: the same peak read to a fraction of a bin, the salience-weighted mean over it
+    // and 2 bins either side (CREPE's decoding), so a note is not snapped to thirds of a semitone
+    const bends = [], fine = [];
     for (let t = a; t < b; t++) {
       let m = -Infinity, arg = 0;
       for (let c = lo; c < hi; c++) {
@@ -235,8 +237,11 @@ export function outputToNotes(note, onset, contour, nF, {onsetThresh = 0.5, fram
         if (v > m) { m = v; arg = c - lo; }
       }
       bends.push(arg - shift);
+      let sw = 0, sx = 0;
+      for (let c = Math.max(0, arg - 2); c < Math.min(hi - lo, arg + 3); c++) { const s = contour[t * NC + lo + c]; sw += s; sx += c * s; }
+      fine.push(sw > 0 ? sx / sw - shift : arg - shift);
     }
-    ev.push(bends);
+    ev.push(bends, fine);
   }
   return events;
 }
@@ -245,11 +250,11 @@ export function outputToNotes(note, onset, contour, nF, {onsetThresh = 0.5, fram
  * activation at its pitch over its frames, amp the mean of act where it is 0.3 or more (else Basic Pitch's own). */
 export function notesFromEvents(events, note, nF) {
   const times = modelFramesToTime(nF);
-  return events.map(([a, b, p, v, bd]) => {
+  return events.map(([a, b, p, v, bd, fine]) => {
     const n = bd.length, act = new Float64Array(n);
     for (let i = 0; i < n; i++) act[i] = note[(a + i) * NP + p - MIDI_OFFSET];
     const top = act.filter(x => x >= 0.3);
-    return [times[a], times[b], p, top.length ? mean64(top) : v, bd, act];
+    return [times[a], times[b], p, top.length ? mean64(top) : v, fine, act];
   });
 }
 
