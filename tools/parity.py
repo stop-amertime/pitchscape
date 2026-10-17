@@ -61,14 +61,11 @@ quantisation; bends, holds and each note's (start, count); the 3 dB medians pack
 
   python tools/parity.py words [name-substring ...] [--device cuda]
 
-words: song_info and lyrics_for (py-words/, Whisper medium on the GPU in float16 as on Modal) against songInfo and
-lyricsFor (src/pipeline/words.mjs by tools/analyse_words.mjs; Whisper medium with the encoder on WebGPU and the decoder
-on the CPU in float32) on Python's vocal stem (py-s0), each side asking LRCLIB itself: whether the tags agree, the
-LRCLIB record (or why none), and for the placed words the difference of each word's time. Whisper's own words (heard)
-are compared too, matched as place_words matches them, on songs without lyrics from a JS heard-only run (js-heard/)
-against faster-whisper's run in whisper-py/medium-b5.json. faster-whisper is not the same twice (its fallback samples
-at random), so Python is compared with itself as well (py-words against whisper-py/medium-b5.json, which is made
-separately, outside this script).
+words: song_info and lyrics_for (py-words/, Whisper medium on the GPU in float16 as on Modal, its words placed by
+place_words) against songInfo and lyricsFor (src/pipeline/words.mjs by tools/analyse_words.mjs into js-align/: forced
+alignment with the en aligner under Node) on Python's vocal stem (py-s0), each side asking LRCLIB itself: whether the
+tags agree, the LRCLIB record (or why none), the difference of each word's time (all words, and those whose Python
+time is one Whisper heard), and how near each side's word starts are to the vocal stem's onsets (py-voice/).
 """
 import json, os, subprocess, sys, time
 
@@ -983,20 +980,6 @@ def py_words(path, vocals_wav, out, device, size='medium'):
                'device': device}, open(os.path.join(out, 'timing.json'), 'w'))
 
 
-def heard_diffs(py, js):
-    """Two lists of Whisper's words [(word, start, end)], matched in order as place_words matches (difflib on the
-    normalised words): how many matched, and the differences of their starts and ends (s)."""
-    import difflib
-    from server.pipeline import norm
-    a, b = [norm(w[0]) for w in py], [norm(w[0]) for w in js]
-    d = []
-    for blk in difflib.SequenceMatcher(None, a, b, autojunk=False).get_matching_blocks():
-        for k in range(blk.size):
-            if a[blk.a + k]:
-                d.append((js[blk.b + k][1] - py[blk.a + k][1], js[blk.b + k][2] - py[blk.a + k][2]))
-    return {'python': len(py), 'js': len(js), **time_diffs(np.array(d).reshape(-1, 2))}
-
-
 def time_diffs(d):
     """d [n, 2 or 1]: differences (s) -> matched, and of the first column: median and 90th percentile of the size,
     the share within 0.02 s and 0.1 s, the median (bias)."""
@@ -1020,73 +1003,73 @@ def placed_diffs(py, js):
 
 
 def words(song, path, outdir, device):
-    """songInfo against song_info; lyricsFor against lyrics_for (Whisper medium; Python on the GPU in float16 as on
-    Modal, JS under Node: encoder on WebGPU, decoder on the CPU in float32), each side asking LRCLIB itself."""
-    from server import pipeline as P
+    """songInfo against song_info, the LRCLIB record each side finds itself, and each published word's time: JS
+    (lyricsFor: forced alignment, en, under Node) against Python's lyrics_for (Whisper medium's words placed by
+    place_words, on the GPU in float16 as on Modal). Whisper is not ground truth, so both are also measured against the
+    vocal stem's onsets (the voice stage's: the start of each sung run and librosa's onsets inside runs), on the words
+    whose Python time is one Whisper heard (the rest place_words spreads between them)."""
     stem = os.path.join(outdir, 'py-s0', 'vocals.wav')
     if not os.path.exists(stem):
         stems(song, path, outdir, device)
-    py, js, jsh = (os.path.join(outdir, d) for d in ('py-words', 'js-words', 'js-heard'))
+    py, js = os.path.join(outdir, 'py-words'), os.path.join(outdir, 'js-align')
     pf = os.path.join(py, 'words.json')
     if os.path.exists(pf) and (json.load(open(pf))['found'] or {}).get('why') == 'LRCLIB could not be reached':
         os.remove(os.path.join(py, 'timing.json'))
     if not os.path.exists(os.path.join(py, 'timing.json')):
         py_words(path, stem, py, device)
-    node = ['node', os.path.join(ROOT, 'tools', 'analyse_words.mjs'), path, '--vocals', stem]
     if not os.path.exists(os.path.join(js, 'timing.json')):
-        subprocess.run(node + ['--out', js], check=True)
-    Pw, Jw = (json.load(open(os.path.join(d, 'words.json'))) for d in (py, js))
-    # Whisper's words on every song, whether or not LRCLIB has it: the JS heard-only beside faster-whisper's own run
-    # with the pipeline's settings (whisper-py/medium-b5.json, made separately), and Python against Python for scale
-    pyh = os.path.join(outdir, 'whisper-py', 'medium-b5.json')
-    other = json.load(open(pyh))['words'] if os.path.exists(pyh) else None
-    if Jw['heard'] is None and other is not None and not os.path.exists(os.path.join(jsh, 'timing.json')):
-        subprocess.run(node + ['--out', jsh, '--heard-only'], check=True)
-    jheard = Jw['heard'] if Jw['heard'] is not None else (
-        json.load(open(os.path.join(jsh, 'words.json')))['heard'] if os.path.exists(os.path.join(jsh, 'words.json'))
-        else None)
-    pheard = Pw['heard'] if Pw['heard'] is not None else other
+        subprocess.run(['node', os.path.join(ROOT, 'tools', 'analyse_words.mjs'), path, '--vocals', stem, '--out', js],
+                       check=True)
+    Pw, Jw = (json.load(open(os.path.join(d, 'words.json'), encoding='utf8')) for d in (py, js))
     info_diff = sorted(k for k in set(Pw['info']) | set(Jw['info']) if Pw['info'].get(k) != Jw['info'].get(k))
     fp, fj = Pw['found'] or {}, Jw['found'] or {}
     res = {'info_differs': info_diff,
            'lyrics': {'python': fp, 'js': fj, 'same_record': fp.get('lrclib') == fj.get('lrclib'),
                       'same_why': fp.get('why') == fj.get('why')},
-           'heard': heard_diffs(pheard, jheard) if pheard is not None and jheard is not None else None,
-           'heard_python_twice': heard_diffs(pheard, other) if Pw['heard'] is not None and other is not None else None,
            'timing': {'python': json.load(open(os.path.join(py, 'timing.json'))),
-                      'js': json.load(open(os.path.join(js, 'timing.json'))),
-                      'js_heard': json.load(open(os.path.join(jsh, 'timing.json')))
-                      if os.path.exists(os.path.join(jsh, 'timing.json')) else None}}
+                      'js': json.load(open(os.path.join(js, 'timing.json')))}}
     if Pw['lyrics'] and Jw['lyrics']:
         res['placed'] = placed_diffs(Pw['lyrics'], Jw['lyrics'])
-        if Pw.get('lines') and other is not None:
-            # Python's placing from its other Whisper run: how much the placing moves between two Python runs
-            lines = [tuple(x) for x in Pw['lines']]
-            placed, _ = P.place_words(lines, [tuple(w) for w in other])
-            res['placed_python_twice'] = placed_diffs(Pw['lyrics'], {'lines': placed})
+        pt = [t for ln in Pw['lyrics']['lines'] for _, t in ln['words']]
+        jt = [t for ln in Jw['lyrics']['lines'] for _, t in ln['words']]
+        heard = {round(h[1], 3) for h in Pw['heard'] or []}
+        m = [i for i, t in enumerate(pt) if round(t, 3) in heard]
+        if res['placed'].get('same_words') and m:
+            res['placed_heard'] = time_diffs(np.array([[jt[i] - pt[i]] for i in m]))
+            vf = os.path.join(outdir, 'py-voice', 'voice.json')
+            if os.path.exists(vf):
+                on = np.array(sorted(o[0] for o in json.load(open(vf))['onsets']))
+                def near(t):
+                    t = np.array(t)
+                    k = np.clip(np.searchsorted(on, t)[:, None] + np.array([-1, 0]), 0, len(on) - 1)
+                    return np.abs(on[k] - t[:, None]).min(1)
+                res['onsets'] = {who: {'median': round(float(np.median(near(x))), 3),
+                                       'within_0.05': round(float(np.mean(near(x) <= 0.05)), 3)}
+                                 for who, x in (('whisper', [pt[i] for i in m]), ('align', [jt[i] for i in m]))}
     return res
 
 
 def print_words(song, res):
-    ly, fp, fj = res['lyrics'], res['lyrics']['python'], res['lyrics']['js']
-    say = lambda f: ('LRCLIB %s, matched %s' % (f.get('lrclib'), f.get('matched')) if f.get('found')
-                     else 'no lyrics (%s)' % f.get('why'))
+    fp, fj = res['lyrics']['python'], res['lyrics']['js']
+    say = lambda f: ('LRCLIB %s' % f.get('lrclib') if f.get('found') else 'no lyrics (%s)' % f.get('why'))
     print('%-40s info %s; Python %s; JS %s' % (song, 'identical' if not res['info_differs'] else
                                                'differs in %s' % res['info_differs'], say(fp), say(fj)), flush=True)
-    for key, label in (('placed', 'placed words, JS vs Python'), ('placed_python_twice', 'placed words, Python twice'),
-                       ('heard', 'heard words, JS vs Python'), ('heard_python_twice', 'heard words, Python twice')):
+    for key, label in (('placed', 'aligned vs Whisper, all'), ('placed_heard', 'aligned vs Whisper, heard')):
         r = res.get(key)
         if r and r.get('matched'):
-            print('%-40s %-28s %4d matched, |start| median %.3f s, p90 %.3f, within 0.02 s %.0f%%, within 0.1 s '
-                  '%.0f%%, bias %+.3f' % ('', label, r['matched'], r['median'], r['p90'], 100 * r['within_0.02'],
-                                          100 * r['within_0.1'], r['bias']), flush=True)
-        elif r is not None and key.startswith('placed') and not r.get('same_words', True):
+            print('%-40s %-28s %4d words, |start| median %.3f s, p90 %.3f, within 0.1 s %.0f%%, bias %+.3f' % (
+                '', label, r['matched'], r['median'], r['p90'], 100 * r['within_0.1'], r['bias']), flush=True)
+        elif r is not None and not r.get('same_words', True):
             print('%-40s %-28s the lines differ' % ('', label), flush=True)
+    if res.get('onsets'):
+        o = res['onsets']
+        print('%-40s to the nearest vocal onset: Whisper median %.3f s (%.0f%% within 50 ms), aligned %.3f s (%.0f%%)' % (
+            '', o['whisper']['median'], 100 * o['whisper']['within_0.05'], o['align']['median'],
+            100 * o['align']['within_0.05']), flush=True)
     t = res['timing']
-    tj = t['js'] if t['js'].get('whisper_s') else (t['js_heard'] or {})
-    print('%-40s time: Python Whisper %s s (%s); JS Whisper %s s (decoder %s s, %s calls; temperatures %s)' % (
-        '', t['python'].get('whisper_s'), t['python'].get('device'), tj.get('whisper_s'), tj.get('decoder_s'),
-        tj.get('decoder_calls'), tj.get('temperatures')), flush=True)
+    print('%-40s time: Python Whisper %s s (%s); JS emissions %s s, alignment %s s (%s)' % (
+        '', t['python'].get('whisper_s'), t['python'].get('device'), t['js'].get('emission_s'), t['js'].get('align_s'),
+        t['js'].get('eps')), flush=True)
 
 
 STAGES = {'stems': stems, 'drums': drums, 'notes': notes, 'tone': tone, 'ear': ear, 'bass': bass, 'voice': voice,

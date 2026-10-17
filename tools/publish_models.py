@@ -51,6 +51,17 @@ for _size in ('base', 'small', 'medium'):
                                'https://huggingface.co/Systran/faster-whisper-%s).' % _size, 'MIT'),
     })
 
+for _name, _what, _lic in (
+        ('en', 'wav2vec 2.0 base fine-tuned for English on LibriSpeech 960 h (A. Baevski, H. Zhou, A. Mohamed, M. Auli, '
+               '"wav2vec 2.0", 2020; fairseq), as torchaudio 2.7.1 ships it (pipelines.WAV2VEC2_ASR_BASE_960H)', 'MIT'),
+        ('mms', 'the MMS forced aligner (V. Pratap et al., "Scaling Speech Technology to 1,000+ Languages", 2023), as '
+                'torchaudio 2.7.1 ships it (pipelines.MMS_FA)', 'CC BY-NC 4.0')):
+    SOURCES.update({
+        'align_%s' % _name: (_what + ', exported to ONNX in float16 with log_softmax by tools/export_align.py.', _lic),
+        'align_%s_f32' % _name: (_what + ', exported to ONNX in float32 (for ONNX Runtime\'s CPU provider) with '
+                                 'log_softmax by tools/export_align.py.', _lic),
+    })
+
 
 def card(repo, manifest):
     rows = '\n'.join('| `%s` | %s | %s | %.1f MB |' % (v['file'], SOURCES[k][0], SOURCES[k][1], v['bytes'] / 1e6)

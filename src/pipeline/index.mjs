@@ -5,7 +5,7 @@
 //                                               ├─► notes ─┬─► tone (MOSQITO) ─────┤
 //                                               ├─► bass ──┤                       ├─► pack
 //                                               ├─► voice ─┴─► width (ear) ────────┤
-//                                               └─► words (LRCLIB, Whisper) ───────┘
+//                                               └─► words (LRCLIB, aligned) ───────┘
 //
 // progress(message) gets the same stage messages as the Python pipeline ('stems: ...', 'drums: ...'), which the page
 // maps to text (STAGES in src/page/legacy.js).
@@ -22,11 +22,11 @@ import {frameCount, makePack, NOTE_STEMS} from './pack.mjs';
 const mono = ([l, r]) => { const y = new Float32Array(l.length); for (let i = 0; i < l.length; i++) y[i] = (l[i] + r[i]) / 2; return y; };
 
 /** bytes: the song file (ArrayBuffer); name: its file name (read as "Artist - Title" when it has no tags).
- * words: false to skip LRCLIB and Whisper. shifts: Demucs's (1, as the pipeline). stems: stems already made
+ * words: false to skip LRCLIB and the alignment; aligner: words.mjs's lyricsFor's ('en', or 'mms'). shifts: Demucs's (1, as the pipeline). stems: stems already made
  * ({name: [left, right]} at 44.1 kHz, e.g. Python's, to compare the later stages on the same input; Demucs is then
  * skipped, as pipeline.analyze's stems_dir). mix: the song already decoded ([left, right] at 44.1 kHz; the page
  * decodes it, as a Worker cannot). Returns the pack. */
-export async function analyze(bytes, name, rt, {progress = () => {}, words = true, shifts = 1, stats = {}, stems: given = null, mix: decoded = null} = {}) {
+export async function analyze(bytes, name, rt, {progress = () => {}, words = true, aligner = 'en', shifts = 1, stats = {}, stems: given = null, mix: decoded = null} = {}) {
   const t0 = performance.now(), ms = {};
   const timed = async (key, p) => { const t = performance.now(); const v = await p; ms[key] = Math.round(performance.now() - t); return v; };
   const sha = await rt.sha256(bytes);
@@ -57,8 +57,8 @@ export async function analyze(bytes, name, rt, {progress = () => {}, words = tru
   const bs = timed('bass', bass(st22.bass, F, rt));
   progress('voice: CREPE');
   const vc = timed('voice', voice(stems.vocals, F, rt));
-  if (words) progress('words: LRCLIB, timed by Whisper');
-  const wd = words ? timed('words', lyricsFor(song, dur, stems.vocals, rt)) : Promise.resolve([null, null]);
+  if (words) progress('words: LRCLIB, aligned to the vocal');
+  const wd = words ? timed('words', lyricsFor(song, dur, stems.vocals, rt, {aligner})) : Promise.resolve([null, null]);
 
   const [segs, b, lead] = await Promise.all([nt, bs, vc]);
   progress('tone: roughness and sharpness');
