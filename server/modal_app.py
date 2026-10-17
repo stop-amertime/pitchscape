@@ -62,10 +62,10 @@ def _fetch_node_models():
     j.dump({k: man[k] for k in NODE_MODELS}, open(f'{APP}/models/manifest.json', 'w'))
 
 
-# the JavaScript pipeline (src/pipeline) under Node: ONNX Runtime for Node fetches its CUDA 12 provider when installed
-# on Linux, which needs CUDA 12 and cuDNN 9 (this base image) on the library path
+# the JavaScript pipeline (src/pipeline) under Node: ONNX Runtime for Node fetches its CUDA provider when installed
+# on Linux; 1.30's is built for CUDA 13 (libcublasLt.so.13) and cuDNN 9, which this base image has
 node_image = (
-    modal.Image.from_registry('nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04', add_python='3.11')
+    modal.Image.from_registry('nvidia/cuda:13.0.3-cudnn-runtime-ubuntu24.04', add_python='3.11')
     .apt_install('ffmpeg', 'curl', 'ca-certificates')
     .run_commands('curl -fsSL https://deb.nodesource.com/setup_24.x | bash -', 'apt-get install -y nodejs')
     .pip_install('huggingface_hub==2.2.0')
