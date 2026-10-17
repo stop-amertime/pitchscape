@@ -1,0 +1,29 @@
+name: trial the JS pipeline on Modal
+
+# By hand only: runs server/trial_js.py (its own Modal app, apart from the live server) and prints the timings.
+on:
+  workflow_dispatch:
+    inputs:
+      words:
+        description: 'Analyse the words too'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  trial:
+    runs-on: ubuntu-latest
+    env:
+      MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+      MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - run: pip install modal
+      - name: Trial
+        run: modal run -m server.trial_js ${{ inputs.words && '--words' || '--no-words' }} | tee trial.txt
+      - run: cat trial.txt >> "$GITHUB_STEP_SUMMARY"
