@@ -19,11 +19,11 @@ const fs = require('fs'), os = require('os'), path = require('path');
   const p = ctx.pages()[0] || await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message));
   const url = (site || 'http://localhost:8010/') + '?bench';
   await p.goto(url);
-  await p.evaluate((lab) => { localStorage.setItem('pitchscape:key', JSON.stringify('test')); localStorage.setItem('pitchscape:lab', JSON.stringify({ v: 2, set: lab ? JSON.parse(lab) : {} })); }, lab || '');
+  await p.evaluate((lab) => { localStorage.setItem('pitchscape:key', JSON.stringify('test')); localStorage.setItem('pitchscape:where', JSON.stringify('server')); localStorage.setItem('pitchscape:lab', JSON.stringify({ v: 2, set: lab ? JSON.parse(lab) : {} })); }, lab || '');
   await p.reload(); await p.waitForTimeout(1200);
-  await p.setInputFiles('#file', song);
+  await p.setInputFiles('input[type=file]', song);
   for (let i = 0; i < 240; i++) {
-    if (await p.evaluate(() => !document.getElementById('play').disabled)) break;
+    if (await p.evaluate(() => window.pitchscapeReady && window.pitchscapeReady())) break;
     await p.waitForTimeout(250);
   }
   await p.waitForTimeout(400);

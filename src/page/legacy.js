@@ -27,7 +27,7 @@ export function start() {
 
   /* ------------------------------------------------------------ lab settings (A/B switches, kept on this device) */
   var LAB_DEF = {
-    colour: 'inst', drums: 'sound', kick: 'smudge', bass: 'smudge', font: 'grotesque', wordSize: 'voice',
+    colour: 'inst', drums: 'sound', kick: 'splat', bass: 'smudge', font: 'grotesque', wordSize: 'voice',
     shake: reduceMotion ? 0 : 0.25, tilt: reduceMotion ? 0 : 0.5, pulse: reduceMotion ? 0 : 0.6, slip: reduceMotion ? 0 : 0.35,
     secs: 0, ink: 1, weight: 1, grain: 0.5, thick: 'ear', edges: 1, guides: 'on',
     /* cutoffs: the defaults are each model's own settings */
@@ -37,6 +37,7 @@ export function start() {
      that setting alone. Settings saved in the older all-in-one form are dropped once. */
   var LAB_VERSION = 2, labSaved = store.get('pitchscape:lab');
   var L = Object.assign({}, LAB_DEF, labSaved && labSaved.v === LAB_VERSION ? labSaved.set : {});
+  if (L.kick === 'smudge') L.kick = 'splat';   /* the kick's soft smudge became a splatter */
   function saveLab() { var d = {}; for (var k in L) if (L[k] !== LAB_DEF[k]) d[k] = L[k]; store.set('pitchscape:lab', { v: LAB_VERSION, set: d }); }
 
   var sayTimer = null;
@@ -359,11 +360,15 @@ export function start() {
     g.fillStyle = rg; g.fillRect(0, 0, 64, 64); DABS[col] = c; return c;
   }
   function smudge(runs, now, alpha) {
-    if (!smudgeCv || smudgeCv.width !== cv.width || smudgeCv.height !== cv.height) {
-      smudgeCv = document.createElement('canvas'); smudgeCv.width = cv.width; smudgeCv.height = cv.height; smudgeCtx = smudgeCv.getContext('2d');
+    /* the smear's layer covers whatever canvas it prints on: the screen's, or a strip's */
+    var tw = ctx.canvas.width, th = ctx.canvas.height;
+    if (!smudgeCv || smudgeCv.width < tw || smudgeCv.height < th) {
+      smudgeCv = document.createElement('canvas'); smudgeCv.width = Math.max(tw, cv.width); smudgeCv.height = Math.max(th, cv.height); smudgeCtx = smudgeCv.getContext('2d');
     }
-    var g = smudgeCtx, i, k;
-    g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, smudgeCv.width, smudgeCv.height); g.setTransform(ctx.getTransform());
+    /* only the box the dabs cover is copied and then cleared (in user space x0..x1, y0..y1): a whole-screen copy every
+       frame was most of the bass's time */
+    var g = smudgeCtx, i, k, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, m = ctx.getTransform();
+    g.setTransform(m);
     runs.forEach(function (pts) { for (i = 0; i < pts.length - 1; i++) {
       var a = pts[i], b = pts[i + 1], xa = xOf(a.t, now), xb = xOf(b.t, now), steps = Math.max(1, Math.ceil(Math.abs(xb - xa) / 2));
       for (k = 0; k < steps; k++) {
@@ -377,10 +382,26 @@ export function start() {
         } else {
           var loud = clamp((a.w + (b.w - a.w) * u - 0.8) / 8, 0, 1); r = (SEMI_PX * 1.3 + 1.5) * (0.85 + 0.3 * loud) * L.weight;
         }
+        if (x + r < clipL) continue;
         g.globalAlpha = Math.min(1, alpha * ink * 3.2 / r); g.drawImage(dabSprite(a.c), x - r, y - r, 2 * r, 2 * r);
+        if (x - r < x0) x0 = x - r; if (x + r > x1) x1 = x + r; if (y - r < y0) y0 = y - r; if (y + r > y1) y1 = y + r;
       }
     } });
-    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = Math.min(1, L.ink); ctx.drawImage(smudgeCv, 0, 0); ctx.restore();
+    if (x1 < x0) return;
+    /* the box in the canvas's pixels (the transform may turn it a little: take all four corners) */
+    var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+    [[x0, y0], [x1, y0], [x0, y1], [x1, y1]].forEach(function (p) {
+      var px = m.a * p[0] + m.c * p[1] + m.e, py = m.b * p[0] + m.d * p[1] + m.f;
+      bx0 = Math.min(bx0, px); by0 = Math.min(by0, py); bx1 = Math.max(bx1, px); by1 = Math.max(by1, py);
+    });
+    bx0 = Math.max(0, Math.floor(bx0) - 2); by0 = Math.max(0, Math.floor(by0) - 2); bx1 = Math.ceil(bx1) + 2; by1 = Math.ceil(by1) + 2;
+    var cx1 = Math.min(tw, bx1), cy1 = Math.min(th, by1);
+    if (cx1 > bx0 && cy1 > by0) {
+      ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = Math.min(1, L.ink);
+      ctx.drawImage(smudgeCv, bx0, by0, cx1 - bx0, cy1 - by0, bx0, by0, cx1 - bx0, cy1 - by0); ctx.restore();
+    }
+    /* left clear for next time (the smear's canvas may be larger than this one) */
+    g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(bx0, by0, Math.max(0, Math.min(smudgeCv.width, bx1) - bx0), Math.max(0, Math.min(smudgeCv.height, by1) - by0));
   }
 
   function frameTrack(now, getHz, getW, getA, getB, getZ, group, alpha, halo, seed) {
@@ -536,11 +557,12 @@ export function start() {
   function drumMark(e, now, kind) {
     var x = xOf(e.t, now), y = hitY(e, kind), age = now - e.t, grow = age < 0.05 ? 0.55 + 0.45 * age / 0.05 : 1;
     var own = L.drums === 'sound', br = own ? e.br : 0.35, sd = e.id * 977 + kind.length * 131;
-    var trail = own && (kind === 'hat' || kind === 'cymbal') ? Math.min(age, e.d) * pps : 0;
+    var trail = own && (kind === 'hat' || kind === 'cymbal') ? e.d * pps : 0;
+    if (x + trail + 30 < clipL) return;
     ctx.fillStyle = tint('drum', e.mhz, y); ctx.beginPath();
     if (kind === 'snare') splat(x, y, (3.2 + 4.2 * e.s) * grow, br, e.s, sd);
     else if (kind === 'tom') drop(x, y, (2.8 + 3.6 * e.s) * grow, sd);
-    else spray(x, y, e.s, grow, trail, kind === 'cymbal', sd);
+    else spray(x, y, e.s, grow, trail, Math.min(age, e.d) * pps, kind === 'cymbal', sd);
     ctx.globalAlpha = inkA(kind === 'snare' || kind === 'tom' ? 0.92 : 0.9); ctx.fill();
   }
   /* an ink splat: a ragged core, thin spikes (more and longer the brighter the hit) and a few loose drops */
@@ -560,8 +582,9 @@ export function start() {
     for (i = 0; i < 2; i++) dot(x, y, hash(sd + 40 + i) * 6.2832, r0 * (1.5 + 0.7 * hash(sd + 60 + i)), r0 * (0.14 + 0.12 * hash(sd + 80 + i)));
   }
   /* a hat: a tight fleck of fine specks. A cymbal: a wider, finer spray. Either, while it rings, trails specks to the
-     right that thin out as the sound dies */
-  function spray(x, y, s, grow, trail, wide, sd) {
+     right that thin out as the sound dies: each speck has its place along the whole ring (trail px) and prints when
+     the head reaches it (shown px), so a printed speck never moves */
+  function spray(x, y, s, grow, trail, shown, wide, sd) {
     var n = wide ? 14 + Math.round(16 * s) : 6 + Math.round(6 * s), rx = (wide ? 6.5 + 8 * s : 4 + 4.5 * s) * grow, ry = rx * (wide ? 0.75 : 0.9), i, d;
     dot(x, y, 0, 0, (wide ? 1.1 : 1.9 + 1.2 * s) * grow);
     for (i = 0; i < n; i++) {
@@ -573,6 +596,7 @@ export function start() {
       var m = Math.min(28, Math.round(trail / (wide ? 2.5 : 3.5)));
       for (i = 0; i < m; i++) {
         var u = (i + hash(sd + 200 + i)) / m;
+        if (u * trail > shown) continue;
         dot(x + u * trail, y + (hash(sd + 230 + i) - 0.5) * ry * (wide ? 2.4 : 1.6) * (1 - 0.5 * u), 0, 0, (wide ? 1 : 1.2) * (1 - 0.55 * u));
       }
     }
@@ -580,8 +604,9 @@ export function start() {
   /* one round speck, at a distance and angle from (x, y), added to the current path */
   function dot(x, y, an, dist, r) { var px = x + Math.cos(an) * dist, py = y + Math.sin(an) * dist; ctx.moveTo(px + r, py); ctx.arc(px, py, r, 0, 6.2832); }
 
-  /* ---- the kick: a big diffuse thud at the pitch of its boom. A soft smudge, or halftone (a riso screen of dots,
-     densest at the centre). Each lands larger and settles, and a faint pressure bloom spreads out from it as it hits. */
+  /* ---- the kick: a big thud at the pitch of its boom. An ink splatter like the snare's but larger, rounder (a kick is
+     a dark sound: few spikes) and part transparent, so what is under it shows through; or halftone (a riso screen of
+     dots, densest at the centre). Each lands larger and settles, and a faint pressure bloom spreads out from it. */
   function halftone(col, R) {
     var key = col + '|' + R; if (HT[key]) return HT[key];
     var sz = Math.ceil(2 * R * dpr) + 2, c = document.createElement('canvas'); c.width = c.height = sz;
@@ -606,9 +631,8 @@ export function start() {
       var Rq = Math.max(8, Math.round(R / 4) * 4);
       ctx.globalAlpha = inkA(0.36 + 0.34 * s); ctx.drawImage(halftone(col, Rq), x - RR, y - RR, 2 * RR, 2 * RR);
     } else {
-      rg = ctx.createRadialGradient(x, y, 0, x, y, RR);
-      rg.addColorStop(0, rgba(col, inkA(0.42 + 0.3 * s))); rg.addColorStop(0.55, rgba(col, inkA(0.16 + 0.12 * s))); rg.addColorStop(1, rgba(col, 0));
-      ctx.globalAlpha = 1; ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(x, y, RR, 0, 6.2832); ctx.fill();
+      ctx.fillStyle = col; ctx.beginPath(); splat(x, y, RR * 0.42, 0.15, s, e.id * 977 + 7);
+      ctx.globalAlpha = inkA(0.38 + 0.3 * s); ctx.fill();
     }
     if (age < 0.45) {
       var kb = age / 0.45, Rb = R * (1.5 + 2.4 * kb);
@@ -653,8 +677,12 @@ export function start() {
      alone. 'raf': one time per animation frame, as when playing; "frame" is then the time between frames, painting
      and all (at least the screen's refresh interval). */
   var BENCH = /[?&]bench\b/.test(location.search) ? {} : null, benchMode = 'paint';
+  /* ?bench&live: draw everything live, as with the Lab open */
+  var BENCH_LIVE = /[?&]live\b/.test(location.search);
   function benchFlush() { if (benchMode === 'paint') ctx.getImageData(0, 0, 1, 1); }
   function benchLayer(name, fn) { benchFlush(); var t = performance.now(); fn(); benchFlush(); (BENCH[name] = BENCH[name] || []).push(performance.now() - t); }
+  if (BENCH) window.pitchscapeReady = function () { return !!S.ana; };
+  if (BENCH) window.pitchscapeStrips = function () { var o = {}; strips.forEach(function (s, k) { o[k] = s.done; }); return { strips: o, pps: pps, nowX: nowX, W: W }; };
   if (BENCH) window.pitchscapeBench = function (times, mode) {
     benchMode = mode || 'paint';
     for (var k in BENCH) delete BENCH[k];
@@ -683,6 +711,101 @@ export function start() {
   };
 
   var lastTf = '';
+  /* each layer: its name and how to print it as it stands at time now (lv gathers how loud each kind of note is now) */
+  var LAYERS = [
+    ['synths', function (now, lv) { drawSegs(now, lv, 0, 'synths'); }],
+    ['piano', function (now, lv) { drawSegs(now, lv, 2, 'piano'); }],
+    ['guitar', function (now, lv) { drawSegs(now, lv, 1, 'guitar'); }],
+    ['bass', function (now) {
+      var a = S.ana;
+      frameTrack(now, function (f) { return a.bassHz[f]; }, function (f) { return 0.8 + 12 * a.bassN[f]; }, function (f) { return smooth(0.015, 0.3, a.bassN[f]); }, function (f) { return a.bassH[f]; }, function () { return 0; }, 'bass', 0.86, 0.15, 11);
+    }],
+    ['voice', function (now) {
+      var a = S.ana;
+      frameTrack(now, function (f) { return a.leadHz[f]; }, function (f) { return 0.8 + 8.5 * a.leadN[f]; }, function (f) { return smooth(0.02, 0.4, a.leadN[f]); }, function (f) { return a.leadH[f]; }, function (f) { return zLead(a.leadNz[f]); }, 'voice', 0.9, 0.16, 37);
+    }],
+    ['hats', function (now) { drawHits(S.hats, now, 'hat'); drawHits(S.cymbals, now, 'cymbal'); }],
+    ['toms', function (now) { drawHits(S.toms, now, 'tom'); }],
+    ['snare', function (now) { drawHits(S.snares, now, 'snare'); }],
+    ['kick', function (now) { drawKicks(now); }],
+    ['words', function (now) { drawWords(now); }]
+  ];
+  /* ---- the print, drawn ahead. Time only slides the print left, and a mark stops changing soon after its time (a
+     line's end tapers over 12 px, a hit grows in 50 ms). So while the Lab is closed the print is drawn ahead into
+     strips STRIP px wide, a CHUNK at a time in each frame's spare moments, by the layers' own drawing code at a
+     moment late enough that every mark reaching into the chunk has settled (lag: how long a mark changes, and how far
+     it reaches back from its time). Each frame then lays down the strips and draws only the last moment before the
+     head live. Every ink multiplies, and multiplying comes to the same in any order, so a strip holds all the layers
+     it can and the kicks and words (few, and slow to settle) are always drawn live on top. Misprint (each colour
+     slipping on its own) needs every layer apart, so it shows only while the Lab is open, when everything is drawn
+     live so a lever shows at once. */
+  var STRIP = 1024, CHUNK = 128, strips = new Map(), stripsFor = '', stripsAna = null, stripPool = [], clipL = -Infinity;
+  var LIVE = { kick: 1, words: 1 };
+  var SETTLE = { hats: 0.1, toms: 0.1, snare: 0.1 }, REACH = { bass: 40 };
+  /* how far back from a stretch of the print a mark can start and still reach into it: a cymbal's ring runs on */
+  var LOOK = { hats: 2.5 };
+  function look(name) { return LOOK[name] || 0.3; }
+  function lag(name) { return (SETTLE[name] || 0.3) + (REACH[name] || 30) / pps; }
+  function stripLayers() { return LAYERS.filter(function (Ly) { return S.vis[Ly[0]] && !LIVE[Ly[0]]; }); }
+  function stripLag(ls) { var m = 0; ls.forEach(function (Ly) { m = Math.max(m, lag(Ly[0])); }); return m; }
+  function stripsCheck() {
+    var sig = strokeGen + '|' + pps + '|' + JSON.stringify(S.vis);
+    if (sig !== stripsFor || stripsAna !== S.ana) { strips.forEach(function (s) { giveStrip(s.c); }); strips.clear(); stripsFor = sig; stripsAna = S.ana; }
+  }
+  /* strip canvases are reused: making a canvas costs far more than clearing one */
+  function giveStrip(c) { if (stripPool.length < 3) stripPool.push(c); }
+  function stripAt(k) {
+    var s = strips.get(k); if (s) return s;
+    var w = Math.ceil(STRIP * dpr), h = Math.ceil(H * dpr), c = null;
+    for (var i = stripPool.length - 1; i >= 0; i--) if (stripPool[i].width === w && stripPool[i].height === h) { c = stripPool.splice(i, 1)[0]; break; }
+    if (!c) { c = document.createElement('canvas'); c.width = w; c.height = h; }
+    else { var g0 = c.getContext('2d'); g0.setTransform(1, 0, 0, 1, 0, 0); g0.globalCompositeOperation = 'source-over'; g0.clearRect(0, 0, w, h); }
+    s = { c: c, done: 0 }; strips.set(k, s); return s;
+  }
+  var PER = STRIP / CHUNK;
+  /* chunk g of the whole print covers the time from g * CHUNK / pps; it is drawn once its strip has done it */
+  function chunkReady(g) { var s = strips.get(Math.floor(g / PER)); return !!s && s.done > g % PER; }
+  /* the next chunk of strip k, drawn as the print stands at nowV */
+  function renderChunk(k, ls, lagS) {
+    var s = stripAt(k), j = s.done, sa = k * STRIP / pps, ca = sa + j * CHUNK / pps, nowV = ca + CHUNK / pps + lagS;
+    var g = s.c.getContext('2d'), keep = [ctx, nowX, WIN];
+    ctx = g; nowX = (nowV - sa) * pps;
+    g.save();
+    try {
+      g.setTransform(dpr, 0, 0, dpr, 0, 0); g.beginPath(); g.rect(j * CHUNK, 0, CHUNK, H); g.clip();
+      g.globalCompositeOperation = 'multiply';
+      ls.forEach(function (Ly) { WIN = nowV - ca + look(Ly[0]); Ly[1](nowV, { guitar: 0, piano: 0, synths: 0 }); });
+    } finally { g.restore(); ctx = keep[0]; nowX = keep[1]; WIN = keep[2]; }
+    s.done++;
+  }
+  /* lay down what is drawn of the print up to the head, and say from what time on it must be drawn live */
+  function printStrips(now, ls) {
+    var lagS = stripLag(ls), cutT = now - lagS, tL = Math.max(0, now - (nowX + 40) / pps), cpp = CHUNK / pps;
+    var gL = Math.floor(tL / cpp), gC = Math.floor(cutT / cpp), gA = gC + PER / 2, g, k, t0 = performance.now();
+    /* draw chunks in order from the left edge (the screen's first, then ahead), within 4 ms a frame; a strip is drawn
+       from its start, so a chunk waits for those before it in its strip */
+    for (g = gL; g <= gA; g++) {
+      if (chunkReady(g)) continue;
+      if (performance.now() - t0 > 4) break;
+      k = Math.floor(g / PER);
+      while (stripAt(k).done <= g % PER && performance.now() - t0 <= 4) renderChunk(k, ls, lagS);
+    }
+    /* the drawn part reaches from the left edge as far as its chunks are done, and never past cutT */
+    var readyT = tL;
+    for (g = gL; g <= gC && chunkReady(g); g++) readyT = Math.min(cutT, (g + 1) * cpp);
+    if (readyT > tL) {
+      var xr = Math.round(xOf(readyT, now) * dpr) / dpr;
+      ctx.save(); ctx.beginPath(); ctx.rect(-80, -80, xr + 80, H + 160); ctx.clip();
+      for (k = Math.floor(gL / PER); k <= Math.floor(g / PER); k++) {
+        var st = strips.get(k); if (st) ctx.drawImage(st.c, Math.round(xOf(k * STRIP / pps, now) * dpr) / dpr, 0, STRIP, H);
+      }
+      ctx.restore();
+    }
+    /* strips scrolled off, or far from here after a seek, are let go */
+    var kL = Math.floor(gL / PER), kA = Math.floor(gA / PER);
+    strips.forEach(function (s, kk) { if (kk < kL || kk > kA) { strips.delete(kk); giveStrip(s.c); } });
+    return readyT;
+  }
   function draw(now) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
@@ -713,21 +836,28 @@ export function start() {
       g2.addColorStop(0, rgba(kc, Math.min(0.3, 0.22 * L.pulse * kickImp))); g2.addColorStop(1, rgba(kc, 0));
       ctx.globalAlpha = 1; ctx.fillStyle = g2; ctx.fillRect(-30, H * 0.45, W + 60, H * 0.55 + 30);
     }
-    function layer(name, fn) { if (!S.vis[name]) return; ctx.save(); ctx.translate(mis[name][0], mis[name][1]); if (BENCH) benchLayer(name, fn); else fn(); ctx.restore(); }
-    layer('synths', function () { drawSegs(now, lv, 0, 'synths'); });
-    layer('piano', function () { drawSegs(now, lv, 2, 'piano'); });
-    layer('guitar', function () { drawSegs(now, lv, 1, 'guitar'); });
-    layer('bass', function () {
-      frameTrack(now, function (f) { return a.bassHz[f]; }, function (f) { return 0.8 + 12 * a.bassN[f]; }, function (f) { return smooth(0.015, 0.3, a.bassN[f]); }, function (f) { return a.bassH[f]; }, function () { return 0; }, 'bass', 0.86, 0.15, 11);
-    });
-    layer('voice', function () {
-      frameTrack(now, function (f) { return a.leadHz[f]; }, function (f) { return 0.8 + 8.5 * a.leadN[f]; }, function (f) { return smooth(0.02, 0.4, a.leadN[f]); }, function (f) { return a.leadH[f]; }, function (f) { return zLead(a.leadNz[f]); }, 'voice', 0.9, 0.16, 37);
-    });
-    layer('hats', function () { drawHits(S.hats, now, 'hat'); drawHits(S.cymbals, now, 'cymbal'); });
-    layer('toms', function () { drawHits(S.toms, now, 'tom'); });
-    layer('snare', function () { drawHits(S.snares, now, 'snare'); });
-    layer('kick', function () { drawKicks(now); });
-    layer('words', function () { drawWords(now); });
+    if (panelOpen() || (BENCH && BENCH_LIVE)) {
+      /* the Lab is open: everything live, so a lever shows at once, with each colour's misprint slip */
+      LAYERS.forEach(function (Ly) {
+        var name = Ly[0]; if (!S.vis[name]) return;
+        ctx.save(); ctx.translate(mis[name][0], mis[name][1]);
+        if (BENCH) benchLayer(name, function () { Ly[1](now, lv); }); else Ly[1](now, lv);
+        ctx.restore();
+      });
+    } else {
+      stripsCheck();
+      var ls = stripLayers(), readyT = now, keepW = WIN;
+      if (BENCH) benchLayer('strips', function () { readyT = printStrips(now, ls); }); else readyT = printStrips(now, ls);
+      /* live: the stretch the strips do not cover yet, then the kicks and words */
+      var xr = Math.round(xOf(readyT, now) * dpr) / dpr;
+      var live = function () {
+        ctx.save(); ctx.beginPath(); ctx.rect(xr, -80, W - xr + 80, H + 160); ctx.clip(); clipL = xr;
+        try { ls.forEach(function (Ly) { WIN = Math.min(keepW, now - readyT + look(Ly[0])); if (BENCH) benchLayer('l:' + Ly[0], function () { Ly[1](now, lv); }); else Ly[1](now, lv); }); }
+        finally { WIN = keepW; clipL = -Infinity; ctx.restore(); }
+        LAYERS.forEach(function (Ly) { if (LIVE[Ly[0]] && S.vis[Ly[0]]) { if (BENCH) benchLayer('l:' + Ly[0], function () { Ly[1](now, lv); }); else Ly[1](now, lv); } });
+      };
+      live();
+    }
     ctx.restore();
 
     /* print head */

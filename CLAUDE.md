@@ -96,8 +96,17 @@ Corollaries the user has stated or endorsed:
    quantised uint8), applies every Lab cutoff, eases ear widths, fits the pitch range (`fitRange`, `scaleY`).
 6. **Draw** (`draw`, every frame), layers bottom to top: synths, piano, guitar (`drawSegs`), bass, voice (`frameTrack`),
    hats/cymbals, toms, snare (`drawHits`), kick (`drawKicks`), words (`drawWords`). Strokes are `ribbon` (filled band
-   with edge wave from harshness), `smudge` (bass and kick as soft dabs on their own layer), `pen` (dot at "now").
-   Snare, hats and cymbals print in a strip along the top (`BEAT_H`); toms and kicks on the sheet at their pitch.
+   with edge wave from harshness), `smudge` (bass as soft dabs on their own layer), `pen` (dot at "now"); kicks are
+   part-transparent splatters (or halftone). Snare, hats and cymbals print in a strip along the top (`BEAT_H`); toms
+   and kicks on the sheet at their pitch.
+   While the Lab is closed the print is drawn ahead into strips (`printStrips`: 1024 px, a 128 px chunk at a time
+   within 4 ms a frame, each drawn at a moment when every mark reaching into it has settled, `lag`); a frame lays the
+   strips down and draws live only the last ~0.8 s and the kicks and words (every ink multiplies, so order does not
+   matter). Misprint shows only with the Lab open, when everything is drawn live. A mark must stop changing once
+   `lag` has passed, and stay put (a hat's trail specks have fixed places), or the strips go stale. Measured (bench,
+   CPU 4x, Incoherent): JS per frame 18.8 -> 13.7 ms median; most of what is left is copying the bass smear's layer
+   (Chrome flushes a canvas before drawing it onto another: ~3-4 ms however small the box). Strip and live frames
+   differ only on anti-aliased edges (strips sit on whole device pixels).
 
 ## The JavaScript pipeline
 
