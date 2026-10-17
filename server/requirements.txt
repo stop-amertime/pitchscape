@@ -1,4 +1,5 @@
-# Pitchscape's analysis pipeline, for running it on your own computer (python -m server.local).
+# The Python reference pipeline (server/pipeline.py) and the parity tools (tools/parity*.py). Neither server runs it:
+# they run the JavaScript pipeline under Node (server/js.py).
 # The same versions as the Modal server's image (server/modal_app.py), except PyTorch: 2.7.1 here, the first with
 # kernels for NVIDIA's RTX 50-series (Blackwell, sm_120); Modal's L4 runs 2.5.1. Python 3.11, and ffmpeg on the PATH.
 #

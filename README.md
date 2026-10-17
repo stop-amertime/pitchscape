@@ -50,9 +50,11 @@ load your own from your device or a link to the audio file.
 
 ## The analysis server
 
-`server/pipeline.py` turns a song into a pack using established, trained models; `server/modal_app.py` runs it on a
-GPU at [Modal](https://modal.com) behind a small upload API, and `.github/workflows/deploy-server.yml` deploys it on
-every push to `main` that touches `server/`.
+`src/pipeline/` turns a song into a pack using established, trained models (run with ONNX Runtime) and the published
+methods around them, ported to JavaScript from the Python reference (`server/pipeline.py`) and checked against it. The
+page runs it on the visitor's GPU; `server/modal_app.py` runs it under Node on an L4 GPU at [Modal](https://modal.com)
+behind a small upload API (a 276 s song in 52 s), and `.github/workflows/deploy-server.yml` deploys it on every push
+to `main` that touches `server/`.
 
 | Layer | Model | Licence |
 | --- | --- | --- |
@@ -63,7 +65,7 @@ every push to `main` that touches `server/`.
 | voice line | CREPE (torchcrepe) | MIT |
 | tone: roughness (Daniel & Weber) and sharpness (DIN 45692) | MOSQITO (Eomys) | Apache-2.0 |
 | lyrics: the song's published words | LRCLIB (lrclib.net), found by the file's tags or an "Artist - Title" file name | free API, no key |
-| when each of those words is sung | Whisper (faster-whisper), read from the vocal stem | MIT |
+| when each of those words is sung | forced alignment of those words to the vocal stem: wav2vec 2.0 (torchaudio's WAV2VEC2_ASR_BASE_960H) and torchaudio's forced_align; MMS_FA as an option | MIT (MMS_FA: CC BY-NC 4.0) |
 
 Colour by instrument comes from the stems, so an instrument keeps its ink for the whole song, warmer the more it is
 out front: voice fluorescent pink, guitar orange, piano sunflower, the other stem's notes (synths, strings, brass,
@@ -123,45 +125,31 @@ and 1280 note stretches holding 606 s of note ink (pipeline 3 drew 1338 notes, 6
 
 Lyrics are the published ones, never a transcription. The pipeline reads the artist and title from the file's tags
 (or an "Artist - Title" file name), asks LRCLIB for the song at that length (within 3 s, since another length is
-another version), and times its words to the vocal stem: LRCLIB's words and Whisper's are matched in order, a matched
-word takes the time Whisper heard it at (unless that is far from where the LRC's own line time puts it, as when a
-chorus repeat is matched against the wrong repeat), and the words between are spread evenly. What Whisper hears is used
-for nothing else. If LRCLIB hasn't got the song, the song has no words, and the page says why.
+another version), and times its words to the vocal stem by forced alignment: each LRC line is aligned to the vocal around its own line
+time, with torchaudio's "star" token either side to take the audio that is not that line. Nothing is transcribed. If LRCLIB hasn't got the song, the song has no words, and the page says why.
 
 The pipeline only wires these together and measures plain properties of what they found (loudness, brightness, how
 long a hit rings, how a note starts and fades). On Made in the Dark, ADTOF found no drum hits at all in the stems that
 hold no drums (the old in-browser detector found hundreds there: piano read as hats, voice read as snares), and on the
 full mix 99% of its snares, 93% of its hats and 84% of its kicks matched the hits it found in the isolated drum stem.
 On Made in the Dark, LRCLIB's synced lyrics were found from the file's tags and 82% of their words were matched to
-words Whisper heard (base model, CPU; the server uses medium); the rest were spread between them.
+words Whisper heard (base model, CPU; the server used medium until pipeline 9); the rest were spread between them.
 
 ### Run it on your own computer
 
-The whole thing, page and analysis, runs on a PC with no Modal and no passphrase. A CUDA GPU (NVIDIA) analyses a song in
-a couple of minutes; on a CPU it takes several.
+The whole thing, page and analysis, runs on a PC with no Modal and no passphrase: the same JavaScript pipeline
+(`src/pipeline`) under Node, on the GPU when ONNX Runtime can use it (WebGPU on Windows, CUDA on Linux), else the CPU.
 
-On Windows, double-click **`Pitchscape.bat`**. The first time it checks for Python 3.11 and ffmpeg (and says how to
-install whichever is missing: `winget install Python.Python.3.11`, `winget install Gyan.FFmpeg`), makes its own Python
-environment in `.venv` and installs everything, with the GPU build of PyTorch if there is an NVIDIA card (a few GB, once).
-Every time, it starts the server and opens the page in the browser; close its window to stop it. It installs again only
-when `server/requirements.txt` changes. Options go after it, e.g. `Pitchscape.bat --update-library`.
+On Windows, double-click **`Pitchscape.bat`**. It checks for Python 3, Node and ffmpeg (and says how to install
+whichever is missing: `winget install Python.Python.3.13`, `winget install OpenJS.NodeJS.LTS`, `winget install
+Gyan.FFmpeg`), runs `npm ci` the first time (and whenever `package-lock.json` changes), starts the server and opens the
+page in the browser; close its window to stop it. Options go after it, e.g. `Pitchscape.bat --update-library`.
 
-By hand (any system):
+By hand (any system): Python 3, Node 24 or later and ffmpeg on the PATH; in the repository folder `npm ci`, then
+`python -m server.local` and open http://localhost:8000.
 
-1. Install Python 3.11 and ffmpeg (on the PATH: `ffmpeg -version` should work in a new terminal).
-2. In the repository folder, make a virtual environment and install the pipeline:
-   ```
-   python -m venv .venv
-   .venv\Scripts\activate            (Windows; on macOS or Linux: source .venv/bin/activate)
-   pip install torch==2.7.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu128
-   pip install -r server/requirements.txt
-   pip uninstall -y tensorflow tensorflow-cpu tensorflow-intel
-   ```
-   (Leave out `--index-url ...` for a CPU-only PyTorch. The last line removes TensorFlow, which Basic Pitch pulls in but
-   Pitchscape does not use.)
-3. `python -m server.local`, then open http://localhost:8000.
-
-The first song downloads the models (Demucs, ADTOF, Whisper: about 2 GB, once). Every song sent to it is kept in a
+When it starts it fetches the models into `models/` (`node tools/fetch_models.mjs`: Demucs, ADTOF, Basic Pitch, CREPE and the
+forced aligner, about 600 MB, once, each checked against its SHA-256). Every song sent to it is kept in a
 library, `~/.pitchscape/library/<sha256>/`: the audio as it came, its cover art, `song.json` (what identifies the
 recording: title, artist, album, track, year, ISRC, MusicBrainz ids, length, every tag) and one analysis per pipeline
 version (`pack-v5.json`...). A song opens at once the second time, and `--update-library` brings every kept song up to a
@@ -183,10 +171,12 @@ what is playing and how far in, which the page could follow to draw the visuals 
 analysis must still come from a file of the same recording (Spotify's audio cannot be read), so the length is the
 check that the two are the same version. The page is built
 from `src/page` when the server starts (if Node and `npm install` are there; otherwise the committed `docs/` is served).
-Options: `--device cpu|cuda`, `--whisper small` (a smaller model to time the lyrics), `--port`, `--library DIR`, `--open`, and
+Options: `--ep cpu|webgpu|cuda` (ONNX Runtime's provider), `--port`, `--library DIR`, `--open`, and
 `--host 0.0.0.0` to open it from a phone on the same network (at the PC's address, port 8000).
 
-The pipeline alone: `python -m server.pipeline SONG.mp3 OUT.json` (`--stems DIR` reuses Demucs stems).
+The pipeline alone: `node server/analyse.mjs SONG.mp3 OUT.json NAME`, or `node tools/analyse_pack.mjs SONG.mp3 OUT.json`
+(`--stems-in DIR` reuses Demucs stems). `server/pipeline.py` is the Python reference it was ported from, no longer run
+by either server; it and the parity tools need `server/requirements.txt`.
 Deploying needs three repository secrets: `MODAL_TOKEN_ID` and `MODAL_TOKEN_SECRET` (a token from
 modal.com/settings/tokens) and `PITCHSCAPE_PASSPHRASE` (any phrase; the page asks for it once, so strangers cannot spend
 the GPU credit). The workflow writes the server's address to `docs/config.json`, which the page reads.

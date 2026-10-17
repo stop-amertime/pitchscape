@@ -41,6 +41,16 @@ def build_page():
         print('the page did not build; serving docs/ as it was')
 
 
+def fetch_models():
+    """The models the analysis needs, into models/ (node tools/fetch_models.mjs: the published ones, each checked
+    against its SHA-256; files already there are kept). False if they could not all be had."""
+    import shutil, subprocess
+    if not shutil.which('node'):
+        print('Pitchscape needs Node (https://nodejs.org) to analyse songs.')
+        return False
+    return subprocess.run(['node', os.path.join(ROOT, 'tools', 'fetch_models.mjs')], cwd=ROOT).returncode == 0
+
+
 class Jobs:
     """The library, and one song analysed at a time in a worker thread; each job's latest stage is kept for the page."""
 
@@ -262,6 +272,8 @@ def main():
     jobs = Jobs(a.library, a.ep)
     url = 'http://%s:%d' % ('localhost' if a.host in ('127.0.0.1', '0.0.0.0') else a.host, a.port)
     build_page()
+    if not fetch_models():
+        print('the models are missing: songs cannot be analysed until they are fetched (restart to try again)')
     server = ThreadingHTTPServer((a.host, a.port), handler(jobs))
     print('Pitchscape %s; songs kept in %s' % (PIPELINE_VERSION, a.library))
     if a.update_library:
