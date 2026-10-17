@@ -67,6 +67,40 @@ gpu_image = (
     .run_function(_download_models)
     .add_local_python_source('server')
 )
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
+APP = '/app'                       # the JavaScript pipeline's checkout in node_image: src/pipeline, server, models
+MODEL_REPO = 'stopamertime/pitchscape-models'
+# the models the pipeline uses under Node (rt.keeps is false there: Whisper's float32 encoder and decoder)
+NODE_MODELS = ['htdemucs_6s', 'adtof_frame_rnn', 'basic_pitch', 'crepe_full', 'silero_vad',
+               'whisper_medium', 'whisper_medium_encoder_f32', 'whisper_medium_decoder_f32']
+
+
+def _fetch_node_models():
+    import json as j
+    import shutil
+    from huggingface_hub import hf_hub_download
+    os.makedirs(f'{APP}/models', exist_ok=True)
+    man = j.load(open(hf_hub_download(MODEL_REPO, 'manifest.json')))
+    for name in NODE_MODELS:
+        shutil.copy(hf_hub_download(MODEL_REPO, man[name]['file']), f'{APP}/models/{man[name]["file"]}')
+    j.dump({k: man[k] for k in NODE_MODELS}, open(f'{APP}/models/manifest.json', 'w'))
+
+
+# the JavaScript pipeline (src/pipeline) under Node: ONNX Runtime for Node fetches its CUDA 12 provider when installed
+# on Linux, which needs CUDA 12 and cuDNN 9 (this base image) on the library path
+node_image = (
+    modal.Image.from_registry('nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04', add_python='3.11')
+    .apt_install('ffmpeg', 'curl', 'ca-certificates')
+    .run_commands('curl -fsSL https://deb.nodesource.com/setup_24.x | bash -', 'apt-get install -y nodejs')
+    .pip_install('huggingface_hub==2.2.0')
+    .add_local_file(os.path.join(ROOT, 'package.json'), f'{APP}/package.json', copy=True)
+    .add_local_file(os.path.join(ROOT, 'package-lock.json'), f'{APP}/package-lock.json', copy=True)
+    .run_commands(f'cd {APP} && npm ci --omit=dev')
+    .run_function(_fetch_node_models)
+    .add_local_dir(os.path.join(ROOT, 'src', 'pipeline'), f'{APP}/src/pipeline')
+    .add_local_file(os.path.join(ROOT, 'server', 'analyse.mjs'), f'{APP}/server/analyse.mjs')
+    .add_local_python_source('server')
+)
 web_image = (modal.Image.debian_slim(python_version='3.11').pip_install('fastapi[standard]', 'python-multipart')
              .add_local_python_source('server'))
 
