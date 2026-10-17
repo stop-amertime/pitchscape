@@ -14,7 +14,18 @@
 <body>
 <main class="app">
   <section class="stage" id="plate" aria-label="The print">
-    <canvas id="cv" role="img" aria-label="A scrolling print of the song. Each kind of sound is drawn in its own ink; higher pitches sit higher on the sheet."></canvas>
+    <div class="sheet" id="sheet">
+      <div class="shake" id="shake">
+        <canvas id="cv" role="img" aria-label="A scrolling print of the song. Each kind of sound is drawn in its own ink; higher pitches sit higher on the sheet."></canvas>
+        <div class="glow" id="glowBass" aria-hidden="true"></div>
+        <div class="glow" id="glowKick" aria-hidden="true"></div>
+        <div class="stripview" id="stripView" aria-hidden="true"><div class="striprow" id="stripRow"></div></div>
+        <canvas class="over" id="liveCv" aria-hidden="true"></canvas>
+      </div>
+      <div class="head" id="head" aria-hidden="true"></div>
+      <canvas class="over grain" id="grainCv" aria-hidden="true"></canvas>
+    </div>
+    <p class="fps" id="fps" aria-hidden="true" hidden></p>
     <p class="toast" id="msg" role="status"></p>
     <button class="cog" type="button" id="labBtn" aria-controls="labPanel" aria-expanded="false" aria-label="Lab: how the print is drawn">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" d="M10.3 2.5h3.4l.5 2.6 1.9.8 2.2-1.5 2.4 2.4-1.5 2.2.8 1.9 2.6.5v3.4l-2.6.5-.8 1.9 1.5 2.2-2.4 2.4-2.2-1.5-1.9.8-.5 2.6h-3.4l-.5-2.6-1.9-.8-2.2 1.5-2.4-2.4 1.5-2.2-.8-1.9-2.6-.5v-3.4l2.6-.5.8-1.9-1.5-2.2 2.4-2.4 2.2 1.5 1.9-.8z"/><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
@@ -45,6 +56,7 @@
         <div class="row"><button type="button" class="k" data-tip="An ink splatter you can see through, or a screen of dots like a printed photo." aria-expanded="false" aria-describedby="ld-kick">Kick<i aria-hidden="true">i</i></button><div class="seg" data-key="kick" role="group" aria-label="Kick" aria-describedby="ld-kick"><button type="button" id="lab-kick-splat" data-v="splat">Splatter</button><button type="button" id="lab-kick-halftone" data-v="halftone">Halftone</button></div><span class="vh" id="ld-kick">An ink splatter you can see through, or a screen of dots like a printed photo.</span></div>
         <div class="row"><button type="button" class="k" data-tip="A soft smear, or a sharp line whose edge shows the tone." aria-expanded="false" aria-describedby="ld-bass">Bass<i aria-hidden="true">i</i></button><div class="seg" data-key="bass" role="group" aria-label="Bass" aria-describedby="ld-bass"><button type="button" id="lab-bass-smudge" data-v="smudge">Smudge</button><button type="button" id="lab-bass-line" data-v="line">Line</button></div><span class="vh" id="ld-bass">A soft smear, or a sharp line whose edge shows the tone.</span></div>
         <div class="row"><button type="button" class="k" data-tip="Faint lines across the print at each C, with its frequency, to read the pitch by." aria-expanded="false" aria-describedby="ld-guides">Pitch lines<i aria-hidden="true">i</i></button><div class="seg" data-key="guides" role="group" aria-label="Pitch lines" aria-describedby="ld-guides"><button type="button" id="lab-guides-on" data-v="on">On</button><button type="button" id="lab-guides-off" data-v="off">Off</button></div><span class="vh" id="ld-guides">Faint lines across the print at each C, with its frequency, to read the pitch by.</span></div>
+        <div class="row"><button type="button" class="k" data-tip="Shows how long each frame takes on this device. Smooth is a frame every 17 ms; the slowest 5% are the stutters you notice." aria-expanded="false" aria-describedby="ld-fps">Frame times<i aria-hidden="true">i</i></button><div class="seg" data-key="fps" role="group" aria-label="Frame times" aria-describedby="ld-fps"><button type="button" id="lab-fps-off" data-v="off">Off</button><button type="button" id="lab-fps-on" data-v="on">On</button></div><span class="vh" id="ld-fps">Shows how long each frame takes on this device. Smooth is a frame every 17 ms; the slowest 5% are the stutters you notice.</span></div>
       </div>
       <div class="pane" id="pane-words" data-pane="words" role="tabpanel" aria-labelledby="tab-words" hidden>
         <div class="row"><button type="button" class="k" data-tip="The typeface for the sung words." aria-expanded="false" aria-describedby="ld-font">Typeface<i aria-hidden="true">i</i></button><div class="seg" data-key="font" role="group" aria-label="Typeface" aria-describedby="ld-font"><button type="button" id="lab-font-grotesque" data-v="grotesque">Grotesque</button><button type="button" id="lab-font-script" data-v="script">Script</button><button type="button" id="lab-font-serif" data-v="serif">Serif</button><button type="button" id="lab-font-mono" data-v="mono">Mono</button></div><span class="vh" id="ld-font">The typeface for the sung words.</span></div>

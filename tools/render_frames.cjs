@@ -11,9 +11,9 @@ const fs = require('fs'), os = require('os'), path = require('path');
   const ctx = await pw.chromium.launchPersistentContext(profile, { executablePath: exe, viewport: { width: 390, height: 750 }, deviceScaleFactor: 2 });
   const p = ctx.pages()[0] || await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message));
   await p.goto(site || 'http://localhost:8010/');
-  await p.evaluate((lab) => { localStorage.setItem('pitchscape:key', JSON.stringify('test')); if (lab) localStorage.setItem('pitchscape:lab', JSON.stringify({ v: 2, set: JSON.parse(lab) })); }, lab || '');
+  await p.evaluate((lab) => { localStorage.setItem('pitchscape:key', JSON.stringify('test')); localStorage.setItem('pitchscape:where', JSON.stringify('server')); if (lab) localStorage.setItem('pitchscape:lab', JSON.stringify({ v: 2, set: JSON.parse(lab) })); }, lab || '');
   await p.reload(); await p.waitForTimeout(1200);
-  await p.setInputFiles('#file', song);
+  await p.setInputFiles('input[type=file]', song);
   const base = path.basename(song).replace(/\.[^.]+$/, '');
   for (let i = 0; i < 240; i++) {
     if (await p.evaluate(() => !document.getElementById('play').disabled)) break;

@@ -3,7 +3,9 @@ import { ui, api } from './ui.svelte.js';
 export function start() {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
-  var cv = $('cv'), ctx = cv.getContext('2d'), plate = $('plate'), audio = $('player');
+  var cv = $('cv'), ctx = cv.getContext('2d'), liveCv = $('liveCv'), liveCtx = liveCv.getContext('2d'), grainCv = $('grainCv');
+  var sheet = $('sheet'), shakeEl = $('shake'), stripView = $('stripView'), stripRow = $('stripRow'), headEl = $('head'), fpsEl = $('fps'), glowBass = $('glowBass'), glowKick = $('glowKick');
+  var plate = $('plate'), audio = $('player');
   var playBtn = $('play'), seek = $('seek'), labSeek = $('labSeek'), tNow = $('tNow'), tDur = $('tDur'), msg = $('msg');
   var reduceMotion = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
 
@@ -29,7 +31,7 @@ export function start() {
   var LAB_DEF = {
     colour: 'inst', drums: 'sound', kick: 'splat', bass: 'smudge', font: 'grotesque', wordSize: 'voice',
     shake: reduceMotion ? 0 : 0.25, tilt: reduceMotion ? 0 : 0.5, pulse: reduceMotion ? 0 : 0.6, slip: reduceMotion ? 0 : 0.35,
-    secs: 0, ink: 1, weight: 1, grain: 0.5, thick: 'ear', edges: 1, guides: 'on',
+    secs: 0, ink: 1, weight: 1, grain: 0.5, thick: 'ear', edges: 1, guides: 'on', fps: 'off',
     /* cutoffs: the defaults are each model's own settings */
     vConf: 0.45, vFloor: 0.04, vRun: 90, bFloor: 0.08, hold: 0.3, noteMin: 100, drumK: 1, rough0: 0.1, sharp0: 1.75, leap: 4
   };
@@ -51,7 +53,7 @@ export function start() {
   function lowerBound(arr, t, key) { var lo = 0, hi = arr.length; while (lo < hi) { var mid = (lo + hi) >> 1; if (arr[mid][key] < t) lo = mid + 1; else hi = mid; } return lo; }
 
   /* ------------------------------------------------------------ geometry */
-  var W = 0, H = 0, dpr = 1, nowX = 0, WIN = 4.2, pps = 100, grain = null;
+  var W = 0, H = 0, dpr = 1, nowX = 0, WIN = 4.2, pps = 100;
   /* the pitch axis runs from F_LO to F_HI (log2 Hz), fitted to each song by fitRange. Snare, hats and cymbals have no
      real pitch, so they print in a strip along the top, BEAT_H tall, and the pitched sheet runs below it. */
   var F_LO = Math.log2(28), F_HI = Math.log2(10000), BEAT_H = 60;
@@ -63,18 +65,18 @@ export function start() {
   function resize() {
     dpr = Math.min(2, window.devicePixelRatio || 1);
     W = Math.max(200, cv.clientWidth); H = Math.max(200, cv.clientHeight);
-    cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+    cv.width = liveCv.width = Math.round(W * dpr); cv.height = liveCv.height = Math.round(H * dpr);
     WIN = L.secs > 0 ? L.secs : W < 520 ? 4.2 : W < 900 ? 5.5 : 7;
     scaleY();
-    nowX = Math.round(W * (W < 520 ? 0.82 : 0.86)); pps = nowX / WIN;
+    nowX = Math.round(W * (W < 520 ? 0.82 : 0.86)); pps = nowX / WIN; headEl.style.left = nowX - 4.5 + 'px';
     makeGrain(); makeHeightLUT(); HT = {}; layoutWords(); S.dirty = true;
     if (labPanel) labUI();
   }
   function makeGrain() {
-    var g = document.createElement('canvas'); g.width = cv.width; g.height = cv.height;
+    var g = grainCv; g.width = cv.width; g.height = cv.height;
     var gx = g.getContext('2d'), img = gx.createImageData(g.width, g.height), d = img.data;
     for (var i = 0; i < d.length; i += 4) { var r = Math.random(); if (r < 0.055) { d[i] = d[i + 1] = d[i + 2] = 255; d[i + 3] = 70 + r * 2000; } }
-    gx.putImageData(img, 0, 0); grain = g;
+    gx.putImageData(img, 0, 0);
   }
 
   /* ------------------------------------------------------------ analysis results */
@@ -710,7 +712,6 @@ export function start() {
     });
   };
 
-  var lastTf = '';
   /* each layer: its name and how to print it as it stands at time now (lv gathers how loud each kind of note is now) */
   var LAYERS = [
     ['synths', function (now, lv) { drawSegs(now, lv, 0, 'synths'); }],
@@ -731,38 +732,41 @@ export function start() {
     ['words', function (now) { drawWords(now); }]
   ];
   /* ---- the print, drawn ahead. Time only slides the print left, and a mark stops changing soon after its time (a
-     line's end tapers over 12 px, a hit grows in 50 ms). So while the Lab is closed the print is drawn ahead into
-     strips STRIP px wide, a CHUNK at a time in each frame's spare moments, by the layers' own drawing code at a
-     moment late enough that every mark reaching into the chunk has settled (lag: how long a mark changes, and how far
-     it reaches back from its time). Each frame then lays down the strips and draws only the last moment before the
-     head live. Every ink multiplies, and multiplying comes to the same in any order, so a strip holds all the layers
-     it can and the kicks and words (few, and slow to settle) are always drawn live on top. Misprint (each colour
-     slipping on its own) needs every layer apart, so it shows only while the Lab is open, when everything is drawn
-     live so a lever shows at once. */
-  var STRIP = 1024, CHUNK = 128, strips = new Map(), stripsFor = '', stripsAna = null, stripPool = [], clipL = -Infinity;
-  var LIVE = { kick: 1, words: 1 };
-  var SETTLE = { hats: 0.1, toms: 0.1, snare: 0.1 }, REACH = { bass: 40 };
-  /* how far back from a stretch of the print a mark can start and still reach into it: a cymbal's ring runs on */
-  var LOOK = { hats: 2.5 };
+     line's end tapers over 12 px, a kick settles and its bloom fades in 0.45 s, a word grows in 90 ms). So while the
+     Lab is closed the print is drawn ahead into strips STRIP px wide, a CHUNK at a time in each frame's spare moments,
+     by the layers' own drawing code at a moment late enough that every mark reaching into the chunk has settled (lag:
+     how long a mark changes, and how far it reaches back from its time). The strips are canvases in a row that the
+     browser slides left with one transform a frame (#stripRow, clipped at where the live part starts by #stripView);
+     only the last moment before the head is drawn each frame, on #liveCv. Both multiply onto the paper beneath, as
+     every ink does, and multiplying comes to the same in any order. Misprint (each colour slipping on its own) needs
+     every layer apart, so it shows only while the Lab is open, when everything is drawn live on #cv so a lever shows
+     at once. */
+  var STRIP = 1024, CHUNK = 128, PER = STRIP / CHUNK, strips = new Map(), stripsFor = '', stripsAna = null, stripPool = [], clipL = -Infinity;
+  var SETTLE = { kick: 0.5, words: 0.15, hats: 0.1, toms: 0.1, snare: 0.1 }, REACH = { kick: 60, bass: 40 };
+  /* how far back from a stretch of the print a mark can start and still reach into it: a word's text and a cymbal's
+     ring run on to the right of their time */
+  var LOOK = { words: 3, hats: 2.5 };
   function look(name) { return LOOK[name] || 0.3; }
   function lag(name) { return (SETTLE[name] || 0.3) + (REACH[name] || 30) / pps; }
-  function stripLayers() { return LAYERS.filter(function (Ly) { return S.vis[Ly[0]] && !LIVE[Ly[0]]; }); }
+  function stripLayers() { return LAYERS.filter(function (Ly) { return S.vis[Ly[0]]; }); }
   function stripLag(ls) { var m = 0; ls.forEach(function (Ly) { m = Math.max(m, lag(Ly[0])); }); return m; }
   function stripsCheck() {
     var sig = strokeGen + '|' + pps + '|' + JSON.stringify(S.vis);
-    if (sig !== stripsFor || stripsAna !== S.ana) { strips.forEach(function (s) { giveStrip(s.c); }); strips.clear(); stripsFor = sig; stripsAna = S.ana; }
+    if (sig !== stripsFor || stripsAna !== S.ana) {
+      strips.forEach(function (s) { dropStrip(s); }); strips.clear(); stripsFor = sig; stripsAna = S.ana;
+    }
   }
   /* strip canvases are reused: making a canvas costs far more than clearing one */
-  function giveStrip(c) { if (stripPool.length < 3) stripPool.push(c); }
+  function dropStrip(s) { if (s.c.parentNode) s.c.parentNode.removeChild(s.c); if (stripPool.length < 3) stripPool.push(s.c); }
   function stripAt(k) {
     var s = strips.get(k); if (s) return s;
     var w = Math.ceil(STRIP * dpr), h = Math.ceil(H * dpr), c = null;
     for (var i = stripPool.length - 1; i >= 0; i--) if (stripPool[i].width === w && stripPool[i].height === h) { c = stripPool.splice(i, 1)[0]; break; }
     if (!c) { c = document.createElement('canvas'); c.width = w; c.height = h; }
     else { var g0 = c.getContext('2d'); g0.setTransform(1, 0, 0, 1, 0, 0); g0.globalCompositeOperation = 'source-over'; g0.clearRect(0, 0, w, h); }
+    c.style.left = k * STRIP + 'px'; c.style.width = STRIP + 'px'; stripRow.appendChild(c);
     s = { c: c, done: 0 }; strips.set(k, s); return s;
   }
-  var PER = STRIP / CHUNK;
   /* chunk g of the whole print covers the time from g * CHUNK / pps; it is drawn once its strip has done it */
   function chunkReady(g) { var s = strips.get(Math.floor(g / PER)); return !!s && s.done > g % PER; }
   /* the next chunk of strip k, drawn as the print stands at nowV */
@@ -778,12 +782,13 @@ export function start() {
     } finally { g.restore(); ctx = keep[0]; nowX = keep[1]; WIN = keep[2]; }
     s.done++;
   }
-  /* lay down what is drawn of the print up to the head, and say from what time on it must be drawn live */
+  /* draw what the screen needs and some way ahead, place the row, and say from what time on it must be drawn live */
+  var rowX = null, viewW = null;
   function printStrips(now, ls) {
     var lagS = stripLag(ls), cutT = now - lagS, tL = Math.max(0, now - (nowX + 40) / pps), cpp = CHUNK / pps;
     var gL = Math.floor(tL / cpp), gC = Math.floor(cutT / cpp), gA = gC + PER / 2, g, k, t0 = performance.now();
-    /* draw chunks in order from the left edge (the screen's first, then ahead), within 4 ms a frame; a strip is drawn
-       from its start, so a chunk waits for those before it in its strip */
+    /* chunks in order from the left edge (the screen's first, then ahead), within 4 ms a frame; a strip is drawn from
+       its start, so a chunk waits for those before it in its strip */
     for (g = gL; g <= gA; g++) {
       if (chunkReady(g)) continue;
       if (performance.now() - t0 > 4) break;
@@ -793,88 +798,101 @@ export function start() {
     /* the drawn part reaches from the left edge as far as its chunks are done, and never past cutT */
     var readyT = tL;
     for (g = gL; g <= gC && chunkReady(g); g++) readyT = Math.min(cutT, (g + 1) * cpp);
-    if (readyT > tL) {
-      var xr = Math.round(xOf(readyT, now) * dpr) / dpr;
-      ctx.save(); ctx.beginPath(); ctx.rect(-80, -80, xr + 80, H + 160); ctx.clip();
-      for (k = Math.floor(gL / PER); k <= Math.floor(g / PER); k++) {
-        var st = strips.get(k); if (st) ctx.drawImage(st.c, Math.round(xOf(k * STRIP / pps, now) * dpr) / dpr, 0, STRIP, H);
-      }
-      ctx.restore();
-    }
+    var rx = Math.round(xOf(0, now) * dpr) / dpr, vw = readyT > tL ? Math.max(0, Math.round(xOf(readyT, now) * dpr) / dpr) : 0;
+    if (rx !== rowX) { rowX = rx; stripRow.style.transform = 'translateX(' + rx + 'px)'; }
+    if (vw !== viewW) { viewW = vw; stripView.style.width = vw + 'px'; }
     /* strips scrolled off, or far from here after a seek, are let go */
     var kL = Math.floor(gL / PER), kA = Math.floor(gA / PER);
-    strips.forEach(function (s, kk) { if (kk < kL || kk > kA) { strips.delete(kk); giveStrip(s.c); } });
+    strips.forEach(function (s, kk) { if (kk < kL || kk > kA) { strips.delete(kk); dropStrip(s); } });
     return readyT;
   }
-  function draw(now) {
+
+  /* what moves without repainting: the sheet's tilt and shake, and the bass and kick glows (CSS, composited) */
+  var lastTf = '', lastSf = '', glowCol = ['', ''], glowA = [-1, -1], lastGrain = -1, baseFor = null, lastXr = null, liveMode = null;
+  function setGlow(el, i, col, a) {
+    a = Math.round(a * 200) / 200;
+    if (a !== glowA[i]) { glowA[i] = a; el.style.visibility = a > 0 ? 'visible' : 'hidden'; if (a > 0) el.style.opacity = String(a); }
+    if (a > 0 && col !== glowCol[i]) { glowCol[i] = col; el.style.background = 'linear-gradient(to top, ' + rgba(col, 1) + ' 0, ' + rgba(col, 1) + ' 30px, ' + rgba(col, 0) + ' 100%)'; }
+  }
+  /* the paper and pitch lines, drawn again only when they change */
+  function drawBase() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
     ctx.fillStyle = C.paper; ctx.fillRect(0, 0, W, H);
+    drawGuides();
+  }
+  function draw(now) {
     var a = S.ana;
-    if (!a) { drawGuides(); return; }
+    if (L.grain !== lastGrain) { lastGrain = L.grain; grainCv.style.opacity = String(L.grain); grainCv.style.display = L.grain > 0 ? '' : 'none'; }
+    if (!a) {
+      drawBase(); baseFor = null; setMode(true);
+      setGlow(glowBass, 0, '', 0); setGlow(glowKick, 1, '', 0);
+      if (lastSf) { lastSf = ''; shakeEl.style.transform = ''; }
+      if (lastTf) { lastTf = ''; sheet.style.transform = ''; }
+      return;
+    }
     strokeCacheCheck();
     var fi = clamp(Math.floor(now / a.dt), 0, a.frames - 1);
     var bassNow = a.bassN[fi] || 0, kickImp = impulse(S.kicks, now, 14), snImp = impulse(S.snares, now, 18), hatImp = impulse(S.hats, now, 22);
     var lv = { guitar: 0, piano: 0, synths: 0 };
     var amp = L.shake * ((S.vis.bass ? bassNow * bassNow * 5 : 0) + (S.vis.kick ? kickImp * 9 : 0) + (S.vis.snare ? snImp * 2 : 0));
     var ox = amp * (Math.sin(now * 53.1) + 0.7 * Math.sin(now * 31.7 + 1.3)) / 1.7, oy = amp * (Math.sin(now * 47.3 + 2.1) + 0.7 * Math.sin(now * 29.9 + 0.4)) / 1.7, rot = amp * 0.0022 * Math.sin(now * 37.7 + 0.9);
-    var misAmt = L.slip * (kickImp * 2.4 + bassNow * 1.1), mis = {};
-    for (var k in DIRS) mis[k] = [DIRS[k][0] * misAmt, DIRS[k][1] * misAmt];
-
-    ctx.save();
-    ctx.translate(W / 2 + ox, H / 2 + oy); ctx.rotate(rot); ctx.translate(-W / 2, -H / 2);
-    drawGuides();
-    ctx.globalCompositeOperation = 'multiply';
-    if (S.vis.bass && bassNow > 0.05) {
-      var bc = tint('bass', a.bassHz[fi] || 55, H), g = ctx.createLinearGradient(0, H, 0, H * 0.6);
-      g.addColorStop(0, rgba(bc, inkA(0.2 * Math.pow(bassNow, 1.5)))); g.addColorStop(1, rgba(bc, 0));
-      ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.fillRect(-30, H * 0.6, W + 60, H * 0.4 + 30);
-    }
+    var sf = amp > 0.01 ? 'translate(' + ox.toFixed(2) + 'px,' + oy.toFixed(2) + 'px) rotate(' + rot.toFixed(5) + 'rad)' : '';
+    if (sf !== lastSf) { lastSf = sf; shakeEl.style.transform = sf; }
+    /* tilt: the sheet tips back on each kick and leans with the bass */
+    var rx = L.tilt * (9 * Math.min(1, kickImp) + 3 * bassNow), rz = L.tilt * 1.4 * bassNow * Math.sin(now * 1.3), tf = L.tilt > 0 ? 'perspective(700px) rotateX(' + rx.toFixed(2) + 'deg) rotate(' + rz.toFixed(2) + 'deg)' : '';
+    if (tf !== lastTf) { lastTf = tf; sheet.style.transform = tf; }
+    setGlow(glowBass, 0, tint('bass', a.bassHz[fi] || 55, H), S.vis.bass && bassNow > 0.05 ? inkA(0.2 * Math.pow(bassNow, 1.5)) : 0);
     /* the thud is felt as much as seen: the low end of the sheet darkens for a moment on each kick */
-    if (S.vis.kick && L.pulse > 0 && kickImp > 0.02) {
-      var kc = tint('drum', 50, H), g2 = ctx.createLinearGradient(0, H, 0, H * 0.45);
-      g2.addColorStop(0, rgba(kc, Math.min(0.3, 0.22 * L.pulse * kickImp))); g2.addColorStop(1, rgba(kc, 0));
-      ctx.globalAlpha = 1; ctx.fillStyle = g2; ctx.fillRect(-30, H * 0.45, W + 60, H * 0.55 + 30);
-    }
+    setGlow(glowKick, 1, tint('drum', 50, H), S.vis.kick && L.pulse > 0 && kickImp > 0.02 ? Math.min(0.3, 0.22 * L.pulse * kickImp) : 0);
+
     if (panelOpen() || (BENCH && BENCH_LIVE)) {
-      /* the Lab is open: everything live, so a lever shows at once, with each colour's misprint slip */
+      /* the Lab is open: everything live on #cv, so a lever shows at once, with each colour's misprint slip */
+      setMode(true); baseFor = null;
+      var misAmt = L.slip * (kickImp * 2.4 + bassNow * 1.1);
+      drawBase();
+      ctx.globalCompositeOperation = 'multiply';
       LAYERS.forEach(function (Ly) {
         var name = Ly[0]; if (!S.vis[name]) return;
-        ctx.save(); ctx.translate(mis[name][0], mis[name][1]);
+        ctx.save(); ctx.translate(DIRS[name][0] * misAmt, DIRS[name][1] * misAmt);
         if (BENCH) benchLayer(name, function () { Ly[1](now, lv); }); else Ly[1](now, lv);
         ctx.restore();
       });
+      ctx.globalCompositeOperation = 'source-over';
     } else {
+      setMode(false);
+      if (baseFor !== strokeGen) { drawBase(); baseFor = strokeGen; }
       stripsCheck();
       var ls = stripLayers(), readyT = now, keepW = WIN;
       if (BENCH) benchLayer('strips', function () { readyT = printStrips(now, ls); }); else readyT = printStrips(now, ls);
-      /* live: the stretch the strips do not cover yet, then the kicks and words */
-      var xr = Math.round(xOf(readyT, now) * dpr) / dpr;
-      var live = function () {
+      /* live: the stretch the strips do not cover yet, on its own canvas, cleared from wherever it began last time */
+      var xr = Math.round(xOf(readyT, now) * dpr) / dpr, xc = Math.max(0, Math.floor(Math.min(xr, lastXr === null ? 0 : lastXr) * dpr) - 2);
+      lastXr = xr;
+      var cvs = ctx;
+      ctx = liveCtx;
+      try {
+        ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+        ctx.clearRect(xc, 0, liveCv.width - xc, liveCv.height);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.globalCompositeOperation = 'multiply';
         ctx.save(); ctx.beginPath(); ctx.rect(xr, -80, W - xr + 80, H + 160); ctx.clip(); clipL = xr;
-        try { ls.forEach(function (Ly) { WIN = Math.min(keepW, now - readyT + look(Ly[0])); if (BENCH) benchLayer('l:' + Ly[0], function () { Ly[1](now, lv); }); else Ly[1](now, lv); }); }
-        finally { WIN = keepW; clipL = -Infinity; ctx.restore(); }
-        LAYERS.forEach(function (Ly) { if (LIVE[Ly[0]] && S.vis[Ly[0]]) { if (BENCH) benchLayer('l:' + Ly[0], function () { Ly[1](now, lv); }); else Ly[1](now, lv); } });
-      };
-      live();
+        ls.forEach(function (Ly) {
+          WIN = Math.min(keepW, now - readyT + look(Ly[0]));
+          if (BENCH) benchLayer('l:' + Ly[0], function () { Ly[1](now, lv); }); else Ly[1](now, lv);
+        });
+      } finally { WIN = keepW; clipL = -Infinity; ctx.restore(); ctx.globalCompositeOperation = 'source-over'; ctx = cvs; }
     }
-    ctx.restore();
-
-    /* print head */
-    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
-    ctx.strokeStyle = 'rgba(35,33,31,0.32)'; ctx.lineWidth = 1; ctx.setLineDash([2, 4]);
-    ctx.beginPath(); ctx.moveTo(nowX + 0.5, 28); ctx.lineTo(nowX + 0.5, H - 6); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = C.ink; ctx.beginPath(); ctx.moveTo(nowX - 4.5, 21); ctx.lineTo(nowX + 5.5, 21); ctx.lineTo(nowX + 0.5, 27); ctx.closePath(); ctx.fill();
-    if (grain && L.grain > 0) { ctx.globalCompositeOperation = 'screen'; ctx.globalAlpha = L.grain; ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(grain, 0, 0); }
-    ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
 
     var lead = a.leadHz[fi] > 0 ? a.leadN[fi] : 0, wordHit = 0;
     if (S.words.length) { var wi = lowerBound(S.words, now - 0.3, 't'); if (wi < S.words.length && S.words[wi].t <= now) wordHit = 1 - (now - S.words[wi].t) / 0.3; }
     setMeter('bass', bassNow); setMeter('kick', kickImp); setMeter('snare', snImp); setMeter('hats', hatImp);
     setMeter('voice', lead); setMeter('guitar', lv.guitar); setMeter('piano', lv.piano); setMeter('synths', lv.synths); setMeter('words', wordHit);
-    /* tilt: the sheet tips back on each kick and leans with the bass (CSS 3D, so the drawing itself is untouched) */
-    var rx = L.tilt * (9 * Math.min(1, kickImp) + 3 * bassNow), rz = L.tilt * 1.4 * bassNow * Math.sin(now * 1.3), tf = L.tilt > 0 ? 'perspective(700px) rotateX(' + rx.toFixed(2) + 'deg) rotate(' + rz.toFixed(2) + 'deg)' : '';
-    if (tf !== lastTf) { lastTf = tf; cv.style.transform = tf; }
+  }
+  /* all on #cv (the Lab open, or no song), or the strips and the live canvas over the paper */
+  function setMode(onCv) {
+    if (liveMode === !onCv) return;
+    liveMode = !onCv; lastXr = null;
+    stripView.style.display = liveCv.style.display = onCv ? 'none' : '';
+    if (!onCv) { liveCtx.setTransform(1, 0, 0, 1, 0, 0); liveCtx.clearRect(0, 0, liveCv.width, liveCv.height); }
   }
 
   /* ------------------------------------------------------------ lyrics */
@@ -1018,13 +1036,23 @@ export function start() {
   var currentURL = null;
   function setAudioSrc(url) { audio.pause(); if (currentURL) URL.revokeObjectURL(currentURL); currentURL = url; audio.src = url; audio.load(); }
 
-  function loop() {
+  /* Lab > Frame times: the time between frames while playing, and the part of it spent drawing, over the last 120 */
+  var frameT = [], drawT = [], lastTs = 0, frameN = 0;
+  function pct(v, q) { var o = v.slice().sort(function (x, y) { return x - y; }); return o[Math.min(o.length - 1, Math.floor(o.length * q))]; }
+  function loop(ts) {
     var playing = !audio.paused && !audio.ended;
     if (playing || S.dirty) {
-      var t = S.neverPlayed ? S.previewT : clock();
+      var t = S.neverPlayed ? S.previewT : clock(), t0 = performance.now();
       draw(t); S.dirty = false;
+      var dt = performance.now() - t0;
       if (!seeking && !S.neverPlayed) { seek.value = labSeek.value = String(t); tNow.textContent = fmt(t); }
+      if (L.fps === 'on' && playing) {
+        if (lastTs) { frameT.push(ts - lastTs); drawT.push(dt); if (frameT.length > 120) { frameT.shift(); drawT.shift(); } }
+        lastTs = ts;
+        if (++frameN % 30 === 0 && frameT.length >= 10) fpsEl.textContent = 'frame ' + pct(frameT, 0.5).toFixed(1) + ' ms, slowest 5% ' + pct(frameT, 0.95).toFixed(1) + '\ndrawing ' + pct(drawT, 0.5).toFixed(1) + ' ms, slowest 5% ' + pct(drawT, 0.95).toFixed(1);
+      } else lastTs = 0;
     }
+    if (fpsEl.hidden !== (L.fps !== 'on')) { fpsEl.hidden = L.fps !== 'on'; fpsEl.textContent = 'frame times show while it plays'; frameT = []; drawT = []; }
     requestAnimationFrame(loop);
   }
 
@@ -1501,10 +1529,10 @@ export function start() {
     labApply('all');
   });
   /* the Lab, below the print (the print shrinks to sit above it), opened from the cog */
-  function openPanel() { labPanel.hidden = false; cog.setAttribute('aria-expanded', 'true'); hideBubble(); wakeHud(); }
+  function openPanel() { labPanel.hidden = false; S.dirty = true; cog.setAttribute('aria-expanded', 'true'); hideBubble(); wakeHud(); }
   function closePanels() {
     var had = !labPanel.hidden && labPanel.contains(document.activeElement);
-    labPanel.hidden = true; cog.setAttribute('aria-expanded', 'false');
+    labPanel.hidden = true; cog.setAttribute('aria-expanded', 'false'); S.dirty = true;
     hideBubble(); wakeHud();
     if (had) cog.focus({ preventScroll: true });
   }
