@@ -9,8 +9,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&family=DM+Mono:wght@400;500&display=swap">
 <style>html{--lightningcss-light:initial;--lightningcss-dark: ;color-scheme:light}:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui}img{max-width:100%}[hidden]{display:none!important}</style>
-  <script type="module" crossorigin src="./app/index-D5OzTSXQ.js"></script>
-  <link rel="stylesheet" crossorigin href="./app/index-DJ-wT2_n.css">
+  <script type="module" crossorigin src="./app/index-B8inZGOt.js"></script>
+  <link rel="stylesheet" crossorigin href="./app/index-CdrcKyi2.css">
 </head>
 <body>
 <main class="app">
@@ -21,6 +21,7 @@
         <div class="glow" id="glowBass" aria-hidden="true"></div>
         <div class="glow" id="glowKick" aria-hidden="true"></div>
         <div class="stripview" id="stripView" aria-hidden="true"><div class="striprow" id="stripRow"></div></div>
+        <div class="blooms" id="blooms" aria-hidden="true"></div>
         <canvas class="over" id="liveCv" aria-hidden="true"></canvas>
       </div>
       <div class="head" id="head" aria-hidden="true"></div>
@@ -57,6 +58,7 @@
         <div class="row"><button type="button" class="k" data-tip="An ink splatter you can see through, or a screen of dots like a printed photo." aria-expanded="false" aria-describedby="ld-kick">Kick<i aria-hidden="true">i</i></button><div class="seg" data-key="kick" role="group" aria-label="Kick" aria-describedby="ld-kick"><button type="button" id="lab-kick-splat" data-v="splat">Splatter</button><button type="button" id="lab-kick-halftone" data-v="halftone">Halftone</button></div><span class="vh" id="ld-kick">An ink splatter you can see through, or a screen of dots like a printed photo.</span></div>
         <div class="row"><button type="button" class="k" data-tip="A soft smear, or a sharp line whose edge shows the tone." aria-expanded="false" aria-describedby="ld-bass">Bass<i aria-hidden="true">i</i></button><div class="seg" data-key="bass" role="group" aria-label="Bass" aria-describedby="ld-bass"><button type="button" id="lab-bass-smudge" data-v="smudge">Smudge</button><button type="button" id="lab-bass-line" data-v="line">Line</button></div><span class="vh" id="ld-bass">A soft smear, or a sharp line whose edge shows the tone.</span></div>
         <div class="row"><button type="button" class="k" data-tip="Faint lines across the print at each C, with its frequency, to read the pitch by." aria-expanded="false" aria-describedby="ld-guides">Pitch lines<i aria-hidden="true">i</i></button><div class="seg" data-key="guides" role="group" aria-label="Pitch lines" aria-describedby="ld-guides"><button type="button" id="lab-guides-on" data-v="on">On</button><button type="button" id="lab-guides-off" data-v="off">Off</button></div><span class="vh" id="ld-guides">Faint lines across the print at each C, with its frequency, to read the pitch by.</span></div>
+        <div class="row slide"><button type="button" class="k" data-tip="How many pixels the print is drawn with for each point of the screen. Lower runs smoother on a slow phone; higher is sharper, up to the screen’s own." aria-expanded="false" aria-describedby="ld-res">Resolution<i aria-hidden="true">i</i></button><input type="range" id="lab-res" data-key="res" min="0.75" max="3" step="0.25" aria-label="Resolution" aria-describedby="ld-res"><span class="lab-v" id="lab-res-v"></span><span class="vh" id="ld-res">How many pixels the print is drawn with for each point of the screen. Lower runs smoother on a slow phone; higher is sharper, up to the screen’s own.</span></div>
         <div class="row"><button type="button" class="k" data-tip="Shows how long each frame takes on this device. Smooth is a frame every 17 ms; the slowest 5% are the stutters you notice." aria-expanded="false" aria-describedby="ld-fps">Frame times<i aria-hidden="true">i</i></button><div class="seg" data-key="fps" role="group" aria-label="Frame times" aria-describedby="ld-fps"><button type="button" id="lab-fps-off" data-v="off">Off</button><button type="button" id="lab-fps-on" data-v="on">On</button></div><span class="vh" id="ld-fps">Shows how long each frame takes on this device. Smooth is a frame every 17 ms; the slowest 5% are the stutters you notice.</span></div>
         <div class="row"><button type="button" class="k" data-tip="Plays the next 10 seconds silently, about 2 minutes in all, trying the print with parts of it turned off, then gives you a result to copy. Start it at a busy part of the song." aria-expanded="false" aria-describedby="ld-speed">Speed test<i aria-hidden="true">i</i></button><div class="seg"><button type="button" id="speedTest">Run</button></div><span class="vh" id="ld-speed">Plays the next 10 seconds silently, about 2 minutes in all, trying the print with parts of it turned off, then gives you a result to copy. Start it at a busy part of the song.</span></div>
       </div>

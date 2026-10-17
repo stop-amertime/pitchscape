@@ -3,7 +3,7 @@ import { ui, api } from './ui.svelte.js';
 export function start() {
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
-  var cv = $('cv'), ctx = cv.getContext('2d'), liveCv = $('liveCv'), liveCtx = liveCv.getContext('2d'), grainCv = $('grainCv');
+  var blooms = $('blooms'), cv = $('cv'), ctx = cv.getContext('2d'), liveCv = $('liveCv'), liveCtx = liveCv.getContext('2d'), grainCv = $('grainCv');
   var sheet = $('sheet'), shakeEl = $('shake'), stripView = $('stripView'), stripRow = $('stripRow'), headEl = $('head'), fpsEl = $('fps'), glowBass = $('glowBass'), glowKick = $('glowKick');
   var plate = $('plate'), audio = $('player');
   var playBtn = $('play'), seek = $('seek'), labSeek = $('labSeek'), tNow = $('tNow'), tDur = $('tDur'), msg = $('msg');
@@ -31,7 +31,7 @@ export function start() {
   var LAB_DEF = {
     colour: 'inst', drums: 'sound', kick: 'splat', bass: 'smudge', font: 'grotesque', wordSize: 'voice',
     shake: reduceMotion ? 0 : 0.25, tilt: reduceMotion ? 0 : 0.5, pulse: reduceMotion ? 0 : 0.6, slip: reduceMotion ? 0 : 0.35,
-    secs: 0, ink: 1, weight: 1, grain: 0.5, thick: 'ear', edges: 1, guides: 'on', fps: 'off',
+    secs: 0, ink: 1, weight: 1, grain: 0.5, thick: 'ear', edges: 1, guides: 'on', fps: 'off', res: 2,
     /* cutoffs: the defaults are each model's own settings */
     vConf: 0.45, vFloor: 0.04, vRun: 90, bFloor: 0.08, hold: 0.3, noteMin: 100, drumK: 1, rough0: 0.1, sharp0: 1.75, leap: 4
   };
@@ -63,7 +63,7 @@ export function start() {
   function rate(hz) { return 4 + 3.2 * Math.log2(Math.max(hz, 30) / 30); }
 
   function resize() {
-    dpr = Math.min(DBG.dpr, window.devicePixelRatio || 1);
+    dpr = Math.min(DBG.dpr, L.res, window.devicePixelRatio || 1);
     W = Math.max(200, cv.clientWidth); H = Math.max(200, cv.clientHeight);
     cv.width = liveCv.width = Math.round(W * dpr); cv.height = liveCv.height = Math.round(H * dpr); liveLx = null;
     WIN = L.secs > 0 ? L.secs : W < 520 ? 4.2 : W < 900 ? 5.5 : 7;
@@ -626,9 +626,12 @@ export function start() {
   function drawKicks(now) {
     for (var i = lowerBound(S.kicks, now - WIN - 0.4, 't'); i < S.kicks.length && S.kicks[i].t <= now; i++) kickMark(S.kicks[i], now);
   }
+  function kickR(e) { return (10 + 19 * e.s) * (1 + 0.4 * clamp(e.d / 0.25, 0, 1)); }
+  function kickY(e) { return clamp(yOf(e.mhz), BEAT_H + 12, H - 10); }
+  var bloomsOnCanvas = true;
   function kickMark(e, now) {
-    var hz = e.mhz, x = xOf(e.t, now), y = clamp(yOf(hz), BEAT_H + 12, H - 10), age = now - e.t, s = e.s, col = tint('drum', hz, y);
-    var settle = Math.min(1, age / 0.28), R = (10 + 19 * s) * (1 + 0.4 * clamp(e.d / 0.25, 0, 1)), RR = R * (1 + 0.35 * (1 - settle)), rg;
+    var hz = e.mhz, x = xOf(e.t, now), y = kickY(e), age = now - e.t, s = e.s, col = tint('drum', hz, y);
+    var R = kickR(e), RR = R, rg;
     if (L.kick === 'halftone') {
       var Rq = Math.max(8, Math.round(R / 4) * 4);
       ctx.globalAlpha = inkA(0.36 + 0.34 * s); ctx.drawImage(halftone(col, Rq), x - RR, y - RR, 2 * RR, 2 * RR);
@@ -636,7 +639,7 @@ export function start() {
       ctx.fillStyle = col; ctx.beginPath(); splat(x, y, RR * 0.42, 0.15, s, e.id * 977 + 7);
       ctx.globalAlpha = inkA(0.38 + 0.3 * s); ctx.fill();
     }
-    if (age < 0.45) {
+    if (age < 0.45 && bloomsOnCanvas) {
       var kb = age / 0.45, Rb = R * (1.5 + 2.4 * kb);
       rg = ctx.createRadialGradient(x, y, R * 0.4, x, y, Rb);
       rg.addColorStop(0, rgba(col, inkA(0.2 * s * (1 - kb) * (1 - kb)))); rg.addColorStop(1, rgba(col, 0));
@@ -742,14 +745,14 @@ export function start() {
      every layer apart, so it shows only while the Lab is open, when everything is drawn live on #cv so a lever shows
      at once. */
   /* the speed test's switches (Lab > Speed test): each piece of the stack, on unless a test turns it off */
-  var DBG_DEF = { blend: true, grain: true, glows: true, tilt: true, shake: true, live: false, still: false, dpr: 2, narrow: false, nolive: false, nostrips: false, strip: 1024 }, DBG = Object.assign({}, DBG_DEF), liveLx = null;
+  var DBG_DEF = { blend: true, grain: true, glows: true, tilt: true, shake: true, live: false, still: false, dpr: 3, narrow: true, nolive: false, nostrips: false, strip: 1024 }, DBG = Object.assign({}, DBG_DEF), liveLx = null;
   var STRIP = 1024, CHUNK = 128, PER = STRIP / CHUNK, strips = new Map(), stripsFor = '', stripsAna = null, stripPool = [], clipL = -Infinity;
-  var SETTLE = { kick: 0.5, words: 0.15, hats: 0.1, toms: 0.1, snare: 0.1 }, REACH = { kick: 60, bass: 40 };
+  var SETTLE = { kick: 0, words: 0.15, hats: 0.1, toms: 0.1, snare: 0.1 }, REACH = { kick: 60, bass: 40 };
   /* how far back from a stretch of the print a mark can start and still reach into it: a word's text and a cymbal's
      ring run on to the right of their time */
   var LOOK = { words: 3, hats: 2.5 };
   function look(name) { return LOOK[name] || 0.3; }
-  function lag(name) { return (SETTLE[name] || 0.3) + (REACH[name] || 30) / pps; }
+  function lag(name) { return (name in SETTLE ? SETTLE[name] : 0.05) + (REACH[name] || 30) / pps; }
   function stripLayers() { return LAYERS.filter(function (Ly) { return S.vis[Ly[0]]; }); }
   function stripLag(ls) { var m = 0; ls.forEach(function (Ly) { m = Math.max(m, lag(Ly[0])); }); return m; }
   function stripsCheck() {
@@ -783,6 +786,21 @@ export function start() {
       ls.forEach(function (Ly) { WIN = nowV - ca + look(Ly[0]); Ly[1](nowV, { guitar: 0, piano: 0, synths: 0 }); });
     } finally { g.restore(); ctx = keep[0]; nowX = keep[1]; WIN = keep[2]; }
     s.done++;
+  }
+  /* each fresh kick's pressure bloom, spreading and fading over 0.45 s, as a gradient element the browser moves */
+  var bloomEls = [];
+  function drawBlooms(now) {
+    var n = 0;
+    if (S.vis.kick) for (var i = lowerBound(S.kicks, now - 0.45, 't'); i < S.kicks.length && S.kicks[i].t <= now; i++) {
+      var e = S.kicks[i], kb = (now - e.t) / 0.45, R = kickR(e), Rb = R * (1.5 + 2.4 * kb), y = kickY(e), x = xOf(e.t, now);
+      var col = tint('drum', e.mhz, y), a = inkA(0.2 * e.s * (1 - kb) * (1 - kb));
+      var el = bloomEls[n] || (bloomEls[n] = blooms.appendChild(document.createElement('div')));
+      el.style.display = ''; el.style.width = el.style.height = 2 * Rb + 'px';
+      el.style.transform = 'translate(' + (x - Rb).toFixed(1) + 'px,' + (y - Rb).toFixed(1) + 'px)';
+      el.style.background = 'radial-gradient(circle closest-side, ' + rgba(col, a) + ' 0, ' + rgba(col, a) + ' ' + (40 * R / Rb).toFixed(1) + '%, ' + rgba(col, 0) + ' 100%)';
+      n++;
+    }
+    for (; n < bloomEls.length; n++) if (bloomEls[n].style.display !== 'none') bloomEls[n].style.display = 'none';
   }
   /* draw what the screen needs and some way ahead, place the row, and say from what time on it must be drawn live */
   var rowX = null, viewW = null;
@@ -851,7 +869,7 @@ export function start() {
 
     if (panelOpen() || DBG.live || (BENCH && BENCH_LIVE)) {
       /* the Lab is open: everything live on #cv, so a lever shows at once, with each colour's misprint slip */
-      setMode(true); baseFor = null;
+      setMode(true); baseFor = null; bloomsOnCanvas = true; drawBlooms(-1e9);
       var misAmt = L.slip * (kickImp * 2.4 + bassNow * 1.1);
       drawBase();
       ctx.globalCompositeOperation = 'multiply';
@@ -863,7 +881,7 @@ export function start() {
       });
       ctx.globalCompositeOperation = 'source-over';
     } else {
-      setMode(false);
+      setMode(false); bloomsOnCanvas = false; drawBlooms(now);
       if (baseFor !== strokeGen) { drawBase(); baseFor = strokeGen; }
       stripsCheck();
       var ls = stripLayers(), readyT = now, keepW = WIN;
@@ -1073,18 +1091,14 @@ export function start() {
      of the stack turned off in turn, then a JSON of the frame times to paste back. Every run plays the same 10 s, so
      the runs compare. */
   /* test 1 (Pixel 9 Pro): blend modes, grain, glows, tilt and shake made no difference; half resolution took it from
-     66 ms a frame to 16.7. Test 2 looks for where the cliff is and which canvas is too big. */
+     66 ms a frame to 16.7. Test 2: the full-screen live canvas was the cost (hidden: 1.3% slow frames against 39%;
+     strips hidden or smaller: no change); resolution 1.5: 1.5%. Test 3: the narrow live canvas over a shorter stretch. */
   var SPEED = [
     ['as now', {}],
+    ['wide live canvas (test 2)', { narrow: false }],
+    ['no live canvas', { nolive: true }],
     ['resolution 1.75', { dpr: 1.75 }],
     ['resolution 1.5', { dpr: 1.5 }],
-    ['resolution 1.25', { dpr: 1.25 }],
-    ['resolution 1', { dpr: 1 }],
-    ['narrow live canvas', { narrow: true }],
-    ['no live canvas', { nolive: true }],
-    ['strips not shown', { nostrips: true }],
-    ['strips 512 wide', { strip: 512 }],
-    ['narrow live, strips 512', { narrow: true, strip: 512 }],
     ['nothing drawn: the phone alone', { still: true }]
   ];
   var speedRun = false;
@@ -1118,9 +1132,9 @@ export function start() {
     var T0 = Math.max(0, Math.min(clock(), (S.dur || 10) - 10)), i = -1, start = 0, last = 0, ft = [], dts = [];
     var diff = {}; for (var k in L) if (L[k] !== LAB_DEF[k]) diff[k] = L[k];
     var out = {
-      test: 'pitchscape speed test 2', when: new Date().toISOString(),
+      test: 'pitchscape speed test 3', when: new Date().toISOString(),
       device: { ua: navigator.userAgent, dpr: window.devicePixelRatio, cores: navigator.hardwareConcurrency || null, memoryGB: navigator.deviceMemory || null },
-      print: { css: W + 'x' + H, px: cv.width + 'x' + cv.height, secondsShown: +WIN.toFixed(2), from: +T0.toFixed(2), to: +(T0 + 10).toFixed(2), lab: diff,
+      print: { res: L.res, css: W + 'x' + H, px: cv.width + 'x' + cv.height, secondsShown: +WIN.toFixed(2), from: +T0.toFixed(2), to: +(T0 + 10).toFixed(2), lab: diff,
         hidden: Object.keys(S.vis).filter(function (k) { return !S.vis[k]; }) },
       runs: []
     };
@@ -1600,7 +1614,7 @@ export function start() {
 
   /* lab */
   function labVal(k, v) {
-    return k === 'secs' ? v.toFixed(1) + ' s' : k === 'ink' || k === 'weight' || k === 'drumK' ? '×' + v.toFixed(2)
+    return k === 'secs' ? v.toFixed(1) + ' s' : k === 'res' ? '×' + v.toFixed(2) + (v > (window.devicePixelRatio || 1) ? ' (screen ×' + (window.devicePixelRatio || 1) + ')' : '') : k === 'ink' || k === 'weight' || k === 'drumK' ? '×' + v.toFixed(2)
       : k === 'vRun' || k === 'noteMin' ? Math.round(v) + ' ms' : k === 'rough0' ? v.toFixed(2) + ' asper' : k === 'sharp0' ? v.toFixed(2) + ' acum'
       : k === 'leap' ? v + ' st' : Math.round(v * 100) + '%';
   }
@@ -1621,7 +1635,7 @@ export function start() {
   function labApply(k) {
     saveLab();
     if (CUTS[k] || k === 'all') { applyCuts(); layoutWords(); }
-    if (k === 'secs' || k === 'all') resize();
+    if (k === 'secs' || k === 'res' || k === 'all') resize();
     if (k === 'font' || k === 'wordSize' || k === 'weight' || k === 'all') ensureFont(L.font).then(function () { layoutWords(); S.dirty = true; });
     labUI(); S.dirty = true;
   }

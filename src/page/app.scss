@@ -45,6 +45,8 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 .striprow canvas { position: absolute; top: 0; height: 100%; }
 .over { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 #liveCv { mix-blend-mode: multiply; }
+.blooms { position: absolute; inset: 0; pointer-events: none; mix-blend-mode: multiply; }
+.blooms div { position: absolute; left: 0; top: 0; border-radius: 50%; will-change: transform; }
 .grain { mix-blend-mode: screen; }
 .head { position: absolute; left: 0; top: 21px; bottom: 6px; width: 10px; pointer-events: none; }
 .head::before { content: ''; position: absolute; left: 0; top: 0; width: 10px; height: 6px; background: var(--ink); clip-path: polygon(0 0, 100% 0, 50% 100%); }
