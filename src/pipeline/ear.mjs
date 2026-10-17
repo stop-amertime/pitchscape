@@ -11,7 +11,7 @@ import {EAR_DB, EAR_SPAN, HOP, SR, earChunk, pyRound} from './ear.dsp.mjs';
 
 const DSP = './ear.dsp.mjs';
 export {EAR_DB, EAR_SPAN};
-export const NOTE_STEMS = ['other', 'guitar', 'piano'];      // a note's source: its index here (record[12])
+export const NOTE_STEMS = ['other', 'guitar', 'piano', 'bass'];      // a note's source: its index here (record[12])
 const DT = HOP / SR, W = 2 * EAR_DB.length;
 const REACH = 3072;                                           // samples beyond a run that its longest window reaches
 

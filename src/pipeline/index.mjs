@@ -2,9 +2,9 @@
 // they read exists, at the same time where they can (models take turns on the GPU; CPU work spreads over rt.pool):
 //
 //   decode + tags ─► stems ─► 22.05 kHz copies ─┬─► drums ─────────────────────────┐
-//                                               ├─► notes ─┬─► tone (MOSQITO) ─────┤
-//                                               ├─► bass ──┤                       ├─► pack
-//                                               ├─► voice ─┴─► width (ear) ────────┤
+//                                               ├─► notes (bass too) ┬─► loudness ─┤
+//                                               ├─► bass (pYIN) ─────┤             ├─► pack
+//                                               ├─► voice, guitar ───┴─► width ────┤
 //                                               └─► words (LRCLIB, aligned) ───────┘
 //
 // progress(message) gets the same stage messages as the Python pipeline ('stems: ...', 'drums: ...'), which the page
@@ -14,7 +14,7 @@ import {drums} from './drums.mjs';
 import {notes} from './notes.mjs';
 import {bass} from './bass.mjs';
 import {voice, voiceGate} from './voice.mjs';
-import {tone} from './tone.mjs';
+import {loudness} from './loudness.mjs';
 import {ears} from './ear.mjs';
 import {songInfo, lyricsFor} from './words.mjs';
 import {frameCount, makePack, NOTE_STEMS} from './pack.mjs';
@@ -53,21 +53,25 @@ export async function analyze(bytes, name, rt, {progress = () => {}, words = tru
 
   progress('drums: ADTOF');
   const dr = timed('drums', drums(stems.drums, st22.drums, rt));
-  progress('notes: Basic Pitch on guitar, piano and the rest');
-  const nt = timed('notes', notes({other: stems.other, guitar: stems.guitar, piano: stems.piano}, st22, rt));
+  progress('notes: Basic Pitch on guitar, piano, bass and the rest');
+  const nt = timed('notes', notes({other: stems.other, guitar: stems.guitar, piano: stems.piano, bass: stems.bass}, st22, rt));
   progress('bass: pYIN');
   const bs = timed('bass', bass(st22.bass, F, rt));
   progress('voice: CREPE');
   const vc = timed('voice', voice(stems.vocals, F, rt));
+  // the guitar's line too (a solo, a bend): CREPE on its stem, read as the voice is
+  const gt = vc.then(() => timed('guitar_line', voice(stems.guitar, F, rt)));
   if (words) progress('words: LRCLIB, aligned to the vocal');
   const wd = words ? timed('words', lyricsFor(song, dur, stems.vocals, rt, {aligner})) : Promise.resolve([null, null]);
 
-  const [segs, b, lead] = await Promise.all([nt, bs, vc]);
-  progress('tone: roughness and sharpness');
-  const tn = timed('tone', tone(stems, segs, lead.leadHz, b.bassHz, F, rt));
+  const [segs, b, lead, gtr] = await Promise.all([nt, bs, vc, gt]);
+  progress('loudness: how loud, how noisy');
+  const mono44 = {};
+  for (const s of ['other', 'guitar', 'piano', 'bass']) mono44[s] = mono(stems[s]);
+  const ld = timed('loudness', loudness(st22, mono44, segs, {vocals: lead.leadHz, guitar: gtr.leadHz}, F, rt));
   progress('width: excitation patterns');
   const ew = timed('width', ears(st22, gain, segs, lead.leadHz, b.bassHz, rt));
-  const [d, t, e, [lyrics, found]] = await Promise.all([dr, tn, ew, wd]);
+  const [d, lo, e, [lyrics, found]] = await Promise.all([dr, ld, ew, wd]);
 
   const hzOrNaN = Float32Array.from(lead.leadHz, h => h > 0 ? h : NaN);
   const g = voiceGate(lead.leadP, lead.leadL, hzOrNaN, 0.45, 0.04, 4);
@@ -76,8 +80,7 @@ export async function analyze(bytes, name, rt, {progress = () => {}, words = tru
   const seconds = (performance.now() - t0) / 1000;
   Object.assign(stats, ms, {total: Math.round(seconds * 1000)});
   const pack = makePack({song, dur, words, title: name.replace(/\.[^.]*$/, ''), hits: d.hits, events: d.events, segs,
-    noteRs: t.noteRs, bassN: b.bassN, bassHz: b.bassHz, bassBr: b.bassBr, lead,
-    leadRough: t.lead[0], leadSharp: t.lead[1], bassRough: t.bass[0], bassSharp: t.bass[1], slices: t.slices,
+    bassN: b.bassN, bassHz: b.bassHz, bassBr: b.bassBr, lead, gtr, loud: lo,
     curves: e, leadEar: e.leadEar, bassEar: e.bassEar, lyrics, found, voiced: on / g.length, seconds,
     timing: {ms, ep: rt.ep, where: rt.where}});
   progress(`done in ${Math.round(seconds)} s`);

@@ -24,13 +24,15 @@ sound (or the ear) actually does and draw that.
 
 | What you see | What it is | Measured by |
 | --- | --- | --- |
-| height | pitch, on a log axis fitted to the song's range | CREPE (voice), pYIN (bass), Basic Pitch (notes) |
+| height | pitch, on a log axis fitted to the song's range | CREPE (voice, guitar line), Basic Pitch (notes, bass), pYIN (bass line, a Lab option) |
 | a note's path | its pitch through time, bends and vibrato included | Basic Pitch's per-frame pitch bends |
 | colour | which instrument (stem), warm inks for what is out front | Demucs htdemucs_6s stems |
-| thickness | how wide the sound spreads along the ear (excitation pattern; for notes and bass, a pure tone's at their pitch and level) | Glasberg & Moore roex filters, ISO 532-2 resolutions |
-| ink density across the stroke | solid within 1 dB of the excitation peak, lighter to 3 dB, haze to 10 dB | same |
-| ink strength along the stroke | loudness, and for struck notes their measured fade | stem RMS, measured decay |
-| edge: smooth ripple to sawtooth | harshness = roughness + sharpness | MOSQITO (Daniel & Weber roughness, DIN 45692 sharpness) |
+| thickness | thin by default (each note apart); Lab: how wide the sound spreads along the ear (excitation pattern; for notes and bass, a pure tone's at their pitch and level) | Glasberg & Moore roex filters, ISO 532-2 resolutions |
+| ink density across the stroke | (ear thickness) solid within 1 dB of the excitation peak, lighter to 3 dB, haze to 10 dB | same |
+| ink strength along the stroke | the note's own level along its path (its real fade) | librosa CQT on its stem |
+| edge: smooth to torn, bristles across | noise heard on it (HPSS residual within 36 dB of the loudest sound within 3 semitones, where the stem is noisy) | librosa CQT + HPSS (Driedger 2014) |
+| ticks through a note | a strike heard on it (HPSS percussive part) | same |
+| which notes print | an overtone of a lower note or a still-ringing key re-read as new does not | partials 7 dB over the lower note's neighbours; partials rising 6 dB at the onset |
 | drum marks | each hit, its kind, its own spectrum and ring | ADTOF drum transcription on the drum stem |
 | words | the published lyrics, placed when and roughly where they are sung | LRCLIB text, Whisper word timings |
 
@@ -253,6 +255,24 @@ different per song; the voice's ear width on the Goldberg aria and Hiroshima dif
   repeatable; the JS dithers the same way by default (`stats.dither = false` to compare). numpy 2 keeps float32 when
   an array meets a Python float (env_follow, thresholds, percentile + 1e-9), so those run in float32 here too. On
   Windows, two servers can listen on the same port (another session's took half the requests): pick a free one.
+- Loudness (`loudness.mjs`, `loud.dsp.mjs`, `cqt.dsp.mjs`; pipeline 11, pack 14): librosa 0.11's cqt (vqt with
+  gamma 0: per-octave sparse wavelet basis, soxr_hq halving) and decompose.hpss (kernel 31, margin 2, a sliding sorted
+  window for the medians) ported; on 30 s of Fluoride's guitar the CQT is within 3.6e-7 of librosa's peak (0.0005 dB
+  above -60 dB) and HPSS within 6.3e-7 (not yet in tools/parity.py). Per stem (other, guitar, piano, bass, vocals; a
+  worker each): levels in dB below the stem's 99.5th percentile of frame maxima over 72 dB; noise and strikes as heard
+  against the loudest sound within +-9 bins (1 at its level, 0 at 36 dB below), smoothed (noise 3 bins x 2 frames,
+  strikes 1 x 0.5); per note sample its level (max of 3 bins around the bent pitch) and noise; per frame the stem's
+  noise share (+-0.25 s) and its strikes in 11 bands of 8 semitones (only where the loudest sound near is above
+  0.4: the Lab's floor); the voice's and guitar's CREPE lines read the same way. `noteCues` (44.1 kHz STFT 4096/512)
+  gives each note its echo dB (Klapuri's spectral smoothness: its partial against the lower note's k-1 and k+1, the
+  loudest lower note sounding, harmonics 2-8, within half a semitone), rise dB (partials 1-2, frames f0..f0+4 against
+  f0-8..f0-3) and the note still ringing at its pitch. Designed by eye in the Contour Lab (spike-timbre/, untracked):
+  15 eight-second excerpts, one per instrument, and the Goldberg Aria against its aligned Mutopia score. Fluoride, no
+  stems or words stage: 54 s in all; loudness 14 s, guitar CREPE 14 s; the pack 2.2 -> 4.0 MB (strikes 0.7 MB).
+  Strikes drawn across their whole band rained across the sheet (drum bleed in every stem, in time with the hats):
+  the page prints them only as ticks through notes and lines sounding then. The bass now also goes through Basic Pitch
+  (NOTE_STEMS index 3), and CREPE runs on the guitar stem as well (`voice()` on it). MOSQITO's tone stage no longer
+  runs (tone.mjs kept for parity_tone). pipeline.py has none of this: the page draws only pack 14.
 - Words (`words.mjs`, `tags.mjs`, `align.mjs`): `songInfo(bytes, name, sha)` is song_info with its own tag reader
   (ID3v1/v2, MP3 Xing/LAME/VBRI, MP4, FLAC, Ogg Vorbis/Opus, WAV; FFmpeg 9.0.2's key names and length arithmetic, no
   ffprobe); `lyricsFor(info, dur, vocals44, rt, {aligner = 'en', stats, fetch, log, onAligned})` finds the record as

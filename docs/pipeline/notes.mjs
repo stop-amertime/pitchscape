@@ -8,7 +8,7 @@ import {ANNOT_N_FRAMES, AUDIO_N_SAMPLES, HOP_SIZE, N_OVERLAP, OVERLAP_LEN, SR, m
         percentile} from './notes.dsp.mjs';
 
 const DSP = './notes.dsp.mjs';
-export const NOTE_STEMS = ['other', 'guitar', 'piano'];      // a note's source: its index here
+export const NOTE_STEMS = ['other', 'guitar', 'piano', 'bass'];      // a note's source: its index here
 const FPS = Math.floor(SR / 256);
 // windows per model call. ONNX Runtime's CPU provider gives the Python's numbers exactly one window at a time (as
 // basic_pitch.inference runs it), and within 2e-7 eight at a time, 2.5x faster.

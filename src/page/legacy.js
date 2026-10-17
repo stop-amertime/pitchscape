@@ -29,11 +29,13 @@ export function start() {
 
   /* ------------------------------------------------------------ lab settings (A/B switches, kept on this device) */
   var LAB_DEF = {
-    colour: 'inst', drums: 'sound', kick: 'splat', bass: 'smudge', font: 'grotesque', wordSize: 'voice',
+    colour: 'inst', drums: 'sound', kick: 'splat', bass: 'notes', gline: 'on', font: 'grotesque', wordSize: 'voice',
     shake: reduceMotion ? 0 : 0.25, tilt: reduceMotion ? 0 : 0.5, pulse: reduceMotion ? 0 : 0.6, slip: reduceMotion ? 0 : 0.35,
-    secs: 0, ink: 1, weight: 1, grain: 0.5, thick: 'ear', edges: 1, guides: 'on', fps: 'off', res: 2,
+    secs: 0, ink: 1, weight: 1, grain: 0.5, thick: 'thin', edges: 1, guides: 'on', fps: 'off', res: 2,
     /* cutoffs: the defaults are each model's own settings */
-    vConf: 0.45, vFloor: 0.04, vRun: 90, bFloor: 0.08, hold: 0.3, noteMin: 100, drumK: 1, rough0: 0.1, sharp0: 1.75, leap: 4
+    vConf: 0.45, vFloor: 0.04, vRun: 90, bFloor: 0.08, hold: 0.3, noteMin: 100, drumK: 1, leap: 4,
+    /* loudness (worked out by eye in the Contour Lab): quietest ink, echoes, re-strikes, noise and strikes */
+    lFloor: 0.3, exDb: 7, attack: 6, nShare: 24, nGate: 0.06, nJag: 4, sShare: 12, gConf: 0.21
   };
   /* only the settings changed from the defaults are kept, so a later change of default reaches everyone who left
      that setting alone. Settings saved in the older all-in-one form are dropped once. */
@@ -94,23 +96,34 @@ export function start() {
     }
     S.segs = []; S.bends = ana.bends; S.holds = ana.holds;
     /* note records: [t0, t1, midi, amp, brightness, noise, family, attack s, fade dB/s, vibrato depth st, vibrato
-       rate Hz, hollowness, stem, roughness asper, sharpness acum, curve start, curve count]. Family: 0 struck, 1
-       swell, 2 held. Stem: 0 other, 1 guitar, 2 piano. The curve is the note every dt from t0 to t1, count values
+       rate Hz, hollowness, stem, echo dB, rise dB, curve start, curve count, ringing note, harmonic]. Family: 0 struck,
+       1 swell, 2 held. Stem: 0 other, 1 guitar, 2 piano, 3 bass. Echo: how far the note stands above the neighbouring
+       partials of the lower note it sits on a harmonic of (NaN: on none); rise: how much its own partials jump as it
+       starts; ringing note: a note at its pitch still sounding then (an index, or -1). The curve is the note every dt from t0 to t1, count values
        from start in ana.bends (its pitch, in semitones from midi) and ana.holds (how sure the note detector is that it
        still sounds, which the "note hold" lever cuts at). */
     var SW = ana.segW, q = ana.segs;
     for (i = 0; i + SW <= q.length; i += SW) {
-      S.segs.push({ t0: q[i], t1: q[i + 1], m: q[i + 2], a: q[i + 3], b: q[i + 4], z: q[i + 5], f: q[i + 6], att: q[i + 7], dec: q[i + 8], vd: q[i + 9], vr: q[i + 10], h: q[i + 11], src: q[i + 12], ro: q[i + 13], sh: q[i + 14], bs: q[i + 15], bn: q[i + 16], id: i / SW });
+      S.segs.push({ t0: q[i], t1: q[i + 1], m: q[i + 2], a: q[i + 3], b: q[i + 4], z: q[i + 5], f: q[i + 6], att: q[i + 7], dec: q[i + 8], vd: q[i + 9], vr: q[i + 10], h: q[i + 11], src: q[i + 12], ex: q[i + 13], rise: q[i + 14], bs: q[i + 15], bn: q[i + 16], ring: q[i + 17], hk: q[i + 18], id: i / SW });
     }
     /* the voice and bass as they came (every frame the models heard anything), before the cutoffs */
     ana.leadHz0 = ana.leadHz; ana.bassHz0 = ana.bassHz;
     ana.leadEar = easeEar(ana.leadEar, lineRuns(ana.leadHz0)); ana.bassEar = easeEar(ana.bassEar, lineRuns(ana.bassHz0));
     S.noteEar = easeEar(ana.noteEar, S.segs.map(function (sg) { return [sg.bs, sg.bs + sg.bn]; }));
+    S.noteLvl = ana.noteLvl; S.noteNz = ana.noteNz;
     applyCuts();
   }
-  /* how harsh a sound is, 0 (smooth) to 1: roughness above the "rough from" lever (clearly grating 0.3 asper past it)
-     and sharpness above "sharp from" (1.25 acum past it), taken together */
-  function harsh(ro, sh) { return Math.min(1, Math.hypot(clamp((ro - L.rough0) / 0.3, 0, 1), clamp((sh - L.sharp0) / 1.25, 0, 1))); }
+  /* how much noise is heard on a sound, 0 to 1: the noise there (nz: 1 as loud as the loudest sound within 3
+     semitones, 0 at 36 dB below), heard from "noise heard within" dB below it, where its whole stem is noisier than
+     "noisy stem" (fully at twice that) */
+  function heardNoise(nz, share) {
+    var g = L.nGate > 0 ? clamp((share - L.nGate) / L.nGate, 0, 1) : 1;
+    return clamp(1 - (1 - nz) * 36 / L.nShare, 0, 1) * g;
+  }
+  var STEM_OF = ['other', 'guitar', 'piano', 'bass'];
+  function stemShare(stem, f) { var a = S.ana.noiseShare && S.ana.noiseShare[stem]; return a ? a[Math.max(0, Math.min(a.length - 1, f))] : 0; }
+  /* a level (0..1 over 72 dB below the stem's loud level) as ink: nothing below "quietest" */
+  function lvlInk(v) { return clamp((v - L.lFloor) / Math.max(1e-6, 1 - L.lFloor), 0, 1); }
   /* every cutoff, from the Lab's levers: what prints of the voice, bass, notes and drums, and how harsh each is */
   var cutsGen = 0;
   function applyCuts() {
@@ -126,10 +139,21 @@ export function start() {
     /* bass: where its tracker heard a note, if loud enough */
     var bh = new Float32Array(F); for (i = 0; i < F; i++) bh[i] = ana.bassN[i] >= L.bFloor ? ana.bassHz0[i] : 0;
     ana.bassHz = bh;
-    /* how harsh the voice and bass are, measured every half second: eased over a quarter of a second each way */
-    var hl = new Float32Array(F), hb = new Float32Array(F);
-    for (i = 0; i < F; i++) { hl[i] = harsh(ana.leadRough[i], ana.leadSharp[i]); hb[i] = harsh(ana.bassRough[i], ana.bassSharp[i]); }
-    ana.leadH = easeOut(hl, 11); ana.bassH = easeOut(hb, 11);
+    /* the guitar's line (CREPE on its stem): cut as the voice is, but at its own certainty (a distorted guitar is
+       less periodic than a voice: torchcrepe's own silence threshold, 0.21) */
+    var gv = new Uint8Array(F);
+    if (ana.gtrHz) {
+      for (i = 0; i < F; i++) gv[i] = ana.gtrHz[i] > 0 && ana.gtrP[i] >= L.gConf && ana.gtrL[i] >= L.vFloor ? 1 : 0;
+      for (i = 0; i < F;) { if (!gv[i]) { i++; continue; } k = i; while (k < F && gv[k]) k++; if (k - i < run) gv.fill(0, i, k); i = k; }
+      var gh = new Float32Array(F); for (i = 0; i < F; i++) gh[i] = gv[i] ? ana.gtrHz[i] : 0;
+      ana.gtrLine = steadyVoice(gh);
+    } else ana.gtrLine = new Float32Array(F);
+    /* the noise heard on the voice and on the guitar's line, frame by frame */
+    ana.leadJ = new Float32Array(F); ana.gtrJ = new Float32Array(F);
+    for (i = 0; i < F; i++) {
+      if (ana.vocalsNz) ana.leadJ[i] = heardNoise(ana.vocalsNz[i], stemShare('vocals', i));
+      if (ana.guitarNz) ana.gtrJ[i] = heardNoise(ana.guitarNz[i], stemShare('guitar', i));
+    }
     /* drums */
     S.kicks = []; S.snares = []; S.hats = []; S.toms = []; S.cymbals = [];
     var lists = [S.kicks, S.snares, S.hats, S.toms, S.cymbals];
@@ -139,7 +163,10 @@ export function start() {
     S.pieces = []; S.segMax = 0;
     var tol = 11 * 256 / 22050, minLen = L.noteMin / 1000, H = S.holds;
     S.segs.forEach(function (sg) {
-      sg.hs = harsh(sg.ro, sg.sh);
+      /* a harmonic echo of a lower note (its partial no louder than that note's neighbouring ones would make it)
+         doesn't print; a note at a pitch still ringing, with no attack of its own, carries the ringing one on */
+      sg.cont = sg.ring >= 0 && sg.rise < L.attack;
+      if (sg.ex < L.exDb) return;
       var n = sg.bn, dtn = (sg.t1 - sg.t0) / Math.max(1, n - 1), a = -1, last = -1, first = true;
       function close() {
         var t0 = a === 0 ? sg.t0 : sg.t0 + a * dtn, t1 = Math.min(sg.t1, sg.t0 + last * dtn + dtn);
@@ -153,6 +180,18 @@ export function start() {
       if (a >= 0) close();
     });
     S.pieces.sort(function (x, y) { return x.t0 - y.t0; });
+    /* what sounds, frame by frame, per stem (notes as cut, and the voice's and guitar's lines): where strikes print */
+    var dtf = ana.dt, at = {};
+    function sounds(stem, f, m) { if (f < 0 || f >= F) return; var o = at[stem] || (at[stem] = {}); (o[f] || (o[f] = [])).push(m); }
+    S.pieces.forEach(function (pc) {
+      var stem = STEM_OF[pc.s.src], f0 = Math.round(pc.t0 / dtf) - 2, f1 = Math.round(pc.t1 / dtf);
+      for (var f = f0; f <= f1; f++) sounds(stem, f, pc.s.m);
+    });
+    for (i = 0; i < F; i++) {
+      if (ana.leadHz[i] > 0) sounds('vocals', i, DSP.ftom(ana.leadHz[i]));
+      if (ana.gtrLine[i] > 0) sounds('guitar', i, DSP.ftom(ana.gtrLine[i]));
+    }
+    S.soundsAt = at;
     var hz = []; for (i = 0; i < ana.leadHz.length; i += 3) if (ana.leadHz[i] > 0) hz.push(ana.leadHz[i]);
     hz.sort(function (x, y) { return x - y; }); S.medHz = hz.length ? hz[hz.length >> 1] : 330;
     fitRange(ana); scaleY();
@@ -192,8 +231,6 @@ export function start() {
     return out;
   }
   function brMap(b) { return clamp((b - 0.05) / 0.3, 0, 1); }
-  function zLead(z) { var r = S.ana.noiseRef; return clamp(((z - r[0]) / Math.max(0.05, r[1] - r[0]) - 0.35) * 1.2, 0, 1); }
-  function zSeg(z) { return clamp((z - 0.35) / 0.4, 0, 1); }
   function impulse(list, now, decay) {
     var v = 0;
     for (var i = lowerBound(list, now - 0.6, 't'); i < list.length && list[i].t <= now; i++) v += list[i].s * Math.exp(-(now - list[i].t) * decay);
@@ -256,7 +293,7 @@ export function start() {
      it has scrolled to: a finished stroke never changes shape, so it is kept and only moved (strokeCache). */
   function buildStroke(pts, color, seed, openEnd, ends, passes) {
     var n = pts.length; if (n < 2) return null;
-    var xs = [], ys = [], ts = [], al = [], cs = [], br = [], zs = [], ph = [], qs = [], lfs = [], i, s, P, TAPER = 12;
+    var xs = [], ys = [], ts = [], al = [], cs = [], br = [], zs = [], ph = [], qs = [], lfs = [], js = [], i, s, P, TAPER = 12;
     var tFirst = pts[0].t, xLast = (pts[n - 1].t - tFirst) * pps;
     function lift(x) {
       if (ends === 'square') return 1;
@@ -272,12 +309,12 @@ export function start() {
         var u = s / steps, t = a.t + (b.t - a.t) * u, x = xa + (xb - xa) * u, lf = lift(x);
         xs.push(x); ys.push(a.y + (b.y - a.y) * u); ts.push(t); lfs.push(lf); ja.push(i); ua.push(u);
         al.push((a.a + (b.a - a.a) * u) * lf); cs.push(a.c || color); br.push(a.b + (b.b - a.b) * u);
-        zs.push(a.z + (b.z - a.z) * u); ph.push(t * a.r); qs.push(a.q);
+        zs.push(a.z + (b.z - a.z) * u); ph.push(t * a.r); qs.push(a.q); js.push(a.j != null ? a.j + ((b.j != null ? b.j : a.j) - a.j) * u : -1);
       }
     }
     var Lp = pts[n - 1], lfL = openEnd || ends === 'square' ? 1 : 0;
     xs.push(xLast); ys.push(Lp.y); ts.push(Lp.t); lfs.push(-1); ja.push(n - 1); ua.push(0);
-    al.push(Lp.a * lfL); cs.push(Lp.c || color); br.push(Lp.b); zs.push(0); ph.push(Lp.t * Lp.r); qs.push(Lp.q);
+    al.push(Lp.a * lfL); cs.push(Lp.c || color); br.push(Lp.b); zs.push(0); ph.push(Lp.t * Lp.r); qs.push(Lp.q); js.push(Lp.j != null ? Lp.j : -1);
     var m = xs.length, last = m - 1;
     /* ink strength runs along the stroke as a horizontal gradient, so one fill fades smoothly with no seams; each
        pass prints it at its own strength (globalAlpha) */
@@ -298,11 +335,19 @@ export function start() {
         var sc = lf < 0 ? wS * (0.3 + 0.7 * lfL) : wS * (0.3 + 0.7 * Math.sqrt(lf));
         var wu = (width(p, P.band, 1) + (width(q, P.band, 1) - width(p, P.band, 1)) * u) * sc * L.weight;
         var wd = (width(p, P.band, 0) + (width(q, P.band, 0) - width(p, P.band, 0)) * u) * sc * L.weight;
-        var amp = (wu + wd) / 2 * (0.03 + 0.8 * Math.max(br[i], 0.3 * (qs[i] || 0)));
+        /* the edge: torn by a sawtooth as tall as the noise heard (js, px), or (the old way) by brightness */
+        var amp = js[i] >= 0 ? js[i] * Math.max(0.3, lf < 0 ? lfL : Math.sqrt(lf)) : (wu + wd) / 2 * (0.03 + 0.8 * Math.max(br[i], 0.3 * (qs[i] || 0)));
         var x = xs[i], y = ys[i];
         if (i) path.lineTo(x, y - wu - amp * wave(ph[i], br[i], qs[i])); else path.moveTo(x, y - wu - amp * wave(ph[i], br[i], qs[i]));
         botX.push(x); botY.push(y + wd + amp * wave(ph[i] + 0.41, br[i], qs[i]));
-        if (lf >= 0 && zs[i] > 0.02 && wS === 1 && al[i] > 0.05) {
+        if (js[i] >= 0) {
+          /* bristles: dark hairs across the stroke, as far as its noise is heard (fading over two semitones) */
+          var kb = Math.round(ts[i] * 300) + seed, th = 0.15 + 0.85 * hash(kb);
+          if (lf >= 0 && wS === 1 && zs[i] > th && al[i] > 0.02) {
+            var reach = 2 * SEMI_PX * Math.sqrt(2 * Math.log(zs[i] / th)) + (wu + wd) / 2;
+            dots = dots || new Path2D(); dots.rect(x - 0.45, y - reach, 0.9, 2 * reach);
+          }
+        } else if (lf >= 0 && zs[i] > 0.02 && wS === 1 && al[i] > 0.05) {
           var k = Math.round(ts[i] * 300) + seed;
           if (hash(k) < zs[i] * 0.55) {
             var r = 0.45 + hash(k + 29) * 1.05, dx = x + (hash(k + 7) - 0.5) * 2, dy = y + (hash(k + 13) * 2 - 1) * (wu + wd) / 2 / L.weight * 1.6;
@@ -408,10 +453,10 @@ export function start() {
 
   function frameTrack(now, getHz, getW, getA, getB, getZ, group, alpha, halo, seed) {
     var a = S.ana, dt = a.dt, f0 = Math.max(0, Math.floor((now - WIN - 0.3) / dt)), f1 = Math.min(a.frames - 1, Math.floor(now / dt));
-    var head = null, soft = group === 'bass' && L.bass === 'smudge', smear = [], ear = L.thick === 'ear';
+    var head = null, soft = group === 'bass' && L.bass === 'smudge', smear = [], ear = L.thick === 'ear' && group !== 'guitar';
     var passes = ear ? earPasses(alpha) : (halo > 0 ? [{ a: halo, s: 1.9, band: -1 }] : []).concat([{ a: alpha, s: 1, band: -1 }]);
     function point(f) {
-      var hz = getHz(f), y = yOf(hz), p = { t: f * dt, y: y, w: getW(f), a: getA(f), b: getB(f), z: getZ(f), r: rate(hz), c: tint(group, hz, y) };
+      var hz = getHz(f), y = yOf(hz), p = { t: f * dt, y: y, w: getW(f), a: getA(f), b: 1, j: getB(f), z: getZ(f), r: rate(hz), c: tint(group, hz, y) };
       if (ear) { p.e = earAt(group === 'bass' ? a.bassEar : a.leadEar, f); p.wd = p.e[2]; p.wu = p.e[3]; }
       return p;
     }
@@ -468,7 +513,28 @@ export function start() {
     var u = clamp((t - s.t0) / Math.max(1e-6, s.t1 - s.t0), 0, 1) * (s.bn - 1), k = Math.min(s.bn - 2, Math.floor(u)), f = u - k, b = S.bends, j = s.bs + k;
     return b[j] + (b[j + 1] - b[j]) * f;
   }
-  /* the guitar, piano or other notes (src), each drawn along its pitch as it bends */
+  /* strikes: where a sound is struck (its stem's percussive part, heard within "strikes heard within" dB of the
+     loudest sound near it), as a fine vertical tick through each note or line sounding then, four semitones either
+     side, about every third pixel. Strikes away from anything sounding (drums bleeding into a stem) don't print. */
+  function drawStrikes(now, stem, group) {
+    var a = S.ana, St = a.strikes && a.strikes[stem], at = S.soundsAt && S.soundsAt[stem]; if (!St || !at) return;
+    var NB = a.strikeBands, dt = a.dt, f0 = Math.max(0, Math.floor((now - WIN - 0.2) / dt)), f1 = Math.min(a.frames - 1, Math.floor(now / dt));
+    var every = Math.max(1, Math.round(3 / Math.max(0.1, pps * dt)));
+    ctx.fillStyle = tint(group, 0, 0);
+    for (var f = f0 - (f0 % every); f <= f1; f += every) {
+      var ms = at[f]; if (!ms) continue;
+      var x = xOf(f * dt, now); if (x < clipL - 2) continue;
+      for (var i = 0; i < ms.length; i++) {
+        var m = ms[i], b = clamp(Math.floor((m - 21) * 3 / 24), 0, NB - 1), lo = clamp(Math.floor((m - 25) * 3 / 24), 0, NB - 1), hi = clamp(Math.floor((m - 17) * 3 / 24), 0, NB - 1);
+        var raw = Math.max(St[f * NB + b], St[f * NB + lo], St[f * NB + hi]);
+        var v = clamp(1 - (1 - raw) * 36 / L.sShare, 0, 1); if (v < 0.03) continue;
+        var yt = Math.max(BEAT_H, yOf(DSP.mtof(m + 4))), yb = yOf(DSP.mtof(m - 4));
+        ctx.globalAlpha = inkA(v * 0.8); ctx.fillRect(x - 0.4, yt, 0.8, yb - yt);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+  /* the guitar, piano, other or bass notes (src), each drawn along its pitch as it bends */
   var SEMI_PX = 1;
   function drawSegs(now, lv, src, key) {
     var t0w = now - WIN - 0.2, i = lowerBound(S.pieces, t0w - S.segMax, 't0');
@@ -477,7 +543,7 @@ export function start() {
       var end = Math.min(pc.t1, now); if (end - pc.t0 < 0.02) continue;
       if (pc.t1 >= now) lv[key] += s.a * 0.5;
       var hz = DSP.mtof(s.m), y0 = yOf(hz), open = pc.t1 > now;
-      var col = tint(src === 1 ? 'guitar' : src === 2 ? 'piano' : s.f === 1 ? 'pad' : s.f === 2 ? 'lead' : 'pluck', hz, y0);
+      var col = tint(src === 1 ? 'guitar' : src === 2 ? 'piano' : src === 3 ? 'bass' : s.f === 1 ? 'pad' : s.f === 2 ? 'lead' : 'pluck', hz, y0);
       /* a finished note never changes shape: built once and kept on its piece */
       if (!open) {
         if (pc.stG !== strokeGen) { pc.stG = strokeGen; pc.st = noteStroke(pc, end, col, false); }
@@ -489,12 +555,15 @@ export function start() {
     }
   }
   function noteStroke(pc, end, col, open, pts) {
-    var s = pc.s, passes = L.thick === 'ear' ? earPasses(0.82) : s.f === 1 ? [{ a: 0.12, s: 1.45, band: -1 }, { a: 0.78, s: 1, band: -1 }] : [{ a: s.f === 0 ? 0.85 : 0.82, s: 1, band: -1 }];
-    return buildStroke(pts || notePoints(pc, end), col, 101 + s.id * 7, open, s.f === 0 ? 'blunt' : s.f === 2 ? 'square' : undefined, passes);
+    var s = pc.s, passes = L.thick === 'ear' ? earPasses(0.82) : L.thick === 'thin' ? [{ a: 0.9, s: 1, band: -1 }] : s.f === 1 ? [{ a: 0.12, s: 1.45, band: -1 }, { a: 0.78, s: 1, band: -1 }] : [{ a: s.f === 0 ? 0.85 : 0.82, s: 1, band: -1 }];
+    /* a key still ringing on, which the detector heard struck again and the player did not, starts square so it joins
+       the stroke before it */
+    var ends = s.cont && pc.t0 - s.t0 < 0.05 ? 'square' : s.f === 0 ? 'blunt' : s.f === 2 ? 'square' : undefined;
+    return buildStroke(pts || notePoints(pc, end), col, 101 + s.id * 7, open, ends, passes);
   }
   /* the note's points from the start of this piece to end */
   function notePoints(pc, end) {
-    var s = pc.s, hz = DSP.mtof(s.m), z = zSeg(s.z), r = rate(hz), a1 = Math.min(1, s.a), pts = [];
+    var s = pc.s, hz = DSP.mtof(s.m), r = rate(hz), a1 = Math.min(1, s.a), pts = [], stem = STEM_OF[s.src], thin = L.thick === 'thin';
     var q = s.h > 0.5 ? clamp((s.h - 0.5) * 2.5, 0, 1) : 0;
     /* u: time since the note was struck (a later stretch of the same note carries on its fade) */
     for (var t = pc.t0; ; t += S.ana.dt) {
@@ -513,7 +582,11 @@ export function start() {
         /* held */
         w = (1 + 4.2 * s.a) * 1.15 * Math.min(1, (tt - pc.t0) / 0.02 + 0.5); ink = 0.5 + 0.5 * a1;
       }
-      var pt = { t: tt, y: y, w: w, a: ink, b: s.hs, z: s.f === 1 ? z * 0.5 : z, r: r, q: q };
+      /* its measured level there (its own fade: every key its own), and the noise heard on it (torn edge, bristles) */
+      var j = s.bs + Math.round((tt - s.t0) / Math.max(1e-6, s.t1 - s.t0) * (s.bn - 1));
+      if (S.noteLvl) { ink = lvlInk(S.noteLvl[j]); if (thin) w = SEMI_PX * (0.15 + 0.2 * ink) + 0.55; }
+      var nv = S.noteNz ? heardNoise(S.noteNz[j], stemShare(stem, Math.round(tt / S.ana.dt))) : 0;
+      var pt = { t: tt, y: y, w: w, a: ink, b: 1, j: nv * L.nJag / 3 * SEMI_PX, z: nv, r: r, q: q };
       if (L.thick === 'ear') {
         /* as wide as the ear spreads it; how it was struck, swelled or held shows in the ink alone */
         pt.e = earAt(S.noteEar, s.bs + Math.round((tt - s.t0) / Math.max(1e-6, s.t1 - s.t0) * (s.bn - 1)));
@@ -717,16 +790,27 @@ export function start() {
 
   /* each layer: its name and how to print it as it stands at time now (lv gathers how loud each kind of note is now) */
   var LAYERS = [
-    ['synths', function (now, lv) { drawSegs(now, lv, 0, 'synths'); }],
-    ['piano', function (now, lv) { drawSegs(now, lv, 2, 'piano'); }],
-    ['guitar', function (now, lv) { drawSegs(now, lv, 1, 'guitar'); }],
-    ['bass', function (now) {
+    ['synths', function (now, lv) { drawSegs(now, lv, 0, 'synths'); drawStrikes(now, 'other', 'lead'); }],
+    ['piano', function (now, lv) { drawSegs(now, lv, 2, 'piano'); drawStrikes(now, 'piano', 'piano'); }],
+    ['guitar', function (now, lv) {
       var a = S.ana;
-      frameTrack(now, function (f) { return a.bassHz[f]; }, function (f) { return 0.8 + 12 * a.bassN[f]; }, function (f) { return smooth(0.015, 0.3, a.bassN[f]); }, function (f) { return a.bassH[f]; }, function () { return 0; }, 'bass', 0.86, 0.15, 11);
+      drawSegs(now, lv, 1, 'guitar');
+      /* its line (a solo, a bend), thin, over its notes */
+      if (L.gline === 'on' && a.gtrLine) frameTrack(now, function (f) { return a.gtrLine[f]; }, function (f) { return SEMI_PX * (0.15 + 0.2 * lvlInk(a.guitarLvl ? a.guitarLvl[f] : 1)) + 0.55; }, function (f) { return a.guitarLvl ? lvlInk(a.guitarLvl[f]) : 0.8; }, function (f) { return a.gtrJ[f] * L.nJag / 3 * SEMI_PX; }, function (f) { return a.gtrJ[f]; }, 'guitar', 0.9, 0, 53);
+      drawStrikes(now, 'guitar', 'guitar');
+    }],
+    ['bass', function (now, lv) {
+      var a = S.ana;
+      if (L.bass === 'notes') drawSegs(now, lv, 3, 'bass');
+      else frameTrack(now, function (f) { return a.bassHz[f]; }, function (f) { return 0.8 + 12 * a.bassN[f]; }, function (f) { return smooth(0.015, 0.3, a.bassN[f]); }, function () { return 0; }, function () { return 0; }, 'bass', 0.86, 0.15, 11);
+      drawStrikes(now, 'bass', 'bass');
     }],
     ['voice', function (now) {
       var a = S.ana;
-      frameTrack(now, function (f) { return a.leadHz[f]; }, function (f) { return 0.8 + 8.5 * a.leadN[f]; }, function (f) { return smooth(0.02, 0.4, a.leadN[f]); }, function (f) { return a.leadH[f]; }, function (f) { return zLead(a.leadNz[f]); }, 'voice', 0.9, 0.16, 37);
+      var thin = L.thick === 'thin';
+      frameTrack(now, function (f) { return a.leadHz[f]; }, function (f) { return thin ? SEMI_PX * (0.15 + 0.2 * lvlInk(a.vocalsLvl ? a.vocalsLvl[f] : 1)) + 0.7 : 0.8 + 8.5 * a.leadN[f]; },
+        function (f) { return thin && a.vocalsLvl ? lvlInk(a.vocalsLvl[f]) : smooth(0.02, 0.4, a.leadN[f]); }, function (f) { return a.leadJ[f] * L.nJag / 3 * SEMI_PX; }, function (f) { return a.leadJ[f]; }, 'voice', 0.9, thin ? 0 : 0.16, 37);
+      drawStrikes(now, 'vocals', 'voice');
     }],
     ['hats', function (now) { drawHits(S.hats, now, 'hat'); drawHits(S.cymbals, now, 'cymbal'); }],
     ['toms', function (now) { drawHits(S.toms, now, 'tom'); }],
@@ -1331,7 +1415,7 @@ export function start() {
   function packKey(sha) { return 'pack:' + PIPELINE + ':' + sha; }
   /* only an analysis from the current pipeline (5, which writes pack version 8) is drawn: an older one lacks what the
      drawing needs, so the song is analysed again rather than drawn with stand-ins */
-  function current(pack) { return !!(pack && pack.version >= 13 && pack.segStride === 17 && pack.bytes); }
+  function current(pack) { return !!(pack && pack.version >= 14 && pack.segStride === 19 && pack.bytes && pack.strikes); }
   var idb = (function () {
     var dbp = null;
     function open() {
@@ -1351,7 +1435,7 @@ export function start() {
       put: function (k, v) { return run('readwrite', function (st) { return st.put(v, k); }).catch(function () {}); }
     };
   })();
-  var STAGES = [['stems', 'Splitting the song into stems', 0.2], ['drums', 'Reading the drums', 0.45], ['notes', 'Reading the notes', 0.55], ['tone', 'Listening for harsh sounds', 0.8], ['width', 'Measuring how wide each sound is', 0.82],
+  var STAGES = [['stems', 'Splitting the song into stems', 0.2], ['drums', 'Reading the drums', 0.45], ['notes', 'Reading the notes', 0.55], ['loudness', 'Listening for how loud and how noisy each sound is', 0.8], ['width', 'Measuring how wide each sound is', 0.82],
     ['bass', 'Following the bass', 0.65], ['voice', 'Following the voice', 0.75], ['words', 'Finding the lyrics', 0.85], ['done', 'Finishing', 0.95]];
   function stageOf(st) { for (var i = 0; st && i < STAGES.length; i++) if (st.indexOf(STAGES[i][0]) === 0) return STAGES[i]; return ['', 'Starting the server', 0.12]; }
   function sha256hex(buf) {
@@ -1569,7 +1653,10 @@ export function start() {
     var res = { dur: pack.dur, dt: pack.dt, frames: pack.frames, stereo: pack.stereo, noiseRef: pack.noiseRef };
     for (var k in pack.arrays) res[k] = b64f32(pack.arrays[k]);
     for (k in pack.bytes) res[k] = b64u8(pack.bytes[k]);
-    res.segW = pack.segStride; res.evW = pack.eventStride; res.earDb = pack.earDb;
+    res.segW = pack.segStride; res.evW = pack.eventStride; res.earDb = pack.earDb; res.strikeBands = pack.strikeBands;
+    res.noiseShare = {}; res.strikes = {};
+    for (k in pack.noiseShare) res.noiseShare[k] = b64u8(pack.noiseShare[k]);
+    for (k in pack.strikes) res.strikes[k] = b64u8(pack.strikes[k]);
     return res;
   }
   /* the song's published lyrics (from LRCLIB, each word timed to the voice by the server). If LRCLIB hasn't got the
@@ -1615,10 +1702,11 @@ export function start() {
   /* lab */
   function labVal(k, v) {
     return k === 'secs' ? v.toFixed(1) + ' s' : k === 'res' ? '×' + v.toFixed(2) + (v > (window.devicePixelRatio || 1) ? ' (screen ×' + (window.devicePixelRatio || 1) + ')' : '') : k === 'ink' || k === 'weight' || k === 'drumK' ? '×' + v.toFixed(2)
-      : k === 'vRun' || k === 'noteMin' ? Math.round(v) + ' ms' : k === 'rough0' ? v.toFixed(2) + ' asper' : k === 'sharp0' ? v.toFixed(2) + ' acum'
+      : k === 'vRun' || k === 'noteMin' ? Math.round(v) + ' ms' : k === 'exDb' || k === 'attack' || k === 'nShare' || k === 'sShare' ? v + ' dB'
+      : k === 'nJag' ? (v / 3).toFixed(1) + ' st' : k === 'lFloor' ? '−' + Math.round((1 - v) * 72) + ' dB'
       : k === 'leap' ? v + ' st' : Math.round(v * 100) + '%';
   }
-  var CUTS = { vConf: 1, vFloor: 1, vRun: 1, bFloor: 1, hold: 1, noteMin: 1, drumK: 1, rough0: 1, sharp0: 1 };
+  var CUTS = { vConf: 1, vFloor: 1, vRun: 1, bFloor: 1, hold: 1, noteMin: 1, drumK: 1, exDb: 1, attack: 1, nShare: 1, nGate: 1, gConf: 1 };
   function labUI() {
     labPanel.querySelectorAll('.seg[data-key]').forEach(function (g) {
       var k = g.dataset.key;

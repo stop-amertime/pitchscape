@@ -3,7 +3,9 @@
 A phone-friendly music visualizer. It splits a song into instruments (voice, guitar, piano, bass, drums and the
 rest) and prints each in its own risograph-style ink on a scrolling sheet. Height is pitch. Colour says which
 instrument, warmer the more it is out front; shape says how each note is played (struck, swelling, held); the edge says
-how it sounds, smooth unless it was measured harsh (rough or sharp), and speckle shows breath and noise. Ink strength follows loudness, so quiet passages print pale and thin. The song's published lyrics are printed
+how it sounds: smooth when clean, torn into teeth with dark bristles across it as far as noise (hiss, breath,
+distortion) is heard on it, with fine ticks where it is struck. Ink strength is each note's own measured level, so
+every key fades as it really does and quiet passages print pale. The song's published lyrics are printed
 along the voice line, at the moment and pitch each word is sung.
 
 It started life as a claude.ai artifact, where large models could not load, so it grew its own lightweight analysis
@@ -60,10 +62,10 @@ to `main` that touches `server/`.
 | --- | --- | --- |
 | stems: vocals, drums, bass, guitar, piano, other | Demucs htdemucs_6s (Meta), then made to add up to the song (mixture-consistency projection, Wisdom et al. 2019) | MIT |
 | drums: kick, snare, toms, hi-hat, cymbals | ADTOF Frame_RNN (Zehren, Alunno, Bientinesi), via `thebluescreen/adtof-drums-onnx` | CC BY-NC-SA 4.0, non-commercial |
-| notes, read from the guitar, piano and other stems separately | Basic Pitch (Spotify) | Apache-2.0 |
-| bass line | pYIN (librosa) | ISC |
-| voice line | CREPE (torchcrepe) | MIT |
-| tone: roughness (Daniel & Weber) and sharpness (DIN 45692) | MOSQITO (Eomys) | Apache-2.0 |
+| notes, read from the guitar, piano, bass and other stems separately | Basic Pitch (Spotify) | Apache-2.0 |
+| bass line (a Lab option; the bass prints as notes by default) | pYIN (librosa) | ISC |
+| voice line, and the guitar's line | CREPE (torchcrepe) | MIT |
+| loudness, noise and strikes: each stem's constant-Q transform split into tone, strikes and noise | librosa's CQT and HPSS (Driedger et al. 2014), ported | ISC |
 | lyrics: the song's published words | LRCLIB (lrclib.net), found by the file's tags or an "Artist - Title" file name | free API, no key |
 | when each of those words is sung | forced alignment of those words to the vocal stem: wav2vec 2.0 (torchaudio's WAV2VEC2_ASR_BASE_960H) and torchaudio's forced_align; MMS_FA as an option | MIT (MMS_FA: CC BY-NC 4.0) |
 
@@ -71,11 +73,19 @@ Colour by instrument comes from the stems, so an instrument keeps its ink for th
 out front: voice fluorescent pink, guitar orange, piano sunflower, the other stem's notes (synths, strings, brass,
 organ) teal in three shades by how each is played (darkest held, middle struck, palest swelling), bass blue, drums
 black, words a deep wine. Demucs' piano stem is the least reliable of the six. Notes that turn up in two stems at the
-same pitch and time stay only where they are much stronger. Tone is measured with MOSQITO on each note's own stem
-(one 200 ms slice early in the note, shared by notes of the same stem in the same slice) and on the voice and bass every
-half second, after setting the whole mix to 70 dB SPL so harshness is absolute rather than relative to the song:
-roughness counts above 0.1 asper, sharpness above 1.75 acum, and together they make a note's edge anything from a
-faint smooth ripple to a sawtooth. The slices run in parallel on the server's eight CPU cores.
+same pitch and time stay only where they are much stronger. **Loudness, noise and strikes** (pipeline 11) come from each stem's constant-Q transform at Basic Pitch's own
+resolution (3 bins a semitone from 27.5 Hz, every 11.6 ms; librosa's, ported, within 4e-7 of the peak), in dB below
+the stem's loud level, split by librosa's harmonic-percussive separation (margin 2) into tone, strikes and what is left,
+noise. A note's ink is its level along its path, so every key fades as it really does. Noise and strikes are heard by
+how close they come to the loudest sound within 3 semitones (simultaneous masking), and noise only where the whole
+stem is noisy (6% of its energy over half a second: a concert grand measures about 1%, distorted guitars and rap
+12-17%). Noise tears the note's edge into teeth up to 1.3 semitones tall and grows bristles across it; strikes print as
+ticks through what is sounding. Two tests per note clean up what Basic Pitch over-reads: a note on a harmonic of a
+lower note prints only if its partial stands 7 dB above that note's neighbouring partials (on the Goldberg Aria's
+aligned score this told played notes from overtones with an AUC of 0.91), and a note at a pitch still ringing joins the
+ringing one unless its partials jump 6 dB as it starts. All of it was worked out by eye on 15 recordings of different
+instruments before it was built (`spike-timbre/`, not in the repository). MOSQITO's roughness and sharpness no longer
+drive the edge: on those recordings roughness hardly told a distorted guitar from a clean one (epsilon squared 0.04).
 
 Every note is drawn along its own pitch as it bends, the way the voice is: Basic Pitch reports each note's bend frame
 by frame (in thirds of a semitone; it reads an in-tune note one third high, which is taken off), and the pipeline keeps
@@ -101,7 +111,8 @@ window's own spread its measured width filled 17-21 semitones, a fog. The page p
 1 dB, lighter to 3 dB, a faint haze to 10 dB, each band eased over about 160 ms. So low sounds are wide and high ones
 narrow (at 35 Hz one auditory filter spans about an octave); loud sounds spread upward; a voice's breath, noise and
 wavering pitch are wider, because its own spectrum is. On the test songs the 3 dB band's median is 4-6 semitones for
-the voice, about 3 for notes, and 7-9 for bass guitar (12.6 for a 35 Hz synth bass). The Lab's Print tab can switch back to thickness from loudness, and set how strongly the faint bands print.
+the voice, about 3 for notes, and 7-9 for bass guitar (12.6 for a 35 Hz synth bass). Since pipeline 11 the print draws fine lines by default (Lab > Print > Thickness from: Thin), so every note stays
+apart and its ink and edge carry how it sounds; the ear's widths and thickness from loudness are the other choices.
 
 **No cutoff is baked in.** Every threshold that decides whether something prints is applied by the page, from the
 Lab's Cutoffs tab, so it can be tried on a song without analysing it again. The server finds things down to a floor
@@ -117,7 +128,11 @@ detector's own setting:
 | Note hold | Basic Pitch's frame by frame certainty that a note still sounds; dips under 0.13 s are bridged, as Basic Pitch does | 30% | 15% |
 | Note shortest | note length | 100 ms | 50 ms |
 | Drum certainty | multiple of ADTOF's per-drum thresholds each hit passed | 1x | 0.6x |
-| Rough from / Sharp from | where harshness starts (MOSQITO roughness, sharpness) | 0.1 asper / 1.75 acum | none |
+| Echoes | a note on a lower note's harmonic prints if it stands this far above that note's neighbouring partials | 7 dB | none |
+| Re-struck | a note at a still-ringing pitch starts afresh if its partials jump this much | 6 dB | none |
+| Quietest | notes and lines fade to nothing this far below the stem's loud level | 50 dB | 72 dB |
+| Noise heard within / Noisy stem | noise prints within this many dB of the loudest sound near it, where the stem is this noisy | 24 dB / 6% | 36 dB / 0 |
+| Strikes heard within | strikes print within this many dB of the loudest sound near them | 12 dB | 36 dB |
 | Line break | a voice or bass leap that starts a new stroke | 4 semitones | none |
 
 At the defaults Made in the Dark prints as before: the same 146 kicks, 75 snares and 243 hats, the same voiced frames,
@@ -295,13 +310,19 @@ one that would steps up, or down, until it is clear.
   spectrum (what each of 16 log-spaced bands from 30 Hz to 11 kHz gained over the frames before it, each drum type
   limited to its own region), how long it rings (until its band falls 14 dB), and for kicks the pitch of the boom;
   `segs` as `[t0, t1, midi, amp, brightness, noise, family, attack, fadeDbPerS, vibratoDepth, vibratoHz, hollowness,
-  stem (0 other, 1 guitar, 2 piano), roughness, sharpness, curveStart, curveCount]` x n (version 8, `segStride` 17, the
-  only version the page draws); each note every `dt` from t0 to t1, `curveCount` values from `curveStart` in `bends`
+  stem (0 other, 1 guitar, 2 piano, 3 bass), echoDb (NaN: on no lower note's harmonic), riseDb, curveStart, curveCount,
+  ringingNote (index or -1), harmonic]` x n (version 14, `segStride` 19, the only version the page draws; before 14,
+  roughness and sharpness stood where echoDb and riseDb are); per note sample also `noteLvl` (level, 0..1 over 72 dB
+  below the stem's loud level) and `noteNz` (noise heard there, 1 as loud as the loudest sound within 3 semitones, 0 at
+  36 dB below) in `bytes`, and per frame `vocalsLvl`, `vocalsNz`, `guitarLvl`, `guitarNz` on the voice's and the
+  guitar's lines (`gtrHz`, `gtrP`, `gtrL` in `arrays`, as the voice's); `noiseShare` per stem and frame (its noise
+  energy over all of it, over half a second) and `strikes` per stem (frames x `strikeBands`, 8 semitones each from
+  27.5 Hz: the most strike heard in each), both `{data, lo, hi}`; each note every `dt` from t0 to t1, `curveCount` values from `curveStart` in `bends`
   (its pitch in semitones from `midi`), `holds` (Basic Pitch's certainty it still sounds) and `noteEar` (six per
   sample: down and up, in semitones, at each of `earDb`); `leadEar`, `bassEar` the same per frame. These go in `bytes`
   as `{data, lo, hi}`, value = lo + byte x (hi - lo) / 255; `events` from version 7
   end with the hit's margin (`eventStride` 22); per frame `leadP` (CREPE periodicity) and `leadL` (vocal loudness
-  share), `leadRough`, `leadSharp`, `bassRough`, `bassSharp`; voice and bass carry every frame down to the server's
+  share) (until version 13 also `leadRough`, `leadSharp`, `bassRough`, `bassSharp`); voice and bass carry every frame down to the server's
   floors, uncut; `onsets` as `[time, gapBefore, runEnd, strength]` x n. `lyrics`: `{language, source, lines: [{text, words: [[word, seconds]]}]}`
   or null, with why in `stats.lyrics`.
 - **Timing** (`song-overprint-timing`): `{lines: [{h, t, e, words: [startSeconds, ...]}]}`, one entry per sung line in

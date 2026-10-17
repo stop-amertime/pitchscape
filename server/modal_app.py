@@ -28,7 +28,7 @@ import time
 
 import modal
 
-PIPELINE_VERSION = '10'         # bump when the analysis changes, so old cached results are not served
+PIPELINE_VERSION = '11'         # bump when the analysis changes, so old cached results are not served
 ALLOWED_ORIGINS = ['https://stop-amertime.github.io', 'http://localhost:8000', 'http://127.0.0.1:8000']
 
 app = modal.App('pitchscape')
