@@ -1,10 +1,11 @@
-// words: the song's published lyrics (LRCLIB) with each word placed when it is sung, as server/pipeline.py's
-// lyrics_for does it: the record found from the tags (find_lyrics), its lines (parse_lrc), Whisper's words with their
-// times (whisper.mjs, heard_words), and the two word lists matched in order (difflib's SequenceMatcher, ported here
-// with autojunk off) to time the published words (place_words). What Whisper hears only times the words: it is never
-// shown, and no lyrics on LRCLIB means no words.
+// words: the song's published lyrics (LRCLIB) with each word placed when it is sung: the record found from the tags
+// (find_lyrics, as server/pipeline.py's lyrics_for), its lines (parse_lrc), and each word's time from forced alignment
+// of the text to the vocal stem (align.mjs: a CTC model and torchaudio's forced_align), each line near its LRC time.
+// No lyrics on LRCLIB means no words. placeWords (Whisper's heard words matched to the published ones, the Python
+// pipeline's way) is kept for comparing the two.
 import {songInfo, songTags} from './tags.mjs';
-import {heardWords, pyRound} from './whisper.mjs';
+import {pyRound} from './whisper.mjs';
+import {ALIGNERS, emissions, alignLines} from './align.mjs';
 
 export {songInfo, songTags};
 
@@ -174,6 +175,12 @@ export function placeWords(lines, heard) {
     });
     for (const [li, k] of first) if (t[k] === null || Math.abs(t[k] - st[li]) > 1.0) t[k] = Math.max(0.0, st[li]);
   }
+  return finishTimes(lines, toks, t);
+}
+
+/** Lines with each word's time: times that do not run forward are dropped, and words without a time are spread
+ * evenly between their timed neighbours (0.3 s apart past the first or last). -> [lines or null, share timed]. */
+export function finishTimes(lines, toks, t) {
   // keep only times that run forward
   let last = -1.0;
   for (let k = 0; k < t.length; k++) {
@@ -201,11 +208,13 @@ export function placeWords(lines, heard) {
   return [out, matched];
 }
 
-/** lyrics_for: [lyrics or null, what was found (and why not)]. info: songInfo's (its artist, title and album, the
- * gaps filled from an "Artist - Title" file name); dur: the song's length (s); vocals44: the vocal stem [left, right]
- * at 44.1 kHz. fetch: for LRCLIB (the global one by default). */
+/** [lyrics or null, what was found (and why not)]. info: songInfo's (its artist, title and album, the gaps filled
+ * from an "Artist - Title" file name); dur: the song's length (s); vocals44: the vocal stem [left, right] at 44.1 kHz.
+ * fetch: for LRCLIB (the global one by default). aligner: 'en' (wav2vec 2.0, English letters; the default) or 'mms'
+ * (the multilingual MMS aligner, romanised letters; text in other scripts needs uroman, not ported, so its words go
+ * untimed). onAligned(toks, {t, score, offset}): each word's aligned time and mean log probability. */
 export async function lyricsFor(info, dur, vocals44, rt, {stats = {}, fetch = globalThis.fetch, log = () => {},
-                                                       size = 'medium', onHeard = null, random} = {}) {
+                                                       aligner = 'en', onAligned = null} = {}) {
   const artist = info.artist || '', title = info.title || '', album = info.album || '';
   const found = {artist, title};
   if (!title) return [null, {...found, found: false, why: 'no artist and title in the tags or the file name'}];
@@ -224,16 +233,29 @@ export async function lyricsFor(info, dur, vocals44, rt, {stats = {}, fetch = gl
   let lines = parseLrc(hit.syncedLyrics);
   if (!lines.length) lines = splitlines(hit.plainLyrics || '').filter(ln => strip(ln)).map(ln => [null, strip(ln)]);
   if (!lines.length) return [null, {...found, why: 'no lyrics in the record'}];
-  // Whisper on the vocal stem's mono mix at 16 kHz (librosa soxr_hq, as pipeline.to_rate)
+  // the aligner's emissions for the vocal stem's mono mix at 16 kHz (librosa soxr_hq, as pipeline.to_rate)
   const [l, r] = vocals44, mono = new Float32Array(l.length);
   for (let i = 0; i < l.length; i++) mono[i] = (l[i] + r[i]) / 2;
   const v16 = await rt.pool.call('./resample.mjs', 'resample', [mono, 44100, 16000], [mono.buffer]);
-  const ws = {};
-  const [heard, lang] = await heardWords(v16, rt, {size, stats: ws, random});
-  stats.whisper = ws;
-  if (onHeard) onHeard(heard, lang);
-  const [placed, matched] = placeWords(lines, heard);
-  Object.assign(found, {synced: lines[0][0] !== null, matched: pyRound(matched, 3), heard: heard.length});
-  if (!placed) return [null, {...found, why: 'none of the words were heard'}];
-  return [{language: lang, source: 'LRCLIB', lines: placed}, found];
+  const name = ALIGNERS[aligner];
+  if (!name) throw new Error(`no aligner '${aligner}' (${Object.keys(ALIGNERS).join(', ')})`);
+  const file = rt.keeps ? name : name + '_f32';          // float16 on the browser's GPU, float32 for the CPU
+  const t1 = performance.now();
+  const sess = await rt.session(file);
+  const {labels} = rt.manifest[file];
+  const E = await emissions(v16, sess, labels.length);
+  stats.emission_ms = performance.now() - t1;
+  const toks = [];
+  lines.forEach(([, text], li) => { for (const w of split(text)) toks.push([li, w]); });
+  const t2 = performance.now();
+  const al = alignLines(E, toks, lines.map(([lt]) => lt), dur, labels);
+  stats.align_ms = performance.now() - t2;
+  const aligned = al.t.filter(x => x !== null).length;
+  const [placed, timed] = finishTimes(lines, toks, al.t);
+  Object.assign(found, {synced: lines[0][0] !== null, aligner, aligned: pyRound(aligned / Math.max(1, toks.length), 3),
+                        matched: pyRound(timed, 3), offset: al.offset === null ? null : pyRound(al.offset, 3)});
+  if (onAligned) onAligned(toks, al);
+  if (!placed) return [null, {...found, why: 'none of the words could be aligned'}];
+  return [{language: aligner === 'en' ? 'en' : null, source: 'LRCLIB', lines: placed}, found];
 }
+

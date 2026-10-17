@@ -46,9 +46,9 @@ def pack_path(key):
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 APP = '/app'                       # the JavaScript pipeline's checkout in node_image: src/pipeline, server, models
 MODEL_REPO = 'stopamertime/pitchscape-models'
-# the models the pipeline uses under Node (rt.keeps is false there: Whisper's float32 encoder and decoder)
-NODE_MODELS = ['htdemucs_6s', 'adtof_frame_rnn', 'basic_pitch', 'crepe_full', 'silero_vad',
-               'whisper_medium', 'whisper_medium_encoder_f32', 'whisper_medium_decoder_f32']
+# the models the pipeline uses under Node (rt.keeps is false there: the aligner's float32 file). The multilingual
+# aligner (align_mms_f32, 1.3 GB, CC BY-NC) is not offered by the server yet.
+NODE_MODELS = ['htdemucs_6s', 'adtof_frame_rnn', 'basic_pitch', 'crepe_full', 'align_en_f32']
 
 
 def _fetch_node_models():

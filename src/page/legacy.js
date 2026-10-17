@@ -1176,7 +1176,9 @@ export function start() {
     HERE.tablet = /iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
     HERE.mem = navigator.deviceMemory || 0; HERE.cores = navigator.hardwareConcurrency || 0;
     var sizes = fetch(MODELS + 'manifest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) {
-      var b = 0; for (var k in m || {}) b += m[k].bytes || 0; HERE.mb = Math.round(b / 1e6);
+      // what an analysis here downloads (the manifest also holds the server's float32 files and other aligners)
+      var b = 0; ['htdemucs_6s', 'adtof_frame_rnn', 'basic_pitch', 'crepe_full', 'align_en'].forEach(function (k) { b += (m && m[k] && m[k].bytes) || 0; });
+      HERE.mb = Math.round(b / 1e6);
     }, function () {});
     /* why not, short enough for the card */
     var gpu = !navigator.gpu ? Promise.resolve(HERE.why = 'No WebGPU: use Chrome or Edge')
