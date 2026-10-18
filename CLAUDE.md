@@ -41,8 +41,27 @@ Corollaries the user has stated or endorsed:
 - **No fallbacks or stand-ins.** If data is missing, show nothing (or say so), never a substitute that looks like data.
   An old pack is analysed again, not drawn with defaults; no lyrics from LRCLIB means no words, never Whisper's
   transcription.
-- **No baked-in cutoffs.** Thresholds (detector certainty, quietest, shortest, where harshness starts...) are Lab
-  levers whose defaults are the model's own settings; the server sends certainties down to a floor and the page cuts.
+- **Fade, don't cut.** Certainty and loudness never decide whether something prints: an unsure or quiet note prints
+  fainter, fading smoothly to nothing, never vanishing at a step. Only decisions about *what a sound is* may remove
+  it: an overtone of a lower note (the echo test), a leak from another stem. Even those fade near their margin. A hard
+  threshold makes squared-off edges and drops real music (pipeline 11's page, 21 songs: the note-hold check at 0.3 plus
+  a 100 ms shortest piece lost 17-23% of note-seconds; on a fast guitar solo 386 of 637 notes, though their median
+  level was 17 dB below the guitar's loudest). No minimum lengths. Lab levers set how gradual a fade is, not where a
+  cut falls; the server sends everything down to its floors and the page fades. (As of pipeline 11 the page still
+  cuts by note hold, shortest note, voice certainty and loudness, shortest run, and "heard within": to be converted.)
+- **Masking is the ear's, not ours.** What one sound hides of another is judged within the ear's bandwidth at that
+  pitch (Glasberg & Moore's ERB), not a fixed number of semitones, and it fades with how far below the masker it is.
+- **Character, not the analysis's texture.** Each instrument should look the way it sounds to a listener (distorted
+  guitar gritty and continuous, a piano struck and fading, a pad a soft wide wash, a lead a crisp line) while staying
+  readable as music. Drawing the raw transform (every CQT bin, every overtone, 72 dB of it) shows the measuring tool's
+  grid and the stems' bleed and looks artificial; overtones of a note are not drawn as lines of their own. Character
+  comes from measured qualities of each sound (noisy or pure, struck or held, its level and fade, wide or narrow in
+  stereo, steady or wobbling), each drawn as a print would.
+- **Judge by a viewer, measure against ground truth.** Whether it works is whether someone watching would want to see
+  it, not whether it matches a score. But claims about what is found (notes, bleed, which instrument) are checked on
+  multitracks where every instrument was recorded separately (`testsongs/multitrack/`, Cambridge-MT), never only by eye.
+- **One problem at a time, the coarse ones first.** The voice bleeding into the guitar stem, and a pad and a lead synth
+  drawn alike, come before telling two of the same instrument apart (the hardest case in source separation).
 - **Prefer established libraries over hand-rolled heuristics**, and a model's own decision over a threshold we invent
   (pYIN's voicing is an HMM decision, so bass gets no "certainty" lever).
 - Where a faithful rendering looks bad (distorted rhythm guitar really does excite 10+ semitones of the ear per strum),
