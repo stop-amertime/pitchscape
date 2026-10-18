@@ -57,6 +57,18 @@ Corollaries the user has stated or endorsed:
   grid and the stems' bleed and looks artificial; overtones of a note are not drawn as lines of their own. Character
   comes from measured qualities of each sound (noisy or pure, struck or held, its level and fade, wide or narrow in
   stereo, steady or wobbling), each drawn as a print would.
+- **An instrument is a body, its notes are inside it (the tree).** What works to watch moves in time with what is
+  heard: a drum hit appears, has a size and fades on the beat; a single voice is one line that moves with the melody.
+  Notes drawn as thin lines of near-constant ink do not: they show what is played but not the instrument's life, the
+  swell, the pluck and its decay, the pumping "wub", the fade, which the ear follows as closely as the pitches. So
+  each instrument (stem) has a body with its own envelope through time, and its notes are drawn within it: the body
+  spans the pitches it is playing at that moment (narrow for one note, tall for a chord), its ink and thickness follow
+  the stem's measured loudness moment to moment, and its edge or texture its brightness (a filter opening and closing
+  is much of a synth's swell and wub). A pluck is a burst that shrinks away, a pad a slow swell, a pumping synth a band
+  that pulses in time, a fade-out thins to nothing; the notes stay readable inside. Pitch movement within a held synth
+  note is small (Glue, held sounds: median 7-9 cents), so "it sounds alive but looks static" is usually dynamics, not
+  pitch. Like everything else, the envelope is measured (each stem's level and spectral centroid), never animated for
+  effect.
 - **Judge by a viewer, measure against ground truth.** Whether it works is whether someone watching would want to see
   it, not whether it matches a score. But claims about what is found (notes, bleed, which instrument) are checked on
   multitracks where every instrument was recorded separately (`testsongs/multitrack/`, Cambridge-MT), never only by eye.
