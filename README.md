@@ -60,7 +60,8 @@ to `main` that touches `server/`.
 
 | Layer | Model | Licence |
 | --- | --- | --- |
-| stems: vocals, drums, bass, guitar, piano, other | Demucs htdemucs_6s (Meta), then made to add up to the song (mixture-consistency projection, Wisdom et al. 2019) | MIT |
+| stems: the voice first | Mel-Band RoFormer (Wang, Lu & Won 2023), Kimberley Jensen's vocal model | MIT |
+| stems: drums, bass, guitar, piano, other (and what voice is left) | Demucs htdemucs_6s (Meta) on the song without the voice, then made to add up to the song (mixture-consistency projection, Wisdom et al. 2019) | MIT |
 | drums: kick, snare, toms, hi-hat, cymbals | ADTOF Frame_RNN (Zehren, Alunno, Bientinesi), via `thebluescreen/adtof-drums-onnx` | CC BY-NC-SA 4.0, non-commercial |
 | notes, read from the guitar, piano, bass and other stems separately | Basic Pitch (Spotify) | Apache-2.0 |
 | bass line (a Lab option; the bass prints as notes by default) | pYIN (librosa) | ISC |
@@ -163,8 +164,8 @@ page in the browser; close its window to stop it. Options go after it, e.g. `Pit
 By hand (any system): Python 3, Node 24 or later and ffmpeg on the PATH; in the repository folder `npm ci`, then
 `python -m server.local` and open http://localhost:8000.
 
-When it starts it fetches the models into `models/` (`node tools/fetch_models.mjs`: Demucs, ADTOF, Basic Pitch, CREPE and the
-forced aligner, about 600 MB, once, each checked against its SHA-256). Every song sent to it is kept in a
+When it starts it fetches the models into `models/` (`node tools/fetch_models.mjs`: the vocal model, Demucs, ADTOF, Basic Pitch, CREPE and the
+forced aligner, about 1.5 GB, once, each checked against its SHA-256). Every song sent to it is kept in a
 library, `~/.pitchscape/library/<sha256>/`: the audio as it came, its cover art, `song.json` (what identifies the
 recording: title, artist, album, track, year, ISRC, MusicBrainz ids, length, every tag) and one analysis per pipeline
 version (`pack-v5.json`...). A song opens at once the second time, and `--update-library` brings every kept song up to a
@@ -311,7 +312,8 @@ one that would steps up, or down, until it is clear.
   limited to its own region), how long it rings (until its band falls 14 dB), and for kicks the pitch of the boom;
   `segs` as `[t0, t1, midi, amp, brightness, noise, family, attack, fadeDbPerS, vibratoDepth, vibratoHz, hollowness,
   stem (0 other, 1 guitar, 2 piano, 3 bass), echoDb (NaN: on no lower note's harmonic), riseDb, curveStart, curveCount,
-  ringingNote (index or -1), harmonic]` x n (version 14, `segStride` 19, the only version the page draws; before 14,
+  ringingNote (index or -1), harmonic]` x n (version 15, `segStride` 19, the only version the page draws: 15 has the same fields as 14, its stems separated
+  with the voice first; before 14,
   roughness and sharpness stood where echoDb and riseDb are); per note sample also `noteLvl` (level, 0..1 over 72 dB
   below the stem's loud level) and `noteNz` (noise heard there, 1 as loud as the loudest sound within 3 semitones, 0 at
   36 dB below) in `bytes`, and per frame `vocalsLvl`, `vocalsNz`, `guitarLvl`, `guitarNz` on the voice's and the

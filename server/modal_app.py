@@ -28,7 +28,7 @@ import time
 
 import modal
 
-PIPELINE_VERSION = '11'         # bump when the analysis changes, so old cached results are not served
+PIPELINE_VERSION = '12'         # bump when the analysis changes, so old cached results are not served
 ALLOWED_ORIGINS = ['https://stop-amertime.github.io', 'http://localhost:8000', 'http://127.0.0.1:8000']
 
 app = modal.App('pitchscape')
@@ -46,9 +46,9 @@ def pack_path(key):
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 APP = '/app'                       # the JavaScript pipeline's checkout in node_image: src/pipeline, server, models
 MODEL_REPO = 'stopamertime/pitchscape-models'
-# the models the pipeline uses under Node (rt.keeps is false there: the aligner's float32 file). The multilingual
+# the models the pipeline uses under Node (rt.keeps is false there: the vocal model's and the aligner's float32 files). The multilingual
 # aligner (align_mms_f32, 1.3 GB, CC BY-NC) is not offered by the server yet.
-NODE_MODELS = ['htdemucs_6s', 'adtof_frame_rnn', 'basic_pitch', 'crepe_full', 'align_en_f32']
+NODE_MODELS = ['vocals_mbr_f32', 'htdemucs_6s', 'adtof_frame_rnn', 'basic_pitch', 'crepe_full', 'align_en_f32']
 
 
 def _fetch_node_models():

@@ -7,9 +7,12 @@
 //                                               ├─► voice, guitar ───┴─► width ────┤
 //                                               └─► words (LRCLIB, aligned) ───────┘
 //
+// stems: the voice first (vocals.mjs, Mel-Band RoFormer), then Demucs (stems.mjs) on the rest, made to add up to the mix.
+//
 // progress(message) gets the same stage messages as the Python pipeline ('stems: ...', 'drums: ...'), which the page
 // maps to text (STAGES in src/page/legacy.js).
 import {separate, consistent, SOURCES} from './stems.mjs';
+import {separateVocals} from './vocals.mjs';
 import {drums} from './drums.mjs';
 import {notes} from './notes.mjs';
 import {bass} from './bass.mjs';
@@ -25,18 +28,31 @@ const mono = ([l, r]) => { const y = new Float32Array(l.length); for (let i = 0;
  * words: false to skip LRCLIB and the alignment; aligner: words.mjs's lyricsFor's ('en', or 'mms'). shifts: Demucs's (1, as the pipeline). stems: stems already made
  * ({name: [left, right]} at 44.1 kHz, e.g. Python's, to compare the later stages on the same input; Demucs is then
  * skipped, as pipeline.analyze's stems_dir). consistent: Demucs's stems made to add up to the mix (stems.mjs; not
- * applied to given stems). mix: the song already decoded ([left, right] at 44.1 kHz; the page
+ * applied to given stems). vocalsFirst: the voice taken out by Mel-Band RoFormer (vocals.mjs) before Demucs runs on
+ * the rest (false: Demucs alone, as before pipeline 12). mix: the song already decoded ([left, right] at 44.1 kHz; the page
  * decodes it, as a Worker cannot). Returns the pack. */
-export async function analyze(bytes, name, rt, {progress = () => {}, words = true, aligner = 'en', shifts = 1, consistent: mc = true, stats = {}, stems: given = null, mix: decoded = null} = {}) {
+export async function analyze(bytes, name, rt, {progress = () => {}, words = true, aligner = 'en', shifts = 1, consistent: mc = true, vocalsFirst = true, stats = {}, stems: given = null, mix: decoded = null} = {}) {
   const t0 = performance.now(), ms = {};
   const timed = async (key, p) => { const t = performance.now(); const v = await p; ms[key] = Math.round(performance.now() - t); return v; };
   const sha = await rt.sha256(bytes);
   const [song, mix] = await Promise.all([songInfo(bytes, name, sha), decoded || timed('decode', rt.decode(bytes, 44100))]);
   const dur = mix[0].length / 44100, F = frameCount(dur);
 
+  let stems = given;
   if (given) progress('stems: given');
-  else progress('stems: separating with Demucs');
-  let stems = given || await timed('stems', separate(mix, rt, {shifts, progress: (k, n) => progress(`stems: ${k}/${n}`)}));
+  else {
+    // the voice first (Mel-Band RoFormer: Demucs alone left it audible in the guitar and other stems), then Demucs on
+    // the rest; what Demucs still hears as voice there joins the vocals
+    let voc = null, src = mix;
+    if (vocalsFirst) {
+      progress('stems: separating the voice');
+      voc = await timed('vocals', separateVocals(mix, rt, {progress: (k, n) => progress(`stems: voice ${k}/${n}`)}));
+      src = mix.map((ch, c) => { const y = new Float32Array(ch.length); for (let i = 0; i < ch.length; i++) y[i] = ch[i] - voc[c][i]; return y; });
+    }
+    progress('stems: separating with Demucs');
+    stems = await timed('stems', separate(src, rt, {shifts, progress: (k, n) => progress(`stems: ${k}/${n}`)}));
+    if (voc) stems.vocals = stems.vocals.map((ch, c) => { for (let i = 0; i < ch.length; i++) ch[i] += voc[c][i]; return ch; });
+  }
   if (!given && mc) stems = await timed('consistent', consistent(mix, stems, rt));
   // pipeline.analyze's st22: each stem's mono mix at 22.05 kHz (librosa soxr_hq), on the workers
   const st22 = {};

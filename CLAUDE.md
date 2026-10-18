@@ -95,7 +95,11 @@ Corollaries the user has stated or endorsed:
    audio and `song.json` under `/cache/library/<sha>/`; dedupes concurrent jobs (`running` Dict, ignores stuck ones);
    stage messages in the `progress` Dict. `server/local.py` does the same on one machine with a library folder.
 4. **Pipeline** (`analyze` in `src/pipeline/index.mjs`; the stage names below are pipeline.py's, which the JS follows), in order (each `progress('<stage>: ...')`):
-   - `stems`: Demucs htdemucs_6s → drums, bass, other, vocals, guitar, piano; then (pipeline 10) made to add up to the
+   - `stems` (pipeline 12): the voice first, by Kimberley Jensen's Mel-Band RoFormer (`vocals.mjs`), then Demucs
+     htdemucs_6s on the song minus the voice → drums, bass, other, vocals (added to the voice), guitar, piano. Why:
+     Demucs alone left the voice audible in the guitar and other stems (heard on Code Monkey, Fluoride and Denial; an
+     energy measure at the voice's harmonics could not tell bleed from a guitar playing the singer's notes, so the
+     user's ears decided). Then (pipeline 10) made to add up to the
      song: each stem takes its share of the leftover (mix minus their sum) in proportion to its power in each STFT bin
      (`consistent`, `mixture.dsp.mjs`: Wisdom et al. 2019's mixture-consistency projection). The leftover was about
      -23 dB below the mix; most stems change by -20 to -35 dB, the quiet ones gain most (other, piano), and sound that
@@ -223,6 +227,23 @@ different per song; the voice's ear width on the Goldberg aria and Hiroshima dif
   model 101 s of it; decoding and details overlap it on 8 workers). Basic Pitch on Fluoride (222 s): Node CPU 4.7 s
   a stem at 8 a call (12 s one at a time), Node WebGPU 4.1 s for all three (within 1.3e-6, the same notes); Chrome
   WebGPU 0.75 s a stem warm (the whole stage 4.8 s, 5915 notes as Python), wasm 17.4 s a stem. So no `"ep": "cpu"`: on the GPU everywhere.
+- Vocals (`vocals.mjs`, `vocals.dsp.mjs`, `tools/export_vocals.py`; pipeline 12): Mel-Band RoFormer (Wang, Lu & Won
+  2023), Kimberley Jensen's checkpoint (MIT, https://huggingface.co/KimberleyJSN/melbandroformer), run as its
+  inference.py does (8 s chunks every 4 s, reflect-padded ends, linear fades over a tenth of a chunk). Only the network
+  is exported: band gather, mask averaging over the bands sharing a bin, the STFT (2048 / 441, centred) and iSTFT
+  (its window envelope varies: 441 does not divide 2048) are JS, as for Demucs. For WebGPU the export writes the
+  band split, unbind and cat band by band (one op with 60 inputs needs more than a shader's 16 buffers), joined in
+  groups of 8, and runs the time attention 10 bands at a time (all 60 at once needed one 2.5 GB buffer; WebGPU allows
+  2 GB); the float16 file (462 MB, browser) normalises and counts rotary positions in float32 (RMSNorm's sum of squares
+  overflowed float16 on WebGPU: the output came out at 15% of its level; a Range in float16 does not export). Parity on
+  Fluoride: JS float32 (Node) against PyTorch float32 SDR 74.2 dB; Node float16 against float32 47.9 dB; Chrome
+  float16 (RTX 5080, browser decoder) against Node float32 46.6 dB. Speed, 222 s song: PyTorch CUDA (autocast) 13-18
+  s; Node WebGPU float32 55 s of GPU (110 s before grouping the attention), float16 53 s (so Node keeps float32);
+  Chrome RTX 5080 float16 59 s. Two chunks a call were slower (147 s) and four ran out of memory: one a call. The
+  whole pipeline under Node: Fluoride 160 s (vocals 65 s, Demucs 23 s), Code Monkey 139 s (56 s, 21 s). Speeding it
+  up (ONNX Runtime's WebGPU kernels, as was done for Whisper) is open. `tools/browser_vocals.html?song=NAME&ref=DIR`
+  runs it in a browser (served by browser_check.py). The Chrome under remote debugging on 9333 runs on the AMD
+  integrated GPU: start one with `--force_high_performance_gpu` (and its own `--user-data-dir`) for the RTX.
 - Stems so far (htdemucs_6s, all nine test songs, shifts=0 on both sides): 35-75 dB SDR against PyTorch on every
   audible stem, with the difference at or below -75 dBFS. For scale, the pipeline's own random shift moves stems by
   2-22 dB. Chrome on the RTX 5080: a 222 s song in 15 s with the shader cache warm (plus 2.5 s to create the session),
@@ -291,7 +312,7 @@ different per song; the voice's ear width on the Goldberg aria and Hiroshima dif
   Strikes drawn across their whole band rained across the sheet (drum bleed in every stem, in time with the hats):
   the page prints them only as ticks through notes and lines sounding then. The bass now also goes through Basic Pitch
   (NOTE_STEMS index 3), and CREPE runs on the guitar stem as well (`voice()` on it). MOSQITO's tone stage no longer
-  runs (tone.mjs kept for parity_tone). pipeline.py has none of this: the page draws only pack 14.
+  runs (tone.mjs kept for parity_tone). pipeline.py has none of this: the page draws only pack 15 (14's format, pipeline 12's stems).
 - Words (`words.mjs`, `tags.mjs`, `align.mjs`): `songInfo(bytes, name, sha)` is song_info with its own tag reader
   (ID3v1/v2, MP3 Xing/LAME/VBRI, MP4, FLAC, Ogg Vorbis/Opus, WAV; FFmpeg 9.0.2's key names and length arithmetic, no
   ffprobe); `lyricsFor(info, dur, vocals44, rt, {aligner = 'en', stats, fetch, log, onAligned})` finds the record as

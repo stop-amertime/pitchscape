@@ -2,7 +2,8 @@
 them (https://huggingface.co/<repo>/resolve/main/<file>).
 
   hf auth login                                # once, with a write token, in your own terminal
-  python tools/publish_models.py OWNER/pitchscape-models [--private]
+  python tools/publish_models.py OWNER/pitchscape-models [--private] [--only=NAME,NAME]   (--only: just those, added
+                                               to the manifest already published)
 
 Uploads manifest.json, every file it lists, and a README (the model card) saying where each model comes from and
 under what licence. A model with no entry in SOURCES below is refused: say what it is before it is published.
@@ -31,6 +32,13 @@ SOURCES = {
                     'Transcription and Multipitch Estimation", ICASSP 2022), Spotify, from '
                     'https://github.com/spotify/basic-pitch: the ONNX file the basic-pitch 0.4.0 package ships, copied '
                     'unchanged.', 'Apache-2.0'),
+    'vocals_mbr': ('Mel-Band RoFormer vocal separation (architecture: J.-C. Wang, W.-T. Lu, M. Won, "Mel-RoFormer for '
+                   'Vocal Separation and Vocal Melody Transcription", 2023), trained by Kimberley Jensen: the checkpoint '
+                   'at https://huggingface.co/KimberleyJSN/melbandroformer with the code of '
+                   'https://github.com/KimberleyJensen/Mel-Band-Roformer-Vocal-Model. Its network exported to ONNX in '
+                   'float16 (normalisation and rotary positions in float32) by tools/export_vocals.py.', 'MIT'),
+    'vocals_mbr_f32': ("The same Mel-Band RoFormer vocal model exported to ONNX in float32 (for ONNX Runtime's CPU "
+                       'and CUDA providers) by tools/export_vocals.py.', 'MIT'),
     'silero_vad': ('Silero VAD v6 voice activity detector (Silero Team, https://github.com/snakers4/silero-vad): the '
                    'ONNX file faster-whisper 1.2.1 ships and runs for vad_filter, copied unchanged.', 'MIT'),
 }
@@ -85,9 +93,18 @@ on WebGPU) and on its server, converted to ONNX. Each keeps its own authors' lic
 if __name__ == '__main__':
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     if len(args) != 1 or '/' not in args[0]:
-        sys.exit('usage: python tools/publish_models.py OWNER/REPO [--private]')
+        sys.exit('usage: python tools/publish_models.py OWNER/REPO [--private] [--only NAME,NAME...]')
     repo = args[0]
     manifest = json.load(open(os.path.join(MODELS, 'manifest.json')))
+    # --only: upload just these, added to the manifest already published (the rest of it left as it is)
+    only = next((a.split('=', 1)[1].split(',') for a in sys.argv[1:] if a.startswith('--only=')), None)
+    if only:
+        from huggingface_hub import hf_hub_download
+        published = json.load(open(hf_hub_download(repo, 'manifest.json', force_download=True)))
+        upload = {k: manifest[k] for k in only}
+        manifest = dict(published, **upload)
+    else:
+        upload = manifest
     unknown = [k for k in manifest if k not in SOURCES]
     if unknown:
         sys.exit('no source and licence in tools/publish_models.py SOURCES for: ' + ', '.join(unknown))
@@ -95,9 +112,9 @@ if __name__ == '__main__':
     api = HfApi()
     print('as', api.whoami()['name'])
     api.create_repo(repo, repo_type='model', private='--private' in sys.argv, exist_ok=True)
-    for k, v in manifest.items():
+    for k, v in upload.items():
         print('uploading', v['file'], '%.1f MB' % (v['bytes'] / 1e6), flush=True)
         api.upload_file(path_or_fileobj=os.path.join(MODELS, v['file']), path_in_repo=v['file'], repo_id=repo)
-    api.upload_file(path_or_fileobj=os.path.join(MODELS, 'manifest.json'), path_in_repo='manifest.json', repo_id=repo)
+    api.upload_file(path_or_fileobj=json.dumps(manifest, indent=1).encode(), path_in_repo='manifest.json', repo_id=repo)
     api.upload_file(path_or_fileobj=card(repo, manifest).encode(), path_in_repo='README.md', repo_id=repo)
     print('https://huggingface.co/%s' % repo)

@@ -75,7 +75,7 @@ export function makePack(r) {
   NOTE_STEMS.forEach((n, i) => { notesByStem[n] = segs.filter(s => s[12] === i).length; });
   const song = r.song;
   return {
-    format: 'song-overprint-pack', version: 14, source: 'pitchscape-js',
+    format: 'song-overprint-pack', version: 15, source: 'pitchscape-js',
     models: {stems: 'htdemucs_6s', drums: 'ADTOF Frame_RNN', notes: 'Basic Pitch ICASSP 2022', bass: 'pYIN, Basic Pitch', voice: 'CREPE',
       guitarLine: 'CREPE', loudness: 'librosa CQT, HPSS (Driedger 2014)', width: 'Glasberg & Moore roex excitation patterns',
       words: r.words ? 'LRCLIB, aligned by CTC' : null},

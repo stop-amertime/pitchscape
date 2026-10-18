@@ -28,6 +28,8 @@ unchanged. Input serving_default_input_2:0 [windows, 43844, 1] (mono, 22.05 kHz,
 CQT is in the graph); outputs StatefulPartitionedCall:1 note [windows, 172, 88], :2 onset [windows, 172, 88],
 :0 contour [windows, 172, 264].
 
+vocals_mbr (and vocals_mbr_f32): the stems stage's vocal model, run before Demucs; tools/export_vocals.py says what it is.
+
 whisper_<size> (base, small, medium) and silero_vad: the words stage's models; tools/export_whisper.py says what they
 are. One export there gives several files (encoder, decoder, their float32 copies, the tokenizer).
 """
@@ -192,10 +194,12 @@ if __name__ == '__main__':
     sys.path.insert(0, ROOT)
     import export_whisper
     import export_align
+    import export_vocals
     EXPORTS = {'htdemucs_6s': export_demucs, 'adtof_frame_rnn': export_adtof, 'basic_pitch': export_basic_pitch,
                'crepe_full': export_crepe, 'silero_vad': lambda: export_whisper.export_silero(OUT),
                **{'whisper_' + s: (lambda s=s: export_whisper.export(s, OUT)) for s in ('base', 'small', 'medium')},
-               **{'align_' + s: (lambda s=s: export_align.export(s, OUT)) for s in ('en', 'mms')}}
+               **{'align_' + s: (lambda s=s: export_align.export(s, OUT)) for s in ('en', 'mms')},
+               'vocals_mbr': lambda: {'vocals_mbr': export_vocals.export(OUT, True), 'vocals_mbr_f32': export_vocals.export(OUT, False)}}
     want = sys.argv[1:] or list(EXPORTS)
     mpath = os.path.join(OUT, 'manifest.json')
     manifest = json.load(open(mpath)) if os.path.exists(mpath) else {}

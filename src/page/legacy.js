@@ -1415,7 +1415,7 @@ export function start() {
   function packKey(sha) { return 'pack:' + PIPELINE + ':' + sha; }
   /* only an analysis from the current pipeline (5, which writes pack version 8) is drawn: an older one lacks what the
      drawing needs, so the song is analysed again rather than drawn with stand-ins */
-  function current(pack) { return !!(pack && pack.version >= 14 && pack.segStride === 19 && pack.bytes && pack.strikes); }
+  function current(pack) { return !!(pack && pack.version >= 15 && pack.segStride === 19 && pack.bytes && pack.strikes); }
   var idb = (function () {
     var dbp = null;
     function open() {
@@ -1542,7 +1542,7 @@ export function start() {
     HERE.mem = navigator.deviceMemory || 0; HERE.cores = navigator.hardwareConcurrency || 0;
     var sizes = fetch(MODELS + 'manifest.json', { cache: 'no-cache' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) {
       // what an analysis here downloads (the manifest also holds the server's float32 files and other aligners)
-      var b = 0; ['htdemucs_6s', 'adtof_frame_rnn', 'basic_pitch', 'crepe_full', 'align_en'].forEach(function (k) { b += (m && m[k] && m[k].bytes) || 0; });
+      var b = 0; ['vocals_mbr', 'htdemucs_6s', 'adtof_frame_rnn', 'basic_pitch', 'crepe_full', 'align_en'].forEach(function (k) { b += (m && m[k] && m[k].bytes) || 0; });
       HERE.mb = Math.round(b / 1e6);
     }, function () {});
     /* why not, short enough for the card */

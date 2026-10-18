@@ -12,7 +12,7 @@ import {pipeline} from 'node:stream/promises';
 const REPO = 'https://huggingface.co/stopamertime/pitchscape-models/resolve/main/';
 // rt.keeps is false under Node: the aligner's float32 file (the browser's is float16); keep in step with NODE_MODELS
 // in server/modal_app.py
-export const NODE_MODELS = ['htdemucs_6s', 'adtof_frame_rnn', 'basic_pitch', 'crepe_full', 'align_en_f32'];
+export const NODE_MODELS = ['vocals_mbr_f32', 'htdemucs_6s', 'adtof_frame_rnn', 'basic_pitch', 'crepe_full', 'align_en_f32'];
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'models');
 
 const sha256 = file => new Promise((res, rej) => {
