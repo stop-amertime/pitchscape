@@ -540,7 +540,9 @@ export function start() {
   }
   /* strikes: where a sound is struck (its stem's percussive part, heard within "strikes heard within" dB of the
      loudest sound near it), as a fine vertical tick through each note or line sounding then, four semitones either
-     side, about every third pixel. Strikes away from anything sounding (drums bleeding into a stem) don't print. */
+     side, about every third pixel. Strikes away from anything sounding (drums bleeding into a stem) don't print.
+     Notes mode only: with Lines (the default) a strike is the line's darker head, and the ticks on the voice and bass,
+     a fixed 8 semitones tall whatever the hit, read as random bars. */
   function drawStrikes(now, stem, group) {
     var a = S.ana, St = a.strikes && a.strikes[stem], at = S.soundsAt && S.soundsAt[stem]; if (!St || !at) return;
     var NB = a.strikeBands, dt = a.dt, f0 = Math.max(0, Math.floor((now - WIN - 0.2) / dt)), f1 = Math.min(a.frames - 1, Math.floor(now / dt));
@@ -884,14 +886,14 @@ export function start() {
       if (L.bass === 'notes' && linesOn()) return drawLines(now, lv, 'bass', 'bass', 'bass');
       if (L.bass === 'notes') drawSegs(now, lv, 3, 'bass');
       else frameTrack(now, function (f) { return a.bassHz[f]; }, function (f) { return 0.8 + 12 * a.bassN[f]; }, function (f) { return smooth(0.015, 0.3, a.bassN[f]); }, function () { return 0; }, function () { return 0; }, 'bass', 0.86, 0.15, 11);
-      drawStrikes(now, 'bass', 'bass');
+      if (!linesOn()) drawStrikes(now, 'bass', 'bass');
     }],
     ['voice', function (now) {
       var a = S.ana;
       var thin = L.thick === 'thin';
       frameTrack(now, function (f) { return a.leadHz[f]; }, function (f) { return thin ? SEMI_PX * (0.15 + 0.2 * lvlInk(a.vocalsLvl ? a.vocalsLvl[f] : 1)) + 0.7 : 0.8 + 8.5 * a.leadN[f]; },
         function (f) { return (thin && a.vocalsLvl ? lvlInk(a.vocalsLvl[f]) : smooth(0.02, 0.4, a.leadN[f])) * a.leadLk[f]; }, function (f) { return a.leadJ[f] * L.nJag / 3 * SEMI_PX; }, function (f) { return a.leadJ[f]; }, 'voice', 0.9, thin ? 0 : 0.16, 37);
-      drawStrikes(now, 'vocals', 'voice');
+      if (!linesOn()) drawStrikes(now, 'vocals', 'voice');
     }],
     ['hats', function (now) { drawHits(S.hats, now, 'hat'); drawHits(S.cymbals, now, 'cymbal'); }],
     ['toms', function (now) { drawHits(S.toms, now, 'tom'); }],
