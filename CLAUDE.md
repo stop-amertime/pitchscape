@@ -475,6 +475,12 @@ changed). The page draws only current packs; an older one is analysed again (clo
 
 ## Open threads (as of pipeline 7)
 
+- **First: telling instruments apart** (2026-10-19, the user). The data under the drawing must say "instrument X
+  plays note Y", "A plays G#, B plays C": two voices, two guitars, one guitar's chord, and no voice leaking into other
+  stems (or a synth into the vocal stem, as on Trance). Drawing character waits on this.
+- **Parked: drawing how it sounds** (character, psychoacoustic measures, the treatments player): what was tried, the
+  user's verdict on each, the measurements, and the options for heard loudness, sharpness and roughness are in
+  `notes/drawing-how-it-sounds.md`.
 - Ear widths are the default thickness. Notes (pipeline 6) and bass (pipeline 7) get a pure tone's width at their
   pitch and their stem's level within one ERB (`tone_widths`, `Ear.level`); only the voice is measured on its stem.
   Why: a polyphonic stem gave every note the chord's width (medians 12-15 semitones at 3 dB, now about 3). The bass
