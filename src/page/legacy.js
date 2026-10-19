@@ -1329,9 +1329,9 @@ export function start() {
     }
     next();
   }
-  function showSpeed(json) {
-    var box = document.createElement('div'); box.className = 'speedout'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', 'Speed test results');
-    box.innerHTML = '<p>Speed test done. Copy this and paste it to Claude.</p><textarea readonly aria-label="Results"></textarea><div class="speedbtns"><button class="btn btn-small" type="button">Copy</button><button class="btn btn-small btn-quiet" type="button">Close</button></div>';
+  function showSpeed(json, msg, label) {
+    var box = document.createElement('div'); box.className = 'speedout'; box.setAttribute('role', 'dialog'); box.setAttribute('aria-label', label || 'Speed test results');
+    box.innerHTML = '<p>' + (msg || 'Speed test done. Copy this and paste it to Claude.') + '</p><textarea readonly aria-label="Results"></textarea><div class="speedbtns"><button class="btn btn-small" type="button">Copy</button><button class="btn btn-small btn-quiet" type="button">Close</button></div>';
     var ta = box.querySelector('textarea'), bs = box.querySelectorAll('button');
     ta.value = json;
     bs[0].addEventListener('click', function () {
@@ -1816,6 +1816,11 @@ export function start() {
     r.addEventListener('input', function () { var k = r.dataset.key; L[k] = parseFloat(r.value); labApply(k); });
   });
   $('labReset').addEventListener('click', function () { L = Object.assign({}, LAB_DEF); labApply('all'); });
+  /* the Lab's settings as JSON, to paste to Claude as new defaults: what differs from the defaults, then every value */
+  $('labCopy').addEventListener('click', function () {
+    var d = {}; for (var k in L) if (L[k] !== LAB_DEF[k]) d[k] = L[k];
+    showSpeed(JSON.stringify({ changed: d, all: L }, null, 1), 'Your Lab settings. Copy this and paste it to Claude to make them the defaults.', 'Lab settings');
+  });
   /* every detector followed as far down as its slider goes (the edges and lines levers are not about what is found) */
   $('labAll').addEventListener('click', function () {
     ['vConf', 'vFloor', 'vRun', 'bFloor', 'hold', 'noteMin', 'drumK'].forEach(function (k) { L[k] = parseFloat($('lab-' + k).min); });

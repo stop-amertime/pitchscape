@@ -133,7 +133,7 @@ body { font: 400 15px/1.5 var(--display); -webkit-font-smoothing: antialiased; -
 .seg button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
 .lab input[type="range"] { width: 100%; margin: 0; height: 28px; accent-color: var(--pink); }
 .lab input:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
-.lab-foot { display: flex; justify-content: flex-end; padding-top: 6px; }
+.lab-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 6px; }
 .bubble { position: absolute; z-index: 3; max-width: min(290px, calc(100% - 32px)); box-sizing: border-box; padding: 10px 12px; background: var(--ink); color: var(--paper); border-radius: 10px; font: 400 14px/1.4 var(--display); box-shadow: 0 10px 24px -14px rgba(0, 0, 0, 0.6); }
 .bubble::after { content: ""; position: absolute; left: var(--tail, 20px); width: 12px; height: 12px; background: inherit; transform: rotate(45deg); }
 .bubble.below::after { top: -5px; }
