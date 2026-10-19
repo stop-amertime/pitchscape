@@ -152,6 +152,10 @@ export function start() {
     var F = ana.frames, i, k;
     /* voice: sung where the pitch tracker is sure enough and the voice loud enough, in long enough runs */
     var v = new Uint8Array(F), run = Math.max(1, Math.round(L.vRun / 1000 / ana.dt));
+    /* the leak test: a line whose own stem sits under another stem at its pitch is that instrument bleeding in; it
+       fades from 10 dB under (full) to 30 dB under (gone) */
+    ana.leadLk = new Float32Array(F); ana.gtrLk = new Float32Array(F);
+    for (i = 0; i < F; i++) { ana.leadLk[i] = ana.vocalsLeak ? smooth(-30, -10, ana.vocalsLeak[i]) : 1; ana.gtrLk[i] = ana.guitarLeak ? smooth(-30, -10, ana.guitarLeak[i]) : 1; }
     for (i = 0; i < F; i++) v[i] = ana.leadHz0[i] > 0 && ana.leadP[i] >= L.vConf && ana.leadL[i] >= L.vFloor ? 1 : 0;
     for (i = 0; i < F;) { if (!v[i]) { i++; continue; } k = i; while (k < F && v[k]) k++; if (k - i < run) v.fill(0, i, k); i = k; }
     var lh = new Float32Array(F); for (i = 0; i < F; i++) lh[i] = v[i] ? ana.leadHz0[i] : 0;
@@ -872,7 +876,7 @@ export function start() {
       var a = S.ana;
       if (linesOn()) drawLines(now, lv, 'guitar', 'guitar', 'guitar'); else drawSegs(now, lv, 1, 'guitar');
       /* its line (a solo, a bend), thin, over its notes */
-      if (L.gline === 'on' && a.gtrLine) frameTrack(now, function (f) { return a.gtrLine[f]; }, function (f) { return SEMI_PX * (0.15 + 0.2 * lvlInk(a.guitarLvl ? a.guitarLvl[f] : 1)) + 0.55; }, function (f) { return a.guitarLvl ? lvlInk(a.guitarLvl[f]) : 0.8; }, function (f) { return a.gtrJ[f] * L.nJag / 3 * SEMI_PX; }, function (f) { return a.gtrJ[f]; }, 'guitar', 0.9, 0, 53);
+      if (L.gline === 'on' && a.gtrLine) frameTrack(now, function (f) { return a.gtrLine[f]; }, function (f) { return SEMI_PX * (0.15 + 0.2 * lvlInk(a.guitarLvl ? a.guitarLvl[f] : 1)) + 0.55; }, function (f) { return (a.guitarLvl ? lvlInk(a.guitarLvl[f]) : 0.8) * a.gtrLk[f]; }, function (f) { return a.gtrJ[f] * L.nJag / 3 * SEMI_PX; }, function (f) { return a.gtrJ[f]; }, 'guitar', 0.9, 0, 53);
       if (!linesOn()) drawStrikes(now, 'guitar', 'guitar');
     }],
     ['bass', function (now, lv) {
@@ -886,7 +890,7 @@ export function start() {
       var a = S.ana;
       var thin = L.thick === 'thin';
       frameTrack(now, function (f) { return a.leadHz[f]; }, function (f) { return thin ? SEMI_PX * (0.15 + 0.2 * lvlInk(a.vocalsLvl ? a.vocalsLvl[f] : 1)) + 0.7 : 0.8 + 8.5 * a.leadN[f]; },
-        function (f) { return thin && a.vocalsLvl ? lvlInk(a.vocalsLvl[f]) : smooth(0.02, 0.4, a.leadN[f]); }, function (f) { return a.leadJ[f] * L.nJag / 3 * SEMI_PX; }, function (f) { return a.leadJ[f]; }, 'voice', 0.9, thin ? 0 : 0.16, 37);
+        function (f) { return (thin && a.vocalsLvl ? lvlInk(a.vocalsLvl[f]) : smooth(0.02, 0.4, a.leadN[f])) * a.leadLk[f]; }, function (f) { return a.leadJ[f] * L.nJag / 3 * SEMI_PX; }, function (f) { return a.leadJ[f]; }, 'voice', 0.9, thin ? 0 : 0.16, 37);
       drawStrikes(now, 'vocals', 'voice');
     }],
     ['hats', function (now) { drawHits(S.hats, now, 'hat'); drawHits(S.cymbals, now, 'cymbal'); }],

@@ -42,10 +42,12 @@ function interp(x, xp, fp) {
 
 /** One stem. y: its mono mix at 22.05 kHz; F: the page's frame count; notes: this stem's notes as
  * [t0, t1, midi, [times, semitone offsets]] (their samples are pack_curves', every DT from t0 to t1); line: a pitch
- * track on the page's frames (Hz, 0 where silent) or null. Returns per note sample {lvl, nz} (level and noise heard,
- * 0..1), per page frame the stem's noise share (noise power over all, +-0.25 s), the line's level and noise, and
- * strikes (F x STRIKE_BANDS: the most strike heard in each band). */
-export async function stemLoudness(y, F, notes, line) {
+ * track on the page's frames (Hz, 0 where silent) or null; probes: {name: pitch track (Hz per page frame)}, lines
+ * of other stems to read this one at. Returns per note sample {lvl, nz} (level and noise heard, 0..1), per page frame
+ * the stem's noise share (noise power over all, +-0.25 s), the line's level and noise, strikes (F x STRIKE_BANDS: the
+ * most strike heard in each band), and per probe this stem's own level at its pitch, in dB of the CQT's magnitude
+ * (not against the stem's loud level, so stems compare: the leak test, loudness.mjs). */
+export async function stemLoudness(y, F, notes, line, probes = {}) {
   const {C, nF} = await cqt(y);
   const maxes = new Float64Array(nF);
   for (let t = 0; t < nF; t++) { let m = 0; for (let p = 0; p < P; p++) m = Math.max(m, C[t * P + p]); maxes[t] = m; }
@@ -114,7 +116,18 @@ export async function stemLoudness(y, F, notes, line) {
       lineLvl[f] = l; lineNz[f] = z;
     }
   }
-  return {lvl: Float32Array.from(lvl), nz: Float32Array.from(nz), share, strikes, lineLvl, lineNz};
+  const probeDb = {};
+  for (const [name, hz] of Object.entries(probes)) {
+    const o = probeDb[name] = new Float32Array(F).fill(-200);
+    for (let f = 0; f < F; f++) {
+      if (!(hz[f] > 0)) continue;
+      const fr = Math.min(nF - 1, Math.round(f * DT * CQT_FPS)), p = Math.round(36 * Math.log2(hz[f] / 27.5));
+      if (p < 0 || p >= P) continue;
+      let c = 0; for (let d = -1; d <= 1; d++) { const q = p + d; if (q >= 0 && q < P) c = Math.max(c, C[fr * P + q]); }
+      o[f] = 20 * Math.log10(c + 1e-12);
+    }
+  }
+  return {lvl: Float32Array.from(lvl), nz: Float32Array.from(nz), share, strikes, lineLvl, lineNz, probeDb};
 }
 
 /** The echo and ringing tests for one stem's notes, on its mono mix at 44.1 kHz (an STFT of 4096 every 512, hann, as

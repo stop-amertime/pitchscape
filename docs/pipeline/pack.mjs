@@ -94,7 +94,9 @@ export function makePack(r) {
       leadEar: u8(r.leadEar, 0, EAR_SPAN), bassEar: u8(r.bassEar, 0, EAR_SPAN),
       noteLvl: u8(Lo.lvl, 0, 1), noteNz: u8(Lo.nz, 0, 1),
       ...Object.fromEntries(Object.entries(Lo.lineLvl).map(([s, a]) => [s + 'Lvl', u8(a, 0, 1)])),
-      ...Object.fromEntries(Object.entries(Lo.lineNz).map(([s, a]) => [s + 'Nz', u8(a, 0, 1)]))},
+      ...Object.fromEntries(Object.entries(Lo.lineNz).map(([s, a]) => [s + 'Nz', u8(a, 0, 1)])),
+      // the leak test (pack 16): dB the voice's and guitar's line stand above the loudest other stem at their pitch
+      ...Object.fromEntries(Object.entries(Lo.lineLeak || {}).map(([s, a]) => [s + 'Leak', u8(a, -72, 72)]))},
     // loudness (pack 14): each stem's noise share per frame, and its strikes (frames x strikeBands, 8 semitones each
     // from 27.5 Hz), 0..1
     noiseShare: Object.fromEntries(Object.entries(Lo.share).map(([s, a]) => [s, u8(a, 0, 1)])),
