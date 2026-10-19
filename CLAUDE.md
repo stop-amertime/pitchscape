@@ -128,6 +128,14 @@ Corollaries the user has stated or endorsed:
      voice and bass, in a spawn process pool, with the mix set to 70 dB SPL.
    - `width`: `Ear` excitation patterns per stem; widths (down, up) at 1 / 3 / 10 dB for every voice frame, bass frame
      and note sample (`ear_line`, `pack_curves`).
+   - `lines` (pipeline 13, pack 16; `lines.mjs`, `lines.dsp.mjs`; JS only): each pitched stem's sounds followed as whole
+     lines through time from Basic Pitch's contour (gaps of up to 5 frames bridged, so pads stay whole), each point's
+     level from a gammatone at its pitch (the ear's time resolution, envelope to 20 Hz: the CQT's 0.93 s window at
+     55 Hz averaged a wub away), its ring followed after Basic Pitch lets go, overtones faded by whole lives (a line
+     at 2-8x a lower one that starts with it and whose level moves with it), masking within an ERB, and strikes from
+     librosa's onsets on the stem (raw strength: a pad ~1, a Rhodes 4.5-7). The page (Lab > Instruments: Lines,
+     the default) draws each line crisp-edged, as thick as it is loud (sones), with a darker head where struck.
+     Designed in the Song Lab (spike-timbre/, untracked). Glue: 27 s alongside the other stages; +1.2 MB of pack.
    - `words`: `lyrics_for`: tags (`song_tags`/`song_info` via ffprobe, or an "Artist - Title" file name) → LRCLIB
      (`find_lyrics`: exact match, then search, preferring synced, within 3 s of the length; title-only if the tagged
      artist finds nothing and exactly one artist has it) → Whisper words → `place_words` (difflib match, LRC line

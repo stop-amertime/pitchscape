@@ -75,10 +75,10 @@ export function makePack(r) {
   NOTE_STEMS.forEach((n, i) => { notesByStem[n] = segs.filter(s => s[12] === i).length; });
   const song = r.song;
   return {
-    format: 'song-overprint-pack', version: 15, source: 'pitchscape-js',
+    format: 'song-overprint-pack', version: 16, source: 'pitchscape-js',
     models: {stems: 'htdemucs_6s', drums: 'ADTOF Frame_RNN', notes: 'Basic Pitch ICASSP 2022', bass: 'pYIN, Basic Pitch', voice: 'CREPE',
       guitarLine: 'CREPE', loudness: 'librosa CQT, HPSS (Driedger 2014)', width: 'Glasberg & Moore roex excitation patterns',
-      words: r.words ? 'LRCLIB, aligned by CTC' : null},
+      words: r.words ? 'LRCLIB, aligned by CTC' : null, lines: 'Basic Pitch contour, gammatone envelopes, librosa onsets'},
     noteStems: NOTE_STEMS,
     title: song.title || r.title || '', artist: song.artist || '',
     audio: null, song: {...song, lrclib: (r.found || {}).lrclib ?? null},
@@ -99,6 +99,13 @@ export function makePack(r) {
     // from 27.5 Hz), 0..1
     noiseShare: Object.fromEntries(Object.entries(Lo.share).map(([s, a]) => [s, u8(a, 0, 1)])),
     strikes: Object.fromEntries(Object.entries(Lo.strikes).map(([s, a]) => [s, u8(a, 0, 1)])), strikeBands: 11,
+    // lines through time (pack 16, lines.mjs): per pitched stem, each line [first frame, points, of them its tail
+    // (last), sure, echo, peak dB, below dB] and its points [contour bin, level dB, strike]; levels against the song's
+    // loudest line
+    lines: Object.fromEntries(Object.entries(r.lines || {}).map(([s, ls]) => [s, {
+      lines: b64f32(Float32Array.from(ls.flatMap(l => [l.f0, l.n, l.nTail, l.sure, l.echo, l.peak, l.below]))),
+      pts: b64f32(ls.reduce((a, l) => { a.push(...l.pts); return a; }, []))}])),
+    lineStride: 7,
     timing: null, lyrics: r.lyrics,
     floors: FLOORS,
     stats: {seconds: round(r.seconds, 1), hits, notes: segs.length, voiced: r.voiced, notesByStem,

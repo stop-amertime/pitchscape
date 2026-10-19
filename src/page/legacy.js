@@ -32,6 +32,9 @@ export function start() {
     colour: 'inst', drums: 'sound', kick: 'splat', bass: 'notes', gline: 'on', font: 'grotesque', wordSize: 'voice',
     shake: reduceMotion ? 0 : 0.25, tilt: reduceMotion ? 0 : 0.5, pulse: reduceMotion ? 0 : 0.6, slip: reduceMotion ? 0 : 0.35,
     secs: 0, ink: 1, weight: 1, grain: 0.5, thick: 'thin', edges: 1, guides: 'on', fps: 'off', res: 2,
+    /* instruments as lines through time (pipeline 13), or as the note detector's notes; how thick a line is at full
+       loudness (semitones either side), against the instrument's own loudest moment or the whole song's */
+    inst: 'lines', lFat: 1.5, lScale: 'own',
     /* cutoffs: the defaults are each model's own settings */
     vConf: 0.45, vFloor: 0.04, vRun: 90, bFloor: 0.08, hold: 0.3, noteMin: 100, drumK: 1, leap: 4,
     /* loudness (worked out by eye in the Contour Lab): quietest ink, echoes, re-strikes, noise and strikes */
@@ -111,6 +114,23 @@ export function start() {
     ana.leadEar = easeEar(ana.leadEar, lineRuns(ana.leadHz0)); ana.bassEar = easeEar(ana.bassEar, lineRuns(ana.bassHz0));
     S.noteEar = easeEar(ana.noteEar, S.segs.map(function (sg) { return [sg.bs, sg.bs + sg.bn]; }));
     S.noteLvl = ana.noteLvl; S.noteNz = ana.noteNz;
+    /* lines through time (pack 16): per stem, each line from its first frame, its points [contour bin, level dB
+       against the song's loudest line, strike] (its tail last); sure (Basic Pitch's certainty, as ink), echo (how
+       surely it is a lower line's overtone), peak (its loudest, dB), below (how far under the loudest sound within an
+       ERB it sits over its life, dB) */
+    S.inst = null; S.lineMax = 0; S.lineOwn = {};
+    if (ana.lines) {
+      S.inst = {};
+      for (var st in ana.lines) {
+        var LW = ana.lineW, Ls = ana.lines[st].lines, P = ana.lines[st].pts, o = 0, out = [], own = -120;
+        for (i = 0; i + LW <= Ls.length; i += LW) {
+          var n = Ls[i + 1] + Ls[i + 2], ln = { t0: Ls[i] * ana.dt, n: Ls[i + 1], nAll: n, sure: Ls[i + 3], echo: Ls[i + 4], peak: Ls[i + 5], below: Ls[i + 6], p: P.subarray(o * 3, (o + n) * 3), id: st + i / LW };
+          ln.t1 = ln.t0 + (n - 1) * ana.dt; o += n; ln.a = lineInk(ln); if (ln.a < 0.02) continue;
+          own = Math.max(own, ln.peak); if (ln.t1 - ln.t0 > S.lineMax) S.lineMax = ln.t1 - ln.t0; out.push(ln);
+        }
+        out.sort(function (x, y) { return x.t0 - y.t0; }); S.inst[st] = out; S.lineOwn[st] = own;
+      }
+    }
     applyCuts();
   }
   /* how much noise is heard on a sound, 0 to 1: the noise there (nz: 1 as loud as the loudest sound within 3
@@ -202,7 +222,8 @@ export function start() {
     var hz = [], i;
     for (i = 0; i < ana.bassHz.length; i += 2) if (ana.bassHz[i] > 0) hz.push(ana.bassHz[i]);
     for (i = 0; i < ana.leadHz.length; i += 2) if (ana.leadHz[i] > 0) hz.push(ana.leadHz[i]);
-    S.pieces.forEach(function (pc) { var f = DSP.mtof(pc.s.m); for (var k = Math.max(1, Math.round((pc.t1 - pc.t0) / (2 * ana.dt))); k > 0; k--) hz.push(f); });
+    if (linesOn()) { for (var st in S.inst) S.inst[st].forEach(function (ln) { if (ln.a < 0.3) return; for (var j = 0; j < ln.n; j += 2) hz.push(lineHz(ln.p[3 * j])); }); }
+    else S.pieces.forEach(function (pc) { var f = DSP.mtof(pc.s.m); for (var k = Math.max(1, Math.round((pc.t1 - pc.t0) / (2 * ana.dt))); k > 0; k--) hz.push(f); });
     if (hz.length < 50) { F_LO = Math.log2(28); F_HI = Math.log2(10000); return; }
     hz.sort(function (a, b) { return a - b; });
     var lo = Math.log2(hz[Math.floor(hz.length * 0.01)]) - 0.25, hi = Math.log2(hz[Math.floor(hz.length * 0.995)]) + 0.33;
@@ -534,6 +555,61 @@ export function start() {
     }
     ctx.globalAlpha = 1;
   }
+  /* ---- lines through time (pipeline 13): each pitched sound followed over its whole life, its thickness how loud it
+     is moment to moment (sones: half for every 10 dB down), crisp-edged, so a pluck prints as a head that tapers, a
+     pad as a slow swell, a pumping synth as beads in time with the kick; a strike (the stem's onset) is a darker,
+     fuller head for its first 70 ms. Its ink: how sure Basic Pitch is of it (half at its own threshold), how loud it
+     is at its peak (nothing 60 dB under the song's loudest line, full from 24 dB), whether it is a lower line's
+     overtone, and how far under a louder sound within the ear's bandwidth it sits (masking, fading over 30 dB). */
+  function linesOn() { return L.inst === 'lines' && !!S.inst; }
+  function lineHz(fb) { return 27.5 * Math.pow(2, fb / 36); }
+  function lineInk(ln) { return 0.9 * ln.sure * smooth(-60, -24, ln.peak) * (1 - ln.echo) * Math.exp(-0.5 * Math.pow(2 * ln.below / 30, 2)); }
+  function lineHalf(lv, stem) { var ref = L.lScale === 'own' ? S.lineOwn[stem] : 0; return Math.max(0.3, L.lFat * SEMI_PX * Math.min(1.2, Math.pow(2, (lv - ref) / 10)) * L.weight); }
+  /* the shape of a line's first k points, in its own coordinates (x = 0 at its start): the body, and its heads */
+  function lineShape(ln, k, stem) {
+    var p = ln.p, dt = S.ana.dt, body = new Path2D(), bot = [], heads = [], i;
+    for (i = 0; i < k; i++) {
+      var x = i * dt * pps, y = yOf(lineHz(p[3 * i])), h = lineHalf(p[3 * i + 1], stem);
+      if (i) body.lineTo(x, y - h); else body.moveTo(x, y - h);
+      bot.push(x, y + h);
+    }
+    for (i = bot.length - 2; i >= 0; i -= 2) body.lineTo(bot[i], bot[i + 1]);
+    body.closePath();
+    for (i = 0; i < Math.min(k, ln.n); i++) {
+      var hit = p[3 * i + 2]; if (hit < 0.05) continue;
+      var hp = new Path2D(), m = Math.min(k, i + 4), j, hb = [];
+      if (m - i < 2) continue;
+      for (j = i; j < m; j++) {
+        var hx = j * dt * pps, hy = yOf(lineHz(p[3 * j])), hh = lineHalf(p[3 * j + 1], stem) * (1 + 0.5 * hit * (1 - (j - i) / 4));
+        if (j === i) hp.moveTo(hx, hy - hh); else hp.lineTo(hx, hy - hh);
+        hb.push(hx, hy + hh);
+      }
+      for (j = hb.length - 2; j >= 0; j -= 2) hp.lineTo(hb[j], hb[j + 1]);
+      hp.closePath(); heads.push({ path: hp, a: 0.35 + 0.65 * hit });
+    }
+    return { t0: ln.t0, body: body, heads: heads, a: ln.a };
+  }
+  function paintLine(sh, col, now) {
+    var dx = xOf(sh.t0, now);
+    ctx.translate(dx, 0); ctx.fillStyle = col;
+    ctx.globalAlpha = inkA(sh.a); ctx.fill(sh.body);
+    for (var i = 0; i < sh.heads.length; i++) { ctx.globalAlpha = inkA(sh.a * sh.heads[i].a); ctx.fill(sh.heads[i].path); }
+    ctx.translate(-dx, 0); ctx.globalAlpha = 1;
+  }
+  function drawLines(now, lv, stem, key, group) {
+    var ls = S.inst[stem]; if (!ls) return;
+    var t0w = now - WIN - 0.2, i = lowerBound(ls, t0w - S.lineMax, 't0'), dt = S.ana.dt;
+    for (; i < ls.length; i++) {
+      var ln = ls[i]; if (ln.t0 > now) break; if (ln.t1 < t0w) continue;
+      var y0 = yOf(lineHz(ln.p[0])), col = tint(group, lineHz(ln.p[0]), y0);
+      if (ln.t1 <= now) { paintLine(cachedStroke('ln:' + ln.id, lineShape.bind(null, ln, ln.nAll, stem)), col, now); continue; }
+      var k = Math.min(ln.nAll, Math.floor((now - ln.t0) / dt) + 1); if (k < 2) continue;
+      paintLine(lineShape(ln, k, stem), col, now);
+      var lvNow = ln.p[3 * (k - 1) + 1], y = yOf(lineHz(ln.p[3 * (k - 1)]));
+      lv[key] += ln.a * Math.min(1, Math.pow(2, lvNow / 10));
+      pen(y, lineHalf(lvNow, stem) / L.weight, col, ln.a * 0.8);
+    }
+  }
   /* the guitar, piano, other or bass notes (src), each drawn along its pitch as it bends */
   var SEMI_PX = 1;
   function drawSegs(now, lv, src, key) {
@@ -790,17 +866,18 @@ export function start() {
 
   /* each layer: its name and how to print it as it stands at time now (lv gathers how loud each kind of note is now) */
   var LAYERS = [
-    ['synths', function (now, lv) { drawSegs(now, lv, 0, 'synths'); drawStrikes(now, 'other', 'lead'); }],
-    ['piano', function (now, lv) { drawSegs(now, lv, 2, 'piano'); drawStrikes(now, 'piano', 'piano'); }],
+    ['synths', function (now, lv) { if (linesOn()) return drawLines(now, lv, 'other', 'synths', 'lead'); drawSegs(now, lv, 0, 'synths'); drawStrikes(now, 'other', 'lead'); }],
+    ['piano', function (now, lv) { if (linesOn()) return drawLines(now, lv, 'piano', 'piano', 'piano'); drawSegs(now, lv, 2, 'piano'); drawStrikes(now, 'piano', 'piano'); }],
     ['guitar', function (now, lv) {
       var a = S.ana;
-      drawSegs(now, lv, 1, 'guitar');
+      if (linesOn()) drawLines(now, lv, 'guitar', 'guitar', 'guitar'); else drawSegs(now, lv, 1, 'guitar');
       /* its line (a solo, a bend), thin, over its notes */
       if (L.gline === 'on' && a.gtrLine) frameTrack(now, function (f) { return a.gtrLine[f]; }, function (f) { return SEMI_PX * (0.15 + 0.2 * lvlInk(a.guitarLvl ? a.guitarLvl[f] : 1)) + 0.55; }, function (f) { return a.guitarLvl ? lvlInk(a.guitarLvl[f]) : 0.8; }, function (f) { return a.gtrJ[f] * L.nJag / 3 * SEMI_PX; }, function (f) { return a.gtrJ[f]; }, 'guitar', 0.9, 0, 53);
-      drawStrikes(now, 'guitar', 'guitar');
+      if (!linesOn()) drawStrikes(now, 'guitar', 'guitar');
     }],
     ['bass', function (now, lv) {
       var a = S.ana;
+      if (L.bass === 'notes' && linesOn()) return drawLines(now, lv, 'bass', 'bass', 'bass');
       if (L.bass === 'notes') drawSegs(now, lv, 3, 'bass');
       else frameTrack(now, function (f) { return a.bassHz[f]; }, function (f) { return 0.8 + 12 * a.bassN[f]; }, function (f) { return smooth(0.015, 0.3, a.bassN[f]); }, function () { return 0; }, function () { return 0; }, 'bass', 0.86, 0.15, 11);
       drawStrikes(now, 'bass', 'bass');
@@ -1413,9 +1490,9 @@ export function start() {
   } catch (e) { /* no config */ }
   /* where a song's analysis is kept on the device: a new version of the server's analysis starts afresh */
   function packKey(sha) { return 'pack:' + PIPELINE + ':' + sha; }
-  /* only an analysis from the current pipeline (5, which writes pack version 8) is drawn: an older one lacks what the
-     drawing needs, so the song is analysed again rather than drawn with stand-ins */
-  function current(pack) { return !!(pack && pack.version >= 15 && pack.segStride === 19 && pack.bytes && pack.strikes); }
+  /* only an analysis from the current pipeline (13, which writes pack version 16) is drawn: an older one lacks what
+     the drawing needs, so the song is analysed again rather than drawn with stand-ins */
+  function current(pack) { return !!(pack && pack.version >= 16 && pack.segStride === 19 && pack.bytes && pack.strikes && pack.lines); }
   var idb = (function () {
     var dbp = null;
     function open() {
@@ -1435,7 +1512,7 @@ export function start() {
       put: function (k, v) { return run('readwrite', function (st) { return st.put(v, k); }).catch(function () {}); }
     };
   })();
-  var STAGES = [['stems', 'Splitting the song into stems', 0.2], ['drums', 'Reading the drums', 0.45], ['notes', 'Reading the notes', 0.55], ['loudness', 'Listening for how loud and how noisy each sound is', 0.8], ['width', 'Measuring how wide each sound is', 0.82],
+  var STAGES = [['stems', 'Splitting the song into stems', 0.2], ['drums', 'Reading the drums', 0.45], ['notes', 'Reading the notes', 0.55], ['loudness', 'Listening for how loud and how noisy each sound is', 0.8], ['width', 'Measuring how wide each sound is', 0.82], ['lines', 'Following each instrument through time', 0.83],
     ['bass', 'Following the bass', 0.65], ['voice', 'Following the voice', 0.75], ['words', 'Finding the lyrics', 0.85], ['done', 'Finishing', 0.95]];
   function stageOf(st) { for (var i = 0; st && i < STAGES.length; i++) if (st.indexOf(STAGES[i][0]) === 0) return STAGES[i]; return ['', 'Starting the server', 0.12]; }
   function sha256hex(buf) {
@@ -1657,6 +1734,7 @@ export function start() {
     res.noiseShare = {}; res.strikes = {};
     for (k in pack.noiseShare) res.noiseShare[k] = b64u8(pack.noiseShare[k]);
     for (k in pack.strikes) res.strikes[k] = b64u8(pack.strikes[k]);
+    if (pack.lines) { res.lines = {}; res.lineW = pack.lineStride; for (k in pack.lines) res.lines[k] = { lines: b64f32(pack.lines[k].lines), pts: b64f32(pack.lines[k].pts) }; }
     return res;
   }
   /* the song's published lyrics (from LRCLIB, each word timed to the voice by the server). If LRCLIB hasn't got the
@@ -1704,9 +1782,9 @@ export function start() {
     return k === 'secs' ? v.toFixed(1) + ' s' : k === 'res' ? '×' + v.toFixed(2) + (v > (window.devicePixelRatio || 1) ? ' (screen ×' + (window.devicePixelRatio || 1) + ')' : '') : k === 'ink' || k === 'weight' || k === 'drumK' ? '×' + v.toFixed(2)
       : k === 'vRun' || k === 'noteMin' ? Math.round(v) + ' ms' : k === 'exDb' || k === 'attack' || k === 'nShare' || k === 'sShare' ? v + ' dB'
       : k === 'nJag' ? (v / 3).toFixed(1) + ' st' : k === 'lFloor' ? '−' + Math.round((1 - v) * 72) + ' dB'
-      : k === 'leap' ? v + ' st' : Math.round(v * 100) + '%';
+      : k === 'leap' ? v + ' st' : k === 'lFat' ? v.toFixed(2) + ' st' : Math.round(v * 100) + '%';
   }
-  var CUTS = { vConf: 1, vFloor: 1, vRun: 1, bFloor: 1, hold: 1, noteMin: 1, drumK: 1, exDb: 1, attack: 1, nShare: 1, nGate: 1, gConf: 1 };
+  var CUTS = { inst: 1, vConf: 1, vFloor: 1, vRun: 1, bFloor: 1, hold: 1, noteMin: 1, drumK: 1, exDb: 1, attack: 1, nShare: 1, nGate: 1, gConf: 1 };
   function labUI() {
     labPanel.querySelectorAll('.seg[data-key]').forEach(function (g) {
       var k = g.dataset.key;

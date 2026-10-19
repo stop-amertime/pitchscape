@@ -3,6 +3,7 @@
 //
 //   decode + tags ─► stems ─► 22.05 kHz copies ─┬─► drums ─────────────────────────┐
 //                                               ├─► notes (bass too) ┬─► loudness ─┤
+//                                               │                    ├─► lines ─────┤
 //                                               ├─► bass (pYIN) ─────┤             ├─► pack
 //                                               ├─► voice, guitar ───┴─► width ────┤
 //                                               └─► words (LRCLIB, aligned) ───────┘
@@ -18,6 +19,7 @@ import {notes} from './notes.mjs';
 import {bass} from './bass.mjs';
 import {voice, voiceGate} from './voice.mjs';
 import {loudness} from './loudness.mjs';
+import {lines} from './lines.mjs';
 import {ears} from './ear.mjs';
 import {songInfo, lyricsFor} from './words.mjs';
 import {frameCount, makePack, NOTE_STEMS} from './pack.mjs';
@@ -29,9 +31,9 @@ const mono = ([l, r]) => { const y = new Float32Array(l.length); for (let i = 0;
  * ({name: [left, right]} at 44.1 kHz, e.g. Python's, to compare the later stages on the same input; Demucs is then
  * skipped, as pipeline.analyze's stems_dir). consistent: Demucs's stems made to add up to the mix (stems.mjs; not
  * applied to given stems). vocalsFirst: the voice taken out by Mel-Band RoFormer (vocals.mjs) before Demucs runs on
- * the rest (false: Demucs alone, as before pipeline 12). mix: the song already decoded ([left, right] at 44.1 kHz; the page
+ * the rest (false: Demucs alone, as before pipeline 12). onStems(stems): called with the finished stems (to keep them). mix: the song already decoded ([left, right] at 44.1 kHz; the page
  * decodes it, as a Worker cannot). Returns the pack. */
-export async function analyze(bytes, name, rt, {progress = () => {}, words = true, aligner = 'en', shifts = 1, consistent: mc = true, vocalsFirst = true, stats = {}, stems: given = null, mix: decoded = null} = {}) {
+export async function analyze(bytes, name, rt, {progress = () => {}, words = true, aligner = 'en', shifts = 1, consistent: mc = true, vocalsFirst = true, onStems = null, stats = {}, stems: given = null, mix: decoded = null} = {}) {
   const t0 = performance.now(), ms = {};
   const timed = async (key, p) => { const t = performance.now(); const v = await p; ms[key] = Math.round(performance.now() - t); return v; };
   const sha = await rt.sha256(bytes);
@@ -54,6 +56,7 @@ export async function analyze(bytes, name, rt, {progress = () => {}, words = tru
     if (voc) stems.vocals = stems.vocals.map((ch, c) => { for (let i = 0; i < ch.length; i++) ch[i] += voc[c][i]; return ch; });
   }
   if (!given && mc) stems = await timed('consistent', consistent(mix, stems, rt));
+  if (onStems) await onStems(stems);
   // pipeline.analyze's st22: each stem's mono mix at 22.05 kHz (librosa soxr_hq), on the workers
   const st22 = {};
   await timed('resample', Promise.all(SOURCES.map(async s => {
@@ -70,7 +73,8 @@ export async function analyze(bytes, name, rt, {progress = () => {}, words = tru
   progress('drums: ADTOF');
   const dr = timed('drums', drums(stems.drums, st22.drums, rt));
   progress('notes: Basic Pitch on guitar, piano, bass and the rest');
-  const nt = timed('notes', notes({other: stems.other, guitar: stems.guitar, piano: stems.piano, bass: stems.bass}, st22, rt));
+  const peaks = {F};
+  const nt = timed('notes', notes({other: stems.other, guitar: stems.guitar, piano: stems.piano, bass: stems.bass}, st22, rt, {peaks}));
   progress('bass: pYIN');
   const bs = timed('bass', bass(st22.bass, F, rt));
   progress('voice: CREPE');
@@ -87,7 +91,10 @@ export async function analyze(bytes, name, rt, {progress = () => {}, words = tru
   const ld = timed('loudness', loudness(st22, mono44, segs, {vocals: lead.leadHz, guitar: gtr.leadHz}, F, rt));
   progress('width: excitation patterns');
   const ew = timed('width', ears(st22, gain, segs, lead.leadHz, b.bassHz, rt));
-  const [d, lo, e, [lyrics, found]] = await Promise.all([dr, ld, ew, wd]);
+  progress('lines: each instrument through time');
+  delete peaks.F;
+  const ln = timed('lines', lines(st22, peaks, F, rt));
+  const [d, lo, e, [lyrics, found], lns] = await Promise.all([dr, ld, ew, wd, ln]);
 
   const hzOrNaN = Float32Array.from(lead.leadHz, h => h > 0 ? h : NaN);
   const g = voiceGate(lead.leadP, lead.leadL, hzOrNaN, 0.45, 0.04, 4);
@@ -97,7 +104,7 @@ export async function analyze(bytes, name, rt, {progress = () => {}, words = tru
   Object.assign(stats, ms, {total: Math.round(seconds * 1000)});
   const pack = makePack({song, dur, words, title: name.replace(/\.[^.]*$/, ''), hits: d.hits, events: d.events, segs,
     bassN: b.bassN, bassHz: b.bassHz, bassBr: b.bassBr, lead, gtr, loud: lo,
-    curves: e, leadEar: e.leadEar, bassEar: e.bassEar, lyrics, found, voiced: on / g.length, seconds,
+    curves: e, leadEar: e.leadEar, bassEar: e.bassEar, lines: lns, lyrics, found, voiced: on / g.length, seconds,
     timing: {ms, ep: rt.ep, where: rt.where}});
   progress(`done in ${Math.round(seconds)} s`);
   return pack;

@@ -175,8 +175,9 @@ export function melFrames(y, from, n, f0, f1) {
 /** librosa.onset.onset_strength (lag 1, max_size 1, centred) from the mel power frames (Float32Array(T * 128)):
  * power_to_db (ref 1, amin 1e-10, top_db 80), the positive difference from the previous frame, its mean over the
  * mels, delayed by 3 frames. Then onset_detect's peak picking (normalised to 0..1; pre_max 1, post_max 1, pre_avg 4,
- * post_avg 5, wait 1, delta 0.07 at 22.05 kHz, hop 512). Returns the onset frames (Int32Array). */
-export function onsetDetect(melPow, T) {
+ * post_avg 5, wait 1, delta 0.07 at 22.05 kHz, hop 512). Returns the onset frames (Int32Array); with strengths,
+ * {peaks, strength}: also each onset's strength as onset_strength gives it (before onset_detect normalises it). */
+export function onsetDetect(melPow, T, strengths = false) {
   const db = new Float32Array(T * N_MELS);
   let top = -Infinity;
   for (let i = 0; i < db.length; i++) {
@@ -192,6 +193,8 @@ export function onsetDetect(melPow, T) {
     for (let m = 0; m < N_MELS; m++) s = f32(s + Math.max(0, f32(db[(t + 1) * N_MELS + m] - db[t * N_MELS + m])));
     env[t + pad] = f32(s / N_MELS);
   }
+  const raw = strengths ? env.slice() : null;
+  const done = p => strengths ? {peaks: p, strength: Float32Array.from(p, f => raw[f])} : p;
   // onset_detect: normalise, then util.peak_pick (numba: means summed in float32)
   let lo = Infinity, hi = -Infinity;
   for (let i = 0; i < T; i++) lo = Math.min(lo, env[i]);
@@ -199,7 +202,7 @@ export function onsetDetect(melPow, T) {
   const den = f32(hi + TINY32);
   let any = false;
   for (let i = 0; i < T; i++) { env[i] = f32(env[i] / den); if (env[i]) any = true; }
-  if (!any) return new Int32Array(0);
+  if (!any) return done(new Int32Array(0));
   const preMax = Math.ceil(Math.floor(0.03 * SR / HOP)), postMax = Math.ceil(Math.floor(0.00 * SR / HOP) + 1);
   const preAvg = Math.ceil(Math.floor(0.10 * SR / HOP)), postAvg = Math.ceil(Math.floor(0.10 * SR / HOP) + 1);
   const wait = Math.ceil(Math.floor(0.03 * SR / HOP)), delta = f32(0.07);
@@ -218,5 +221,5 @@ export function onsetDetect(melPow, T) {
     peaks.push(n);
     n += wait + 1;
   }
-  return Int32Array.from(peaks);
+  return done(Int32Array.from(peaks));
 }

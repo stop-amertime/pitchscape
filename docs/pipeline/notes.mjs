@@ -58,8 +58,10 @@ export async function basicPitch(y, rt, stats = {}, batch = BATCH) {
 
 /** One stem: Basic Pitch, its notes decoded and joined (a worker), then note_details over the workers in runs of
  * notes, each sent the samples its frames reach. */
-async function stemNotes(y, rt, stats, events, batch) {
+async function stemNotes(y, rt, stats, events, batch, peaks) {
   const {note, onset, contour, nF} = await basicPitch(y, rt, stats, batch);
+  // lines through time (lines.mjs) start from the same output: each page frame's contour peaks
+  const pk = peaks ? rt.pool.call('./lines.dsp.mjs', 'peaks', [note.slice(), contour.slice(), nF, peaks.F]) : null;
   const t = performance.now();
   const {notes, events: ev} = await rt.pool.call(DSP, 'decodeStem', [note, onset, contour, nF],
                                      [note.buffer, onset.buffer, contour.buffer]);
@@ -82,6 +84,7 @@ async function stemNotes(y, rt, stats, events, batch) {
     jobs.push(rt.pool.call(DSP, 'noteDetails', [part, ys, from, n], [ys.buffer]));
   }
   const segs = (await Promise.all(jobs)).flat();
+  if (pk) peaks.out = await pk;
   stats.details_ms = (stats.details_ms || 0) + performance.now() - t2;
   return segs.sort((a, b) => a[0] - b[0]);
 }
@@ -90,12 +93,15 @@ async function stemNotes(y, rt, stats, events, batch) {
  * mono mix, which is st22's); st22: {name: mono Float32Array at 22.05 kHz}. Returns notes_by_stem's records:
  * [t0, t1, midi, amp, brightness, noise, family, attack, fade, vibrato depth, vibrato rate, hollowness, stem index,
  * [times, semitone offsets, holds]]. stats gets each stem's timing; events, if given ({}), each stem's Basic Pitch events
- * [t0, t1, pitch, amplitude, bends], as predict() returns them; batch: windows per model call. */
-export async function notes(stems44, st22, rt, {stats = {}, events = null, batch = BATCH} = {}) {
+ * [t0, t1, pitch, amplitude, bends], as predict() returns them; batch: windows per model call; peaks, if given
+ * ({F: page frames}), gets each stem's contour peaks for lines.mjs ({stem: Float32Array}). */
+export async function notes(stems44, st22, rt, {stats = {}, events = null, batch = BATCH, peaks = null} = {}) {
   const found = [];
   await rt.session('basic_pitch');                             // made once, before the stems ask for it at once
   const per = await Promise.all(NOTE_STEMS.map((name, i) => name in st22
-    ? stemNotes(st22[name], rt, stats[name] = {}, events && (events[name] = []), batch).then(r => r.map(s => [...s, i])) : []));
+    ? stemNotes(st22[name], rt, stats[name] = {}, events && (events[name] = []), batch, peaks && (peaks[name] = {F: peaks.F}))
+      .then(r => r.map(s => [...s, i])) : []));
+  if (peaks) for (const name of NOTE_STEMS) if (peaks[name]) peaks[name] = peaks[name].out;
   for (const r of per) found.push(...r);
   if (!found.length) return [];
   // notes far below the song's level (bleed into a near-empty stem) go; a note also found, much weaker, at the same
