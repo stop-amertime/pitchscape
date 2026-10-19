@@ -477,7 +477,9 @@ changed). The page draws only current packs; an older one is analysed again (clo
 
 - **First: telling instruments apart** (2026-10-19, the user). The data under the drawing must say "instrument X
   plays note Y", "A plays G#, B plays C": two voices, two guitars, one guitar's chord, and no voice leaking into other
-  stems (or a synth into the vocal stem, as on Trance). Drawing character waits on this.
+  stems (or a synth into the vocal stem, as on Trance). Drawing character waits on this. What exists (YourMT3+,
+  karaoke and two-singer separators, timbre clustering), ground-truth multitracks and a proposed plan:
+  `notes/instrument-separation.md`.
 - **Parked: drawing how it sounds** (character, psychoacoustic measures, the treatments player): what was tried, the
   user's verdict on each, the measurements, and the options for heard loudness, sharpness and roughness are in
   `notes/drawing-how-it-sounds.md`.
