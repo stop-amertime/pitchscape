@@ -16,7 +16,11 @@
 #             The best case for a stereo split (fixed pans, no reverb), to see what it could do at most.
 #   duets     cantoria's singers two at a time: every pair of the four, the first 60 s of each song (84 duets), the
 #             case two-singer separators (MedleyVox) are trained for.
-#   <venv python> tools/instruments/build.py slakh|slakhpan|cantoria|duets|musdb
+#   csd       Choral Singing Dataset (Cuesta, Gomez, Martorell & Loaiciga 2018, Zenodo 2649950, CC BY 4.0): three pieces
+#             sung by 16 singers, four to a part, each recorded alone; a quartet per piece and singer number (singer k
+#             of each part: 12 quartets of four singers Cantoria never had); notes from the dataset's own f0 files.
+#   csdduets  csd's first quartet of each piece two parts at a time, the first 60 s (18 duets).
+#   <venv python> tools/instruments/build.py slakh|slakhpan|cantoria|duets|musdb|csd|csdduets
 import glob, json, os, shutil, sys, tarfile, zipfile, warnings; warnings.filterwarnings('ignore')
 import numpy as np, librosa, soundfile as sf
 
@@ -94,6 +98,44 @@ def cantoria():
         sf.write(os.path.join(out, 'mix.wav'), mix / max(1, np.abs(mix).max() / 0.99), 44100)
         json.dump({'mix': 'mix.wav', 'source': 'Cantoria (CC BY 4.0)', 'instruments': inst}, open(os.path.join(out, 'truth.json'), 'w'))
         print(s, [i['name'] for i in inst], flush=True)
+
+
+def csd():
+    src = os.path.join(DL, 'csd', 'ChoralSingingDataset')
+    if not os.path.isdir(src):
+        with zipfile.ZipFile(os.path.join(DL, 'csd', 'ChoralSingingDataset.zip')) as z: z.extractall(os.path.join(DL, 'csd'))
+    for piece in ('ER', 'LI', 'ND'):
+        for k in range(1, 5):
+            out = os.path.join(ROOT, 'csd', f'{piece}_q{k}'); os.makedirs(out, exist_ok=True); ys, inst = [], []
+            for v in ('soprano', 'alto', 'tenor', 'bass'):
+                a = os.path.join(src, f'CSD_{piece}_{v}_{k}.wav')
+                y, sr = librosa.load(a, sr=44100, mono=True); ys.append(y); sf.write(os.path.join(out, v[0].upper() + '.wav'), y, sr)
+                f0 = np.loadtxt(a[:-4] + '.f0')
+                inst.append({'name': v, 'class': 'voice', 'audio': v[0].upper() + '.wav',
+                             'notes': runs_to_notes(f0[:, 0], np.where(f0[:, 1] > 0, f0[:, 1], np.nan))})
+            n = max(map(len, ys)); mix = sum(np.pad(y, (0, n - len(y))) for y in ys)
+            sf.write(os.path.join(out, 'mix.wav'), mix / max(1, np.abs(mix).max() / 0.99), 44100)
+            json.dump({'mix': 'mix.wav', 'source': 'Choral Singing Dataset (CC BY 4.0)', 'instruments': inst}, open(os.path.join(out, 'truth.json'), 'w'))
+            print(f'{piece}_q{k}', [len(i['notes']) for i in inst], flush=True)
+
+
+def csdduets(secs=60.0):
+    for d in sorted(glob.glob(os.path.join(ROOT, 'csd', '*_q1'))):
+        T = json.load(open(os.path.join(d, 'truth.json'))); ins = T['instruments']
+        for x in range(len(ins)):
+            for z in range(x + 1, len(ins)):
+                a, b = ins[x], ins[z]
+                out = os.path.join(ROOT, 'csdduets', f"{os.path.basename(d).split('_')[0]}_{a['name'][0]}{b['name'][0]}"); os.makedirs(out, exist_ok=True)
+                ys = []
+                for i in (a, b):
+                    y, sr = librosa.load(os.path.join(d, i['audio']), sr=44100, mono=True, duration=secs); ys.append(y)
+                    sf.write(os.path.join(out, i['audio']), y, sr)
+                n = max(map(len, ys)); mix = sum(np.pad(y, (0, n - len(y))) for y in ys)
+                sf.write(os.path.join(out, 'mix.wav'), mix / max(1, np.abs(mix).max() / 0.99), 44100)
+                cut = lambda ns: [[s0, min(s1, secs), m] for s0, s1, m in ns if s0 < secs]
+                json.dump({'mix': 'mix.wav', 'source': T['source'], 'instruments': [{**i, 'notes': cut(i['notes'])} for i in (a, b)]},
+                          open(os.path.join(out, 'truth.json'), 'w'))
+                print(os.path.basename(out), flush=True)
 
 
 def slakhpan():
@@ -196,4 +238,4 @@ def musdb():
 
 
 if __name__ == '__main__':
-    {'slakh': slakh, 'slakhpan': slakhpan, 'cantoria': cantoria, 'duets': duets, 'musdb': musdb}[sys.argv[1]]()
+    {'slakh': slakh, 'slakhpan': slakhpan, 'cantoria': cantoria, 'duets': duets, 'musdb': musdb, 'csd': csd, 'csdduets': csdduets}[sys.argv[1]]()

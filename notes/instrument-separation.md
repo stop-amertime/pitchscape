@@ -120,3 +120,21 @@ recordings; all voice material is the same four Cantoria singers, so voices are 
 placed apart or together by the learned pair test; voices from Basic Pitch on the vocal stem with the classifier's
 fade, since the pipeline's single voice line cannot show two singers. Not yet tried: that combination on one page;
 voices other than Cantoria's four singers (the voice numbers may flatter); a pipeline run on the duets.
+
+**2026-10-20, later: noise, unfamiliar singers, one colour per player.**
+- Choral Singing Dataset (CC BY 4.0, 16 singers Cantoria never had) built as `csd` (12 quartets) and `csddu` duets
+  (`csdduets`, 18). Trained without them, tested only on them: the junk test AUC 0.96, keeping 95% of sung notes it
+  removes 87% of overtones and 68% of junk (Cantoria, pieces held out: 0.98, 94%, 82%); colour contrast quartets 0.89,
+  duets 0.92 (the first colouring 0.77, 0.83). The four-singer worry was mostly unfounded.
+- "Random stuff everywhere" (the user): fading by how far a note sits below the loudest likely note did nothing
+  (a junk note's level is the energy at its pitch, which belongs to someone else's loud note). The source is what
+  matters. A curve of how many real notes the junk fade gives up (fg.py), ink-weighted: voices from Basic Pitch at
+  85% of real notes keep 95% of their ink and the junk share falls 36% -> 6% (4.7 notes visible a second);
+  instruments from Basic Pitch stay noisy however hard faded (26% junk at 86% ink, 16 notes a second); from the
+  pipeline's lines at 70% of real notes (mostly short glide pieces given up) they keep 96% of their ink, junk 19% ->
+  12%, 2 notes a second. So: instruments from the pipeline's lines, voices from Basic Pitch, each with its fade.
+- Lines by global tracking (Hungarian assignment of notes starting together to lines ending before them): purer
+  (0.94 -> 0.97) but more broken, contrast slightly down; greedy chaining by sound stays. What split a player into
+  several hues was several lines each choosing its own: lines a moment apart (up to 3 s) are now pulled towards one
+  hue when likely the same player (logistic on distance in sound, pitch gap, time gap; learned): pipeline lines
+  Slakh 0.786 -> 0.800, MUSDB 0.867 -> 0.877.
