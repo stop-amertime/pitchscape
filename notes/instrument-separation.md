@@ -105,3 +105,18 @@ recordings; all voice material is the same four Cantoria singers, so voices are 
   against two players'): 0.863 / 0.758 / 0.682. On the pipeline's lines: Slakh 0.788, MUSDB 0.850.
 - On the page songs (draw3.py): duets 0.69-0.91 (first try 0.62-0.79), ink on real singers 84-93% after fading by
   the classifier (49-71% before); Slakh from the pipeline's lines 0.78-0.84, MUSDB 0.85-0.92.
+- The pipeline as evidence for Basic Pitch's notes (where its stems exist): each stem's share of the energy at the
+  note's pitch, and whether the pipeline drew a line there. Instruments: AUC 0.81 -> 0.85; keeping 95% of players'
+  notes now removes 35% of overtones and 54% of junk (28%, 43%). Voices unchanged.
+- An established audio model per note instead of (or beside) the hand-made measures: each note's own sound cut from
+  the mix (its harmonics, 50 cents, inverse STFT) described by AST (Gong et al. 2021, AudioSet). Contrast,
+  voices / Slakh / MUSDB, measures 0.862 / 0.792 / 0.684, with AST 0.864 / 0.774 / 0.742; on the pipeline's lines
+  no gain. Not worth its cost yet (an hour of GPU for 47 minutes of music, a 300 MB model); MUSDB's gain is 6 songs.
+- Page songs with all of it (draw3.py): duets 0.75-0.90 (first try 0.62-0.79), ink on real singers 86-96% (49-71%);
+  Slakh and MUSDB from the pipeline's lines 0.78-0.92. Basic Pitch on real recordings stays poor: two MUSDB songs
+  0.54-0.56, ink on players 40-73%.
+
+**Where this points**: instruments from the pipeline's lines (already cleaner), coloured by the learned measure and
+placed apart or together by the learned pair test; voices from Basic Pitch on the vocal stem with the classifier's
+fade, since the pipeline's single voice line cannot show two singers. Not yet tried: that combination on one page;
+voices other than Cantoria's four singers (the voice numbers may flatter); a pipeline run on the duets.
