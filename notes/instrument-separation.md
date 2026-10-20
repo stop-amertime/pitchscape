@@ -122,8 +122,8 @@ fade, since the pipeline's single voice line cannot show two singers. Not yet tr
 voices other than Cantoria's four singers (the voice numbers may flatter); a pipeline run on the duets.
 
 **2026-10-20, later: noise, unfamiliar singers, one colour per player.**
-- Choral Singing Dataset (CC BY 4.0, 16 singers Cantoria never had) built as `csd` (12 quartets) and `csddu` duets
-  (`csdduets`, 18). Trained without them, tested only on them: the junk test AUC 0.96, keeping 95% of sung notes it
+- Choral Singing Dataset (CC BY 4.0, 16 singers Cantoria never had) built as `csd` (12 quartets) and `csdduets`
+  (18 duets). Trained without them, tested only on them: the junk test AUC 0.96, keeping 95% of sung notes it
   removes 87% of overtones and 68% of junk (Cantoria, pieces held out: 0.98, 94%, 82%); colour contrast quartets 0.89,
   duets 0.92 (the first colouring 0.77, 0.83). The four-singer worry was mostly unfounded.
 - "Random stuff everywhere" (the user): fading by how far a note sits below the loudest likely note did nothing
