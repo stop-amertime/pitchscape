@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Instrument Splits</title>
+<style>
+  :root { --bg: #f6f3ec; --ink: #1d1b18; --dim: #77716a; --line: #d9d3c8; --panel: #fffdf8; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #171614; --ink: #ece8e1; --dim: #8f8981; --line: #34312d; --panel: #201e1b; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line);
+           padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  select { max-width: 100%; }
+  select, button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line);
+                   border-radius: 6px; padding: 5px 9px; }
+  button { cursor: pointer; }
+  button.on { background: var(--ink); color: var(--bg); }
+  #play { min-width: 76px; font-weight: 600; }
+  #time { font-variant-numeric: tabular-nums; color: var(--dim); min-width: 92px; }
+  main { padding: 12px 16px 40px; display: grid; gap: 18px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .panel h2 { margin: 0 0 6px; font-size: 15px; display: flex; gap: 10px; align-items: baseline; }
+  .panel h2 small { color: var(--dim); font-weight: 400; }
+  canvas.roll { width: 100%; height: 260px; display: block; border-radius: 6px; cursor: pointer; }
+  .parts { display: grid; gap: 4px; margin-top: 8px; }
+  .part { display: grid; grid-template-columns: 14px minmax(90px, 210px) 1fr auto auto; gap: 8px; align-items: center; }
+  .sw { width: 14px; height: 14px; border-radius: 3px; }
+  .part .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .part .nm em { color: var(--dim); font-style: normal; font-size: 12px; }
+  .part canvas { width: 100%; height: 22px; display: block; }
+  .part button { padding: 2px 8px; font-size: 12px; }
+  .part.off { opacity: 0.4; }
+  .note { color: var(--dim); font-size: 13px; max-width: 70ch; }
+  @media (max-width: 600px) { .part { grid-template-columns: 14px 1fr auto auto; } .part canvas { display: none; } }
+</style>
+</head>
+<body>
+<header>
+  <select id="clip" aria-label="Song"></select>
+  <select id="method" aria-label="Method"></select>
+  <button id="play">Play</button>
+  <span id="time">0.0 s</span>
+  <button id="loop" class="on" aria-pressed="true">Loop</button>
+  <button id="mixBtn" aria-pressed="false" title="Play the original mix instead of the parts">Mix</button>
+</header>
+<main>
+  <p class="note">Each panel is one way of splitting the song: every coloured line is one part's notes over this clip, and
+    each row plays that part's own audio. Solo a row to hear only it (solo several to compare), mute to leave it out;
+    click the roll to jump. Rows marked <em>notes only</em> have no audio of their own (the method gives only notes)
+    and play as a plain synth of those notes.</p>
+  <section class="panel" id="pM"></section>
+  <section class="panel" id="pT"></section>
+</main>
+<script>
+const COLS = ['#d1495b', '#2e86ab', '#e8a33d', '#3c9d5d', '#8e5cc2', '#d96c2e', '#1f9e9a', '#c24b8e', '#6b7f2a', '#5a6acf', '#a0522d', '#4b4b4b'];
+let CLIPS = [], clip = null, ctx = null, buffers = {}, state = {}, playing = null, t0 = 0, offset = 0, loop = true, useMix = false;
+const $ = id => document.getElementById(id);
+
+async function init() {
+  CLIPS = await (await fetch('clips.json')).json();
+  $('clip').innerHTML = CLIPS.map((c, i) => `<option value="${i}">${c.set} / ${c.song} (${c.start}-${(c.start + c.dur).toFixed(0)} s)</option>`).join('');
+  $('clip').onchange = () => pick(+$('clip').value);
+  $('method').onchange = () => { stop(); render(); };
+  $('play').onclick = () => playing ? pause() : play();
+  $('loop').onclick = () => { loop = !loop; $('loop').classList.toggle('on', loop); $('loop').setAttribute('aria-pressed', loop); };
+  $('mixBtn').onclick = () => { useMix = !useMix; $('mixBtn').classList.toggle('on', useMix); $('mixBtn').setAttribute('aria-pressed', useMix); if (playing) { const t = now(); stop(); offset = t; play(); } };
+  document.addEventListener('keydown', e => { if (e.code === 'Space' && e.target.tagName !== 'SELECT') { e.preventDefault(); $('play').click(); } });
+  pick(0);
+}
+
+async function pick(i) {
+  stop(); clip = CLIPS[i]; offset = 0; buffers = {}; state = {};
+  const ms = clip.groups.filter(g => g.name !== 'truth');
+  $('method').innerHTML = ms.map((g, k) => `<option value="${k}">${g.desc || g.name}</option>`).join('');
+  render();
+  ctx = ctx || new AudioContext();
+  const files = [clip.mix, ...clip.groups.flatMap(g => g.parts.map(p => p.audio).filter(Boolean))];
+  await Promise.all(files.map(async f => { buffers[f] = await ctx.decodeAudioData(await (await fetch(f)).arrayBuffer()); }));
+  render();
+}
+
+function group(name) { return clip.groups.find(g => g.name === name); }
+function methodGroup() { return clip.groups.filter(g => g.name !== 'truth')[+$('method').value || 0]; }
+function key(g, k) { return g.name + '/' + k; }
+function st(g, k) { return state[key(g, k)] || (state[key(g, k)] = {mute: g.name === 'truth', solo: false}); }
+
+function render() {
+  panel($('pM'), methodGroup(), methodGroup().desc || 'method');
+  panel($('pT'), group('truth'), 'the true instruments, each recorded or rendered on its own');
+}
+
+function range() {
+  let lo = 127, hi = 0;
+  for (const g of [methodGroup(), group('truth')]) for (const p of g.parts) for (const n of p.notes) { lo = Math.min(lo, n[2]); hi = Math.max(hi, n[2]); }
+  return hi < lo ? [36, 84] : [lo - 2, hi + 2];
+}
+
+function panel(el, g, what) {
+  el.innerHTML = `<h2>${g.name} <small>${what}, ${g.parts.length} parts</small></h2><canvas class="roll"></canvas><div class="parts"></div>`;
+  const roll = el.querySelector('canvas.roll'), list = el.querySelector('.parts');
+  g.parts.forEach((p, k) => {
+    const row = document.createElement('div'); row.className = 'part';
+    const s = st(g, k), col = COLS[k % COLS.length];
+    row.innerHTML = `<span class="sw" style="background:${col}"></span><span class="nm" title="${p.name}">${p.name} ${p.audio ? '' : '<em>notes only</em>'}</span>
+      <canvas></canvas><button class="m ${s.mute ? 'on' : ''}" aria-pressed="${s.mute}">Mute</button><button class="s ${s.solo ? 'on' : ''}" aria-pressed="${s.solo}">Solo</button>`;
+    row.classList.toggle('off', s.mute);
+    row.querySelector('.m').onclick = () => { s.mute = !s.mute; relive(); };
+    row.querySelector('.s').onclick = () => { s.solo = !s.solo; relive(); };
+    list.appendChild(row);
+    wave(row.querySelector('canvas'), p, col);
+  });
+  roll._g = g; drawRoll(roll);
+  roll.onclick = e => { const r = roll.getBoundingClientRect(); seek((e.clientX - r.left) / r.width * clip.dur); };
+}
+
+function wave(cv, p, col) {
+  const w = cv.clientWidth || 300, h = cv.clientHeight || 22, dpr = devicePixelRatio || 1;
+  cv.width = w * dpr; cv.height = h * dpr; const c = cv.getContext('2d'); c.scale(dpr, dpr);
+  const b = p.audio && buffers[p.audio];
+  c.fillStyle = col; c.globalAlpha = 0.7;
+  if (!b) { for (const n of p.notes) c.fillRect(n[0] / clip.dur * w, h / 2 - 2, Math.max(1, (n[1] - n[0]) / clip.dur * w), 4); return; }
+  const d = b.getChannelData(0), per = Math.max(1, Math.floor(d.length / w));
+  let mx = 1e-9; const rms = [];
+  for (let x = 0; x < w; x++) { let s = 0; for (let i = x * per; i < (x + 1) * per && i < d.length; i++) s += d[i] * d[i]; rms.push(Math.sqrt(s / per)); mx = Math.max(mx, rms[x]); }
+  for (let x = 0; x < w; x++) { const a = rms[x] / mx * (h / 2); c.fillRect(x, h / 2 - a, 1, Math.max(0.5, 2 * a)); }
+}
+
+function drawRoll(cv) {
+  const g = cv._g, w = cv.clientWidth, h = cv.clientHeight, dpr = devicePixelRatio || 1;
+  cv.width = w * dpr; cv.height = h * dpr; const c = cv.getContext('2d'); c.scale(dpr, dpr);
+  const [lo, hi] = range(), y = m => h - (m - lo) / (hi - lo) * h, cs = getComputedStyle(document.documentElement);
+  c.fillStyle = cs.getPropertyValue('--bg'); c.fillRect(0, 0, w, h);
+  c.strokeStyle = cs.getPropertyValue('--line'); c.lineWidth = 1;
+  for (let m = Math.ceil(lo / 12) * 12; m <= hi; m += 12) { c.beginPath(); c.moveTo(0, y(m)); c.lineTo(w, y(m)); c.stroke(); c.fillStyle = cs.getPropertyValue('--dim'); c.fillText('C' + (m / 12 - 1), 3, y(m) - 2); }
+  const any = anySolo(), bh = Math.max(2, h / (hi - lo) * 0.8);
+  g.parts.forEach((p, k) => {
+    const s = st(g, k), on = any ? s.solo : !s.mute;
+    c.fillStyle = COLS[k % COLS.length]; c.globalAlpha = on ? 0.85 : 0.12;
+    for (const n of p.notes) c.fillRect(n[0] / clip.dur * w, y(n[2]) - bh / 2, Math.max(1.5, (n[1] - n[0]) / clip.dur * w), bh);
+  });
+  c.globalAlpha = 1; c.fillStyle = cs.getPropertyValue('--ink'); c.fillRect(now() / clip.dur * w, 0, 1.5, h);
+}
+
+function anySolo() { return Object.values(state).some(s => s.solo); }
+function audible(g, k) { const s = st(g, k); return anySolo() ? s.solo : !s.mute; }
+function now() { return playing ? Math.min(clip.dur, offset + ctx.currentTime - t0) : offset; }
+
+function relive() { const t = now(), was = !!playing; stop(); offset = t; render(); if (was) play(); }
+
+function play() {
+  if (!ctx || !clip) return; ctx.resume();
+  const out = ctx.createGain(); out.connect(ctx.destination); const nodes = [];
+  t0 = ctx.currentTime + 0.05;
+  const start = (buf, gain) => { const s = ctx.createBufferSource(); s.buffer = buf; const gn = ctx.createGain(); gn.gain.value = gain; s.connect(gn).connect(out); s.start(t0, offset); nodes.push(s); };
+  if (useMix) start(buffers[clip.mix], 1);
+  else for (const g of [methodGroup(), group('truth')]) g.parts.forEach((p, k) => {
+    if (!audible(g, k)) return;
+    if (p.audio && buffers[p.audio]) start(buffers[p.audio], 1);
+    else for (const n of p.notes) {                        // notes only: a plain synth of the notes
+      if (n[1] <= offset) continue;
+      const o = ctx.createOscillator(), gn = ctx.createGain(); o.type = 'triangle'; o.frequency.value = 440 * 2 ** ((n[2] - 69) / 12);
+      const a = t0 + Math.max(0, n[0] - offset), b = t0 + (n[1] - offset);
+      gn.gain.setValueAtTime(0, a); gn.gain.linearRampToValueAtTime(0.08, a + 0.01); gn.gain.setValueAtTime(0.08, Math.max(a + 0.01, b - 0.02)); gn.gain.linearRampToValueAtTime(0, b);
+      o.connect(gn).connect(out); o.start(a); o.stop(b + 0.01); nodes.push(o);
+    }
+  });
+  playing = {out, nodes}; $('play').textContent = 'Pause'; tick();
+}
+function stop() { if (playing) { playing.nodes.forEach(n => { try { n.stop(); } catch (e) {} }); playing.out.disconnect(); playing = null; } $('play').textContent = 'Play'; }
+function pause() { offset = now(); stop(); }
+function seek(t) { const was = !!playing; stop(); offset = Math.max(0, Math.min(clip.dur - 0.05, t)); if (was) play(); else redraw(); }
+function redraw() { document.querySelectorAll('canvas.roll').forEach(drawRoll); $('time').textContent = now().toFixed(1) + ' / ' + clip.dur.toFixed(0) + ' s'; }
+function tick() {
+  if (!playing) return; redraw();
+  if (now() >= clip.dur - 0.01) { stop(); offset = 0; if (loop) play(); else redraw(); return; }
+  requestAnimationFrame(tick);
+}
+addEventListener('resize', () => { render(); });
+init();
+</script>
+</body>
+</html>
