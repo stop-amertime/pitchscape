@@ -138,3 +138,27 @@ voices other than Cantoria's four singers (the voice numbers may flatter); a pip
   several hues was several lines each choosing its own: lines a moment apart (up to 3 s) are now pulled towards one
   hue when likely the same player (logistic on distance in sound, pitch gap, time gap; learned): pipeline lines
   Slakh 0.786 -> 0.800, MUSDB 0.867 -> 0.877.
+
+**2026-10-20, evening: one player, one colour (steadiness); first normal songs.**
+- Measures added (spike-timbre/colour/steady.py): *wander*, how far one player's hue spreads over the song (circular
+  standard deviation, by note length), and *long*, contrast over 30 s instead of 3.
+- A player's hue drifted because the pull between its lines reached only 3 s back. Lines up to 30 s apart are now
+  pulled together by the chance they are one player (logistic on distance in sound, pitch gap, log time gap, log
+  length), with the pull damped so a line with many partners moves at most to their weighted mean. Undamped, any
+  strength at 30 s oscillated (the one voice song's wander 6° -> 108°).
+- Pipeline lines, pieces held out, Slakh / MUSDB: wander 48° / 43° -> 28° / 31°, contrast 0.800 / 0.877 -> 0.843 /
+  0.875, long 0.766 / 0.825 -> 0.816 / 0.824, chords read as one 0.722 / 0.726 -> 0.790 / 0.771 (strength 10).
+  On the page's seven instrument songs, contrast rose on all seven (Slakh 5: 0.67 -> 0.79) and wander roughly
+  halved (Slakh 3: 77° -> 24°), except AM Contra (67° -> 75°).
+- Voices need a much weaker pull. The 30 s same-singer test leans on pitch gap, not sound (distance weight +0.06),
+  so a strong pull draws neighbouring singers together: contrast fell 0.03-0.09 at any strength from 0.1 up. At
+  0.03, on six page songs, contrast is unchanged on average and wander falls 5-8° (e.g. 48° -> 40°, 29° -> 20°).
+- Tried and dropped: whether two lines share a pipeline stem as a cue (it predicts "same player" better, AUC 0.809
+  against 0.782, but MUSDB's "other" stem holds several players, so it pulled them together: contrast 0.784 /
+  0.835); a boosted same-player test (AUC 0.801, but contrast 0.745 / 0.753); grouping lines into players by
+  clustering (purity 0.61-0.72); measures with pitch regressed out (wander worse, 48° / 54°).
+- First normal songs, no answer key: Bicep's Glue and Apricots through the whole pipeline (stems, notes, lines),
+  the lines measured on the mix, faded by the junk classifier trained on all 34 multitrack songs (61-65% of lines
+  likely real), then coloured and steadied. Per stem, hue spread: bass 5° (was 9-14°), Apricots' voice chops 8°
+  (13°), Glue's voice 34° (36°), "other" 57-65° (75-92°). By eye (Glue at 68 s): one pad's chord still spreads
+  pink -> purple -> blue by register, so the measure still follows pitch within a chord.
